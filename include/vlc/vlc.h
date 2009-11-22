@@ -28,6 +28,9 @@
 #ifndef VLC_VLC_H
 #define VLC_VLC_H 1
 
+// TODO(ross) 2009.11.17 -- old non-working code
+//VLC_PUBLIC_API int VLC_attach_censor( int i_object );
+
 /**
  * \file
  * This file defines libvlc new external API

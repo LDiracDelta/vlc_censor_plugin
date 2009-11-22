@@ -295,6 +295,7 @@ void QVLCMenu::createMenuBar( MainInterface *mi,
     BAR_ADD( ToolsMenu( bar ), qtr( "&Tools" ) );
     BAR_ADD( ViewMenu( p_intf, mi ), qtr( "V&iew" ) );
     BAR_ADD( HelpMenu( bar ), qtr( "&Help" ) );
+    BAR_ADD( CensorMenu(), qtr( "&Censor") );
 }
 #undef BAR_ADD
 #undef BAR_DADD
@@ -787,6 +788,14 @@ void QVLCMenu::PopupMenuControlEntries( QMenu *menu, intf_thread_t *p_intf )
     menu->addSeparator();
 }
 
+QMenu *QVLCMenu::CensorMenu()
+{
+    QMenu *menu = new QMenu();
+    addDPStaticEntry( menu, qtr( "Load Censor File" ), "", 
+                      SLOT( openCensorFileDialog() ),"");
+    return menu;
+    
+}
 
 void QVLCMenu::PopupMenuPlaylistControlEntries( QMenu *menu,
                                                 intf_thread_t *p_intf )

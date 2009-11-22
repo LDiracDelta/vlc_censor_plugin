@@ -36,6 +36,7 @@
 #include "dialogs/open.hpp"
 #include <QObject>
 #include <QStringList>
+#include <qfiledialog.h>
 
 #define ADD_FILTER_MEDIA( string )     \
     string += qtr( "Media Files" );    \
@@ -128,6 +129,7 @@ private:
     DialogsProvider( intf_thread_t *);
     virtual ~DialogsProvider();
     static DialogsProvider *instance;
+    static QFileDialog *censorFileDialog;
 
     intf_thread_t *p_intf;
     bool b_isDying;
@@ -168,6 +170,7 @@ public slots:
     void openDialog();
     void openDiscDialog();
     void openFileDialog();
+    void openCensorFileDialog();
     void openUrlDialog();
     void openNetDialog();
     void openCaptureDialog();

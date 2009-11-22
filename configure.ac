@@ -4588,6 +4588,16 @@ then
 fi
 
 dnl
+dnl Auto-censor plugin
+dnl
+AC_ARG_ENABLE(censor,
+  [  --enable-censor         auto-censor plugin (default enabled)])
+if test "${enable_censor}" != "no"
+then
+    VLC_ADD_PLUGIN([censor])
+fi
+
+dnl
 dnl  goom visualization plugin
 dnl
 PKG_ENABLE_MODULES_VLC([goom], [], [libgoom2], [goom visualization plugin], [auto])
@@ -5269,6 +5279,7 @@ AC_CONFIG_FILES([
   modules/video_output/qte/Makefile
   modules/video_output/x11/Makefile
   modules/visualization/Makefile
+  modules/censor/Makefile
   modules/visualization/visual/Makefile
 ])
 

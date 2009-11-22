@@ -1,0 +1,4 @@
+CFLAGS=@CFLAGS@ -I/home/ross/antlrC/include /home/ross/antlrC/lib/libantlr3c.a
+SOURCES_censor = censor.c CensorLexer.c  CensorParser.c 
+LIBADD_censor = /home/ross/antlrC/lib/libantlr3c.a
+#SOURCES_censor = censor.c CensorLexer.c  CensorParser.c /home/ross/antlrC/lib/libantlr3c.so

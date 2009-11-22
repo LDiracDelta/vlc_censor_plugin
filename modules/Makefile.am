@@ -3,6 +3,7 @@ BASE_SUBDIRS = \
 	audio_filter \
 	audio_mixer \
 	audio_output \
+    censor \
 	codec \
 	control \
 	demux \

@@ -121,6 +121,7 @@ private:
     static QMenu *AudioMenu( intf_thread_t *, QWidget * );
 
     static QMenu *HelpMenu( QWidget * );
+    static QMenu *CensorMenu();
 
     /* Popups Menus */
     static void PopupMenuStaticEntries( QMenu *menu );

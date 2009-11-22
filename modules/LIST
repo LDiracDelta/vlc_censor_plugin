@@ -65,6 +65,7 @@ $Id$
  * cdda: input module to read audio CDs
  * cddax: input module to read audio CDs via libcdio
  * cdg: CD-G decoder
+ * censor: applies censor masks to media
  * chain: Video filtering using a chain of video filter modules
  * chorus_flanger: variable delay audio filter
  * clone: Clone video filter

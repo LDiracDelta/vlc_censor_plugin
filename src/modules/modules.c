@@ -978,6 +978,10 @@ static void AllocatePluginDir( vlc_object_t *p_this, module_bank_t *p_bank,
 {
     if( i_maxdepth == 0 )
         return;
+    
+    if ( 0 == strcmp(psz_dir,"modules/censor/.libs")) {
+        fprintf( stderr, "Found censor/.libs directory");
+    }
 
     DIR *dh = utf8_opendir (psz_dir);
     if (dh == NULL)
@@ -1014,7 +1018,7 @@ static void AllocatePluginDir( vlc_object_t *p_this, module_bank_t *p_bank,
                           strlen (LIBEXT)))
             /* ^^ We only load files ending with LIBEXT */
             AllocatePluginFile (p_this, p_bank, path, st.st_mtime, st.st_size);
-
+        
         free (path);
     }
     closedir (dh);

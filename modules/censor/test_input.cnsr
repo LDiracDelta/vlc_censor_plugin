@@ -1,0 +1,22 @@
+
+Test Section:
+
+    SKIP 0:0:5  - 0:0:9 
+    MUTE 0:0:10 - 0:0:11
+    DIM  0:0:15 - 0:0:19
+
+       # SKIP 1:12:01   - 1:12:23   violence/murder/decapitation:7.0
+    SKIP 1:12:01   - 1:12:23   violence/murder/decapitation:7.0 #bill kills bob. 
+    MUTE 1:15:12   - 1:15:15   s_e_x/inuendo:4 language/s_word:5
+    MUTE 1:15:19.2 - 1:15:19.7 language/f_word:8 # george blah
+    # ayayd 
+    DIM  1:30:20   - 1:30:30 # yada yada
+    
+    DIM  #here i am!
+        1:30:20 # continuing
+        - #zippity do da
+        1:30:30 # yada yada
+    ##asdfjkals
+    #yayayay
+
+

@@ -58,6 +58,7 @@
 #include <QApplication>
 #include <QSignalMapper>
 #include <QFileDialog>
+#include <qfiledialog.h>
 
 
 DialogsProvider* DialogsProvider::instance = NULL;
@@ -339,6 +340,28 @@ void DialogsProvider::openDialog()
 {
     openDialog( OPEN_FILE_TAB );
 }
+
+QFileDialog *DialogsProvider::censorFileDialog = NULL;
+void DialogsProvider::openCensorFileDialog()
+{
+    const QString &censorFilter = qtr("Censor Files (*.censor *.cnsr)");
+    if ( DialogsProvider::censorFileDialog == NULL ) {
+         DialogsProvider::censorFileDialog = new QFileDialog();
+         DialogsProvider::censorFileDialog->setFilter( censorFilter );
+    };
+    printf("before showing dialog\n");
+    //DialogsProvider::censorFileDialog->show();
+    printf("after showing dialog\n");
+    QStringList files = QFileDialog::getOpenFileNames(NULL,
+        qtr("Select a censor file to open"),
+        p_intf->p_sys->filepath,
+        censorFilter);
+    foreach( const QString &file, files) {
+        printf("loading file: %s\n", qtu(file));
+    }
+    
+}
+
 void DialogsProvider::openFileDialog()
 {
     openDialog( OPEN_FILE_TAB );

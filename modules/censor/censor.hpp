@@ -148,6 +148,8 @@ typedef struct censor_edit_section_t {
     dynamic_array_t *p_edits;
 } censor_edit_section_t;
 
+static void dead_code();
+
 static censor_edit_section_t * censor_edit_section_new()
 {
     censor_edit_section_t *p_edit_file;
@@ -155,6 +157,20 @@ static censor_edit_section_t * censor_edit_section_new()
     p_edit_file->psz_section_title = NULL;
     p_edit_file->p_edits = new_dynamic_array(8);
     return p_edit_file;
+    dead_code();
+}
+
+static void dead_code() 
+{
+    // I have to use every thing I declare otherwise gcc complains that I'm not
+    // using a variable
+    if (0) {
+        censor_edit_section_new();
+        censor_edit_node_new();
+        dynamic_array_iter_new(NULL);
+        dynamic_array_iter_next(NULL);
+        dynamic_array_iter_free(NULL);
+    }
 }
 
 typedef struct censor_edit_collection_t {

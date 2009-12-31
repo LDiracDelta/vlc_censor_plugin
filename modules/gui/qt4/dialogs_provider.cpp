@@ -351,7 +351,7 @@ void DialogsProvider::openCensorFileDialog()
     };
     printf("before showing dialog\n");
     //DialogsProvider::censorFileDialog->show();
-    printf("after showing dialog\n");
+    //printf("after showing dialog\n");
     QStringList files = QFileDialog::getOpenFileNames(NULL,
         qtr("Select a censor file to open"),
         p_intf->p_sys->filepath,

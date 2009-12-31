@@ -22,25 +22,25 @@ int ANTLR3_CDECL main (int argc, char *argv[]) {
     input  = antlr3AsciiFileStreamNew(fName);
 
     if ( input == NULL ) {
-        ANTLR3_FPRINTF(stderr, "Unable to open file %s due to malloc() failure1\n", (char *)fName);
+        fprintf(stderr, "Unable to open file %s due to malloc() failure1\n", (char *)fName);
     }
 
     lxr = CensorLexerNew(input);
     if ( lxr == NULL ) {
-        ANTLR3_FPRINTF(stderr, "Unable to create the lexer due to malloc() failure1\n");
+        fprintf(stderr, "Unable to create the lexer due to malloc() failure1\n");
         exit(ANTLR3_ERR_NOMEM);
     }
 
-    tstream = antlr3CommonTokenStreamSourceNew(ANTLR3_SIZE_HINT, TOKENSOURCE(lxr));
+    tstream = antlr3CommonTokenStreamSourceNew(ANTLR3_SIZE_HINT, lxr->pLexer->tokSource);
 
     if (tstream == NULL) {
-        ANTLR3_FPRINTF(stderr, "Out of memory trying to allocate token stream\n");
+        fprintf(stderr, "Out of memory trying to allocate token stream\n");
         exit(ANTLR3_ERR_NOMEM);
     }
 
     psr = CensorParserNew(tstream);
     if (psr == NULL) {
-        ANTLR3_FPRINTF(stderr, "Out of memory trying to allocate parser\n");
+        fprintf(stderr, "Out of memory trying to allocate parser\n");
         exit(ANTLR3_ERR_NOMEM);
     }
 

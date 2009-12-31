@@ -5,9 +5,14 @@
 #include <vlc_common.h>
 #include <vlc_plugin.h>
 #include <vlc_interface.h>
+#include <vlc_aout.h>
 //#include <vlc_fixups.h>
 #include "CensorParser.h"
 #include "CensorLexer.h"
+#include <sys/poll.h>
+#include <sys/types.h>
+#include <netinet/in.h>
+#include <sys/socket.h>
 /*****************************************************************************
  * Module descriptor
  *****************************************************************************/
@@ -47,7 +52,7 @@ static dynamic_array_t * intersecting_edits( censor_edit_collection_t *edit_coll
 
 static struct timeval *absolute_time_to_next_edit( censor_edit_collection_t *edit_collection, struct timeval *movie_time);
 
-static void init_edit_collection(censor_edit_collection_t edit_collection);
+//static void init_edit_collection(censor_edit_collection_t edit_collection);
 // Implementation
 
 typedef struct censor_edit_iter_t {
@@ -63,12 +68,12 @@ static censor_edit_iter_t * censor_edit_iter_new(censor_edit_collection_t *p_edi
     return p_edit_iter;
 }
 
-static void censor_edit_iter_free( censor_edit_iter_t *p_edit_iter) {
-    dynamic_array_iter_free(p_edit_iter->_p_section_iter);
-    if (NULL!=p_edit_iter->_p_edit_iter) {
-        dynamic_array_iter_free(p_edit_iter->_p_edit_iter);
-    };
-}
+//static void censor_edit_iter_free( censor_edit_iter_t *p_edit_iter) {
+//    dynamic_array_iter_free(p_edit_iter->_p_section_iter);
+//    if (NULL!=p_edit_iter->_p_edit_iter) {
+//        dynamic_array_iter_free(p_edit_iter->_p_edit_iter);
+//    };
+//}
 
 static censor_edit_node_t * censor_edit_iter_next( censor_edit_iter_t *p_edit_iter) {
     if ( NULL == p_edit_iter->_p_edit_iter ) {
@@ -201,6 +206,7 @@ static void Run( intf_thread_t *p_intf );
 
 static void load_censor_file( intf_thread_t *p_intf, const char *filename, censor_edit_collection_t *p_edit_collection) 
 {
+    p_intf = p_intf;
     pANTLR3_UINT8 fName;
     pANTLR3_INPUT_STREAM input;
     pCensorLexer lxr;
@@ -215,19 +221,19 @@ static void load_censor_file( intf_thread_t *p_intf, const char *filename, censo
     
     lxr = CensorLexerNew(input);
     if ( lxr == NULL ) {
-        ANTLR3_FPRINTF(stderr, "Unable to create the lexer due to malloc() failure1\n");
+        fprintf(stderr, "Unable to create the lexer due to malloc() failure1\n");
         exit(ANTLR3_ERR_NOMEM);
     }
     
-    tstream = antlr3CommonTokenStreamSourceNew(ANTLR3_SIZE_HINT, TOKENSOURCE(lxr));
+    tstream = antlr3CommonTokenStreamSourceNew(ANTLR3_SIZE_HINT, lxr->pLexer->tokSource);
     if (tstream == NULL) {
-        ANTLR3_FPRINTF(stderr, "Out of memory trying to allocate token stream\n");
+        fprintf(stderr, "Out of memory trying to allocate token stream\n");
         exit(ANTLR3_ERR_NOMEM);
     }
     
     psr = CensorParserNew(tstream);
     if (psr == NULL) {
-        ANTLR3_FPRINTF(stderr, "Out of memory trying to allocate parser\n");
+        fprintf(stderr, "Out of memory trying to allocate parser\n");
         exit(ANTLR3_ERR_NOMEM);
     }
     p_edit_collection->p_censor_sections = psr->censorship_file(psr);
@@ -263,12 +269,17 @@ static int CensorActivate( vlc_object_t *p_this)
 static void Run( intf_thread_t *p_intf )
 {
     fprintf( stderr, "*Com-link online*\n");
+    printf("*Com-link online*\n");
+    config_PutPsz(p_intf, "hello_world", "who's your daddy");
+    char *hello_world = config_GetPsz(p_intf, "hello_world");
+    fprintf( stderr, "hello_world=%s",hello_world);
+    perror("Here I am!\n");
                         
     struct timeval movie_time;
-    time_t cur_time = 0;
+    //time_t cur_time = 0;
     movie_time.tv_usec = 0;
     
-    movie_time.tv_sec = libvlc_media_player_get_time(p_intf->p_libvlc,NULL);
+    movie_time.tv_sec = var_GetTime(p_intf->p_libvlc,"time");
                              
     fprintf( stderr, "All edits:\n");
     dump_edit_collection(&edit_collection);
@@ -282,11 +293,44 @@ static void Run( intf_thread_t *p_intf )
     
     struct timeval *p_next_edit_time, *p_last_edit_time;
     
-    short previously_muted = 0, previously_dimmed = 1;
+    short previously_dimmed = 1;
+    
+    // Setup the socket for telling this plugin when a new file needs to be 
+    // opened
+    int censor_file_socket_fd = socket(AF_INET, SOCK_STREAM, 0);
+    if (0 == censor_file_socket_fd) {
+        perror("ERROR opening censor file listening socket\n");
+    }
+    // try to bind to a random port multiple times
+    struct sockaddr_in srvr_addr;
+    srvr_addr.sin_family = AF_INET;
+    srvr_addr.sin_addr.s_addr = INADDR_ANY;
+    srand(time(NULL));
+    bool bound_port = false;
+    for( int i = 0; i < 100; i++ ) {
+        srvr_addr.sin_port = rand()%(65535-10000) + 10000;
+        if( bind(censor_file_socket_fd, (struct sockaddr *) &srvr_addr,
+            sizeof(srvr_addr)) >= 0) {
+            bound_port = true;
+            break;
+        }
+    }
+    if(!bound_port) {
+        perror("ERROR couldn't bind censor file listening socket to a port after many attempts\n");
+    }
+    listen(censor_file_socket_fd,5);
+    
     
     while (1) 
     {
-        movie_time.tv_sec = libvlc_media_player_get_time(p_intf->p_libvlc,NULL);
+        // poll for censor file input on the socket
+        int poll_val = poll( &censor_file_socket_fd, 1, 0);
+        if( poll_val > 0) {
+            // Load the censor file
+            
+        }
+        
+        movie_time.tv_sec = var_GetTime(p_intf->p_libvlc,"time");
         if ( movie_time.tv_sec < 0 )
             movie_time.tv_sec = 0;
         fprintf( stderr, "Time : %d seconds\n", (int)movie_time.tv_sec);
@@ -327,18 +371,23 @@ static void Run( intf_thread_t *p_intf )
         p_last_edit_time = p_next_edit_time;
         
         if ( dim_on && mute_on ) {
-            libvlc_media_player_set_time(
-                p_intf->p_libvlc,         // libvlc_media_player_t*
-                p_next_edit_time->tv_sec, // i_seconds
-                NULL);                    // libvlc_exception*
+            var_SetTime(
+                p_intf->p_libvlc,
+                "time",
+                p_next_edit_time->tv_sec);
             
-        } else if ( mute_on && !previously_muted) {
-            previously_muted = mute_on;
-            VLC_VolumeMute(p_intf->p_libvlc);
-        } else if ( !mute_on && previously_muted) {
-            previously_muted = mute_on;
-            // unmute
-            VLC_VolumeMute(p_intf->p_libvlc);
+        } else if ( mute_on ) {
+            audio_volume_t cur_volume;
+            aout_VolumeGet(p_intf->p_libvlc,&cur_volume);
+            if (AOUT_VOLUME_MIN != cur_volume) {
+                aout_ToggleMute(p_intf->p_libvlc, NULL);
+            }
+        } else if (!mute_on) {
+            audio_volume_t cur_volume;
+            aout_VolumeGet(p_intf->p_libvlc,&cur_volume);
+            if (AOUT_VOLUME_MIN == cur_volume) {
+                aout_ToggleMute(p_intf->p_libvlc, NULL);
+            }
         } else if ( dim_on && !previously_dimmed) {
             previously_dimmed = dim_on;
             // TODO
@@ -363,7 +412,10 @@ static void Run( intf_thread_t *p_intf )
         }
     }
 }
-static void CensorClose( vlc_object_t *arg){ }
+static void CensorClose( vlc_object_t *arg){ 
+    arg = arg;
+    dead_code();
+}
 //static void Thread   ( vlc_object_t *arg) { }
  
 //void hello_world( libvlc_int_t * p_libvlc ) 

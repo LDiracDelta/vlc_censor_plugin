@@ -55,7 +55,7 @@ vlc_module_begin ()
     set_shortname( "GnomeVFS" )
     set_category( CAT_INPUT )
     set_subcategory( SUBCAT_INPUT_ACCESS )
-    add_integer( "gnomevfs-caching", DEFAULT_PTS_DELAY / 1000, NULL, CACHING_TEXT, CACHING_LONGTEXT, true )
+    add_integer( "gnomevfs-caching", DEFAULT_PTS_DELAY / 1000, CACHING_TEXT, CACHING_LONGTEXT, true )
     set_capability( "access", 10 )
     add_shortcut( "gnomevfs" )
     set_callbacks( Open, Close )
@@ -65,9 +65,9 @@ vlc_module_end ()
 /*****************************************************************************
  * Exported prototypes
  *****************************************************************************/
-static int  Seek( access_t *, int64_t );
-static int  Read( access_t *, uint8_t *, size_t );
-static int  Control( access_t *, int, va_list );
+static int     Seek( access_t *, uint64_t );
+static ssize_t Read( access_t *, uint8_t *, size_t );
+static int     Control( access_t *, int, va_list );
 
 struct access_sys_t
 {
@@ -121,11 +121,11 @@ static int Open( vlc_object_t *p_this )
                                             *(p_access->psz_access) != '\0')
     {
         asprintf( &psz_name, "%s://%s", p_access->psz_access,
-                                                    p_access->psz_path );
+                  p_access->psz_location );
     }
     else
     {
-        psz_name = strdup( p_access->psz_path );
+        psz_name = strdup( p_access->psz_location );
     }
     psz = ToLocale( psz_name );
     psz_expand_tilde = gnome_vfs_expand_initial_tilde( psz );
@@ -286,7 +286,7 @@ static void Close( vlc_object_t * p_this )
 /*****************************************************************************
  * Read: standard read on a file descriptor.
  *****************************************************************************/
-static int Read( access_t *p_access, uint8_t *p_buffer, size_t i_len )
+static ssize_t Read( access_t *p_access, uint8_t *p_buffer, size_t i_len )
 {
     access_sys_t *p_sys = p_access->p_sys;
     GnomeVFSFileSize i_read_len;
@@ -339,7 +339,7 @@ static int Read( access_t *p_access, uint8_t *p_buffer, size_t i_len )
 /*****************************************************************************
  * Seek: seek to a specific location in a file
  *****************************************************************************/
-static int Seek( access_t *p_access, int64_t i_pos )
+static int Seek( access_t *p_access, uint64_t i_pos )
 {
     access_sys_t *p_sys = p_access->p_sys;
     int i_ret;

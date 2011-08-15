@@ -261,6 +261,9 @@ static int Open( decoder_t *p_dec, bool b_packetizer )
     }
     else
     {
+        p_dec->fmt_out.i_codec = VLC_CODEC_S16N;
+        p_dec->fmt_out.audio.i_bitspersample = 16;
+
         p_dec->pf_decode_audio = Decode;
         p_dec->pf_packetize    = NULL;
     }
@@ -297,7 +300,7 @@ static block_t *Parse( decoder_t *p_dec, int *pi_frame_length, int *pi_bits,
     *pp_block = NULL; /* So the packet doesn't get re-sent */
 
     /* Date management */
-    if( p_block->i_pts > 0 &&
+    if( p_block->i_pts > VLC_TS_INVALID &&
         p_block->i_pts != date_Get( &p_sys->end_date ) )
     {
         date_Set( &p_sys->end_date, p_block->i_pts );

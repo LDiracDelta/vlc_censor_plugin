@@ -26,14 +26,11 @@
 #include <vlc_common.h>
 #include <vlc_interface.h>
 
-gboolean delete_event_cb( GtkWidget *widget,
-                          GdkEvent *event,
-                          gpointer user_data );
-
 void play_cb( GtkButton *button, gpointer user_data );
 void stop_cb( GtkButton *button, gpointer user_data );
 void prev_cb( GtkButton *button, gpointer user_data );
 void next_cb( GtkButton *button, gpointer user_data );
+void playlist_cb( GtkButton *button, gpointer user_data );
 void seekbar_changed_cb( GtkRange *range, GtkScrollType scroll,
                          gdouble value, gpointer data );
 
@@ -46,3 +43,6 @@ void open_webcam_cb( GtkMenuItem *menuitem, gpointer user_data );
 
 void snapshot_cb( GtkMenuItem *menuitem, gpointer user_data );
 void dropframe_cb( GtkMenuItem *menuitem, gpointer user_data );
+
+gboolean key_cb(GtkWidget *widget, GdkEventKey *event, gpointer user_data);
+gboolean fullscreen_cb(gpointer user_data);

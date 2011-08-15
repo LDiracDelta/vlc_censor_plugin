@@ -37,6 +37,8 @@
 #include <vlc_aout.h>
 #include <vlc_block_helper.h>
 #include <vlc_bits.h>
+#include <vlc_modules.h>
+#include <vlc_cpu.h>
 
 /*****************************************************************************
  * Module descriptor
@@ -109,7 +111,7 @@ static inline int SyncCode( const uint8_t * );
 static int  SyncInfo( const uint8_t *, bool *, unsigned int *, unsigned int *,
                       unsigned int *, unsigned int *, unsigned int * );
 
-static uint8_t       *GetOutBuffer ( decoder_t *, void ** );
+static uint8_t       *GetOutBuffer ( decoder_t *, block_t ** );
 static aout_buffer_t *GetAoutBuffer( decoder_t * );
 static block_t       *GetSoutBuffer( decoder_t * );
 
@@ -119,7 +121,7 @@ static block_t       *GetSoutBuffer( decoder_t * );
 static int OpenDecoder( vlc_object_t *p_this )
 {
     /* HACK: Don't use this codec if we don't have an dts audio filter */
-    if( !module_exists( "dtstofloat32" ) )
+    if( !HAVE_FPU || !module_exists( "dtstofloat32" ) )
         return VLC_EGENERIC;
 
     return OpenCommon( p_this, false );
@@ -153,8 +155,9 @@ static int OpenCommon( vlc_object_t *p_this, bool b_packetizer )
     p_sys->i_state = STATE_NOSYNC;
     date_Set( &p_sys->end_date, 0 );
     p_sys->b_dts_hd = false;
+    p_sys->i_pts = VLC_TS_INVALID;
 
-    p_sys->bytestream = block_BytestreamInit();
+    block_BytestreamInit( &p_sys->bytestream );
 
     /* Set output properties */
     p_dec->fmt_out.i_cat = AUDIO_ES;
@@ -178,7 +181,7 @@ static void *DecodeBlock( decoder_t *p_dec, block_t **pp_block )
     decoder_sys_t *p_sys = p_dec->p_sys;
     uint8_t p_header[DTS_HEADER_SIZE];
     uint8_t *p_buf;
-    void *p_out_buffer;
+    block_t *p_out_buffer;
 
     if( !pp_block || !*pp_block )
         return NULL;
@@ -195,7 +198,7 @@ static void *DecodeBlock( decoder_t *p_dec, block_t **pp_block )
         return NULL;
     }
 
-    if( !date_Get( &p_sys->end_date ) && !(*pp_block)->i_pts )
+    if( !date_Get( &p_sys->end_date ) && (*pp_block)->i_pts <= VLC_TS_INVALID )
     {
         /* We've just started the stream, wait for the first PTS. */
         block_Release( *pp_block );
@@ -231,7 +234,7 @@ static void *DecodeBlock( decoder_t *p_dec, block_t **pp_block )
         case STATE_SYNC:
             /* New frame, set the Presentation Time Stamp */
             p_sys->i_pts = p_sys->bytestream.p_block->i_pts;
-            if( p_sys->i_pts != 0 &&
+            if( p_sys->i_pts > VLC_TS_INVALID &&
                 p_sys->i_pts != date_Get( &p_sys->end_date ) )
             {
                 date_Set( &p_sys->end_date, p_sys->i_pts );
@@ -277,6 +280,14 @@ static void *DecodeBlock( decoder_t *p_dec, block_t **pp_block )
                 return NULL;
             }
 
+            if( p_sys->b_packetizer &&
+                p_header[0] == 0 && p_header[1] == 0 )
+            {
+                /* DTS wav files and audio CD's use stuffing */
+                p_sys->i_state = STATE_SEND_DATA;
+                break;
+            }
+
             if( SyncCode( p_header ) != VLC_SUCCESS )
             {
                 msg_Dbg( p_dec, "emulated sync word "
@@ -318,11 +329,12 @@ static void *DecodeBlock( decoder_t *p_dec, block_t **pp_block )
 
             /* Copy the whole frame into the buffer. When we reach this point
              * we already know we have enough data available. */
-            block_GetBytes( &p_sys->bytestream, p_buf, p_sys->i_frame_size );
+            block_GetBytes( &p_sys->bytestream,
+                            p_buf, __MIN( p_sys->i_frame_size, p_out_buffer->i_buffer ) );
 
             /* Make sure we don't reuse the same pts twice */
             if( p_sys->i_pts == p_sys->bytestream.p_block->i_pts )
-                p_sys->i_pts = p_sys->bytestream.p_block->i_pts = 0;
+                p_sys->i_pts = p_sys->bytestream.p_block->i_pts = VLC_TS_INVALID;
 
             p_sys->i_state = STATE_NOSYNC;
 
@@ -352,7 +364,7 @@ static void CloseCommon( vlc_object_t *p_this )
 /*****************************************************************************
  * GetOutBuffer:
  *****************************************************************************/
-static uint8_t *GetOutBuffer( decoder_t *p_dec, void **pp_out_buffer )
+static uint8_t *GetOutBuffer( decoder_t *p_dec, block_t **pp_out_buffer )
 {
     decoder_sys_t *p_sys = p_dec->p_sys;
     uint8_t *p_buf;
@@ -665,10 +677,12 @@ static int SyncInfo( const uint8_t *p_buf,
     {
         case 0x0:
             /* Mono */
+            *pi_channels = 1;
             *pi_channels_conf = AOUT_CHAN_CENTER;
             break;
         case 0x1:
             /* Dual-mono = stereo + dual-mono */
+            *pi_channels = 2;
             *pi_channels_conf = AOUT_CHAN_LEFT | AOUT_CHAN_RIGHT |
                            AOUT_CHAN_DUALMONO;
             break;

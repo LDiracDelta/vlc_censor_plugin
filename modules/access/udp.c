@@ -60,17 +60,13 @@ vlc_module_begin ()
     set_category( CAT_INPUT )
     set_subcategory( SUBCAT_INPUT_ACCESS )
 
-    add_integer( "udp-caching", DEFAULT_PTS_DELAY / 1000, NULL, CACHING_TEXT,
+    add_integer( "udp-caching", DEFAULT_PTS_DELAY / 1000, CACHING_TEXT,
                  CACHING_LONGTEXT, true )
         change_safe()
-    add_obsolete_integer( "rtp-late" )
-    add_obsolete_bool( "udp-auto-mtu" )
+    add_obsolete_integer( "server-port" ) /* since 1.2.0 */
 
     set_capability( "access", 0 )
-    add_shortcut( "udp" )
-    add_shortcut( "udpstream" )
-    add_shortcut( "udp4" )
-    add_shortcut( "udp6" )
+    add_shortcut( "udp", "udpstream", "udp4", "udp6" )
 
     set_callbacks( Open, Close )
 vlc_module_end ()
@@ -78,8 +74,6 @@ vlc_module_end ()
 /*****************************************************************************
  * Local prototypes
  *****************************************************************************/
-#define RTP_HEADER_LEN 12
-
 static block_t *BlockUDP( access_t * );
 static int Control( access_t *, int, va_list );
 
@@ -90,10 +84,10 @@ static int Open( vlc_object_t *p_this )
 {
     access_t     *p_access = (access_t*)p_this;
 
-    char *psz_name = strdup( p_access->psz_path );
+    char *psz_name = strdup( p_access->psz_location );
     char *psz_parser;
     const char *psz_server_addr, *psz_bind_addr = "";
-    int  i_bind_port, i_server_port = 0;
+    int  i_bind_port = 1234, i_server_port = 0;
     int fam = AF_UNSPEC;
     int fd;
 
@@ -114,8 +108,6 @@ static int Open( vlc_object_t *p_this )
                 break;
         }
     }
-
-    i_bind_port = var_CreateGetInteger( p_access, "server-port" );
 
     /* Parse psz_name syntax :
      * [serveraddr[:serverport]][@[bindaddr]:[bindport]] */
@@ -205,7 +197,7 @@ static int Control( access_t *p_access, int i_query, va_list args )
         /* */
         case ACCESS_GET_PTS_DELAY:
             pi_64 = (int64_t*)va_arg( args, int64_t * );
-            *pi_64 = (int64_t)var_GetInteger(p_access,"udp-caching") * 1000;
+            *pi_64 = var_GetInteger(p_access,"udp-caching") * 1000;
             break;
 
         /* */

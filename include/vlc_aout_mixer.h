@@ -34,67 +34,18 @@
 extern "C" {
 #endif
 
-//#include <vlc_aout.h>
-
-/* */
-typedef struct aout_mixer_sys_t aout_mixer_sys_t;
-typedef struct aout_mixer_t aout_mixer_t;
-
-typedef struct {
-    /* Is the input to be ignored while mixing */
-    bool        is_invalid;
-
-    /* */
-    aout_fifo_t fifo;
-
-    /* Pointer on the first byte of data to mix.
-     *
-     * It points in the first buffer of fifo
-     */
-    uint8_t     *begin;
-
-    /* Software multiplier */
-    float       multiplier;
-} aout_mixer_input_t;
+typedef struct audio_mixer audio_mixer_t;
 
 /** 
  * audio output mixer
  */
-struct aout_mixer_t {
+struct audio_mixer
+{
     VLC_COMMON_MEMBERS
 
-    /* Module */
-    module_t *module;
-
-    /* Mixer format.
-     *
-     * You cannot modify it.
-     */
-    audio_sample_format_t fmt;
-
-    /* Mixer output buffer allocation method.
-     *
-     * You can override it in the open function only.
-     */
-    aout_alloc_t          allocation;
-
-    /* Multiplier used to raise or lower the volume of the sound in
-     * software.
-     */
-    float                 multiplier;
-
-    /* Array of mixer inputs */
-    unsigned              input_count;
-    aout_mixer_input_t    **input;
-
-    /* Mix input into the given buffer (mandatory) */
-    void (*mix)(aout_mixer_t *, aout_buffer_t *);
-
-    /* Private place holder for the aout_mixer_t module (optional)
-     *
-     * A module is free to use it as it wishes.
-     */
-    aout_mixer_sys_t *sys;
+    module_t *module; /**< Module handle */
+    vlc_fourcc_t format; /**< Audio samples format */
+    void (*mix)(audio_mixer_t *, block_t *, float); /**< Amplifier */
 };
 
 #ifdef __cplusplus

@@ -23,18 +23,10 @@
 *****************************************************************************/
 
 #import "VLCLibrary.h"
-#import "VLCMediaListAspect.h"
+#if !TARGET_OS_IPHONE
 #import "VLCStreamOutput.h"
+#endif
 #import "VLCMediaPlayer.h"
-
-/* Utility functions */
-/**
- * \function catch_execption( ex )
- * Utility function that catches a LibVLC generated exception by throwing a Cocoa based NSException.  
- * \param ex LibVLC exception returned by LibVLC internal functions.
- */
-#define catch_exception( ex ) __catch_exception( (void *)(ex), __FUNCTION__, __FILE__, __LINE__ )
-extern void __catch_exception( void * e, const char * function, const char * file, int line_number );
 
 /**
  * Bridges functionality between libvlc and VLCMediaList implementation.
@@ -44,7 +36,7 @@ extern void __catch_exception( void * e, const char * function, const char * fil
 /**
  * Manufactures new object wrapped around specified media list.
  * \param p_new_mlist LibVLC media list pointer.
- * \return Newly create media list instance using specified media list 
+ * \return Newly create media list instance using specified media list
  * pointer.
  */
 + (id)mediaListWithLibVLCMediaList:(void *)p_new_mlist;
@@ -130,40 +122,12 @@ extern void __catch_exception( void * e, const char * function, const char * fil
 @end
 
 /**
- * Bridges functionality between VLCMediaListAspect and libvlc.
- */
-@interface VLCMediaListAspect (VLCLibVLCBridging)
-/* Factories */
-/**
- * Manufactures a new media list aspect object with libvlc media list view instance.
- * \return Newly created media list aspect using specified libvlc media list view.
- */
-+ (id)mediaListAspectWithLibVLCMediaListView:(libvlc_media_list_view_t *)p_new_mlv;
-
-/**
- * Manufactures a new media list aspect object with libvlc media list view instance.
- * \return Newly created media list aspect using specified libvlc media list view.
- */
-+ (id)mediaListAspectWithLibVLCMediaListView:(libvlc_media_list_view_t *)p_new_mlv andMediaList:(VLCMediaList*)mediaList;
-
-/* Initializers */
-/**
- * Initializes a new media list aspect object with libvlc media list view instance.
- * \return Newly created media list aspect using specified libvlc media list view.
- */
-- (id)initWithLibVLCMediaListView:(libvlc_media_list_view_t *)p_new_mlv andMediaList:(VLCMediaList*)mediaList;
-
-/* Properties */
-@property (readonly) libvlc_media_list_view_t * libVLCMediaListView; //< Libvlc pointer to media list view instance.
-@end
-
-/**
  * Bridges functionality between VLCLibrary and VLCAudio.
  */
 @interface VLCLibrary (VLCAudioBridging)
 /**
  * Called by VLCAudio, each library has a singleton VLCaudio instance.  VLCAudio
- * calls this function to let the VLCLibrary instance know how to get in touch 
+ * calls this function to let the VLCLibrary instance know how to get in touch
  * with the VLCAudio instance.  TODO: Each media player instance should have it's
  * own audio instance...not each library instance.
  */
@@ -176,15 +140,17 @@ extern void __catch_exception( void * e, const char * function, const char * fil
 @interface VLCAudio (VLCAudioBridging)
 /* Initializers */
 /**
- * Initializes a new object using the specified library instance.
- * \return Newly created audio object using specified VLCLibrary instance.
+ * Initializes a new object using the specified mediaPlayer instance.
+ * \return Newly created audio object using specified VLCMediaPlayer instance.
  */
-- (id)initWithLibrary:(VLCLibrary *)library;
+- (id)initWithMediaPlayer:(VLCMediaPlayer *)mediaPlayer;
 @end
 
 /**
  * TODO: Documentation
  */
+#if !TARGET_OS_IPHONE
 @interface VLCStreamOutput (LibVLCBridge)
 - (NSString *)representedLibVLCOptions;
 @end
+#endif

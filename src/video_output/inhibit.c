@@ -23,6 +23,7 @@
 #endif
 
 #include <vlc_common.h>
+#include <vlc_modules.h>
 #include "inhibit.h"
 #include <libvlc.h>
 #include <assert.h>
@@ -35,9 +36,7 @@ typedef struct
 
 vlc_inhibit_t *vlc_inhibit_Create (vlc_object_t *parent, int_fast32_t wid)
 {
-    static char const typename[] = "inhibit";
-    inhibit_t *priv = vlc_custom_create (parent, sizeof (*priv),
-                                         VLC_OBJECT_GENERIC, typename);
+    inhibit_t *priv = vlc_custom_create (parent, sizeof (*priv), "inhibit" );
     if (priv == NULL)
         return NULL;
 
@@ -46,7 +45,6 @@ vlc_inhibit_t *vlc_inhibit_Create (vlc_object_t *parent, int_fast32_t wid)
     ih->p_sys = NULL;
     ih->inhibit = NULL;
 
-    vlc_object_attach (ih, parent);
     priv->module = module_need (ih, "inhibit", NULL, false);
     if (priv->module == NULL)
     {

@@ -27,7 +27,7 @@ Example use:
     require "host"
     h = host.host()
 
-    -- Bypass any authentification
+    -- Bypass any authentication
     function on_password( client )
         client:switch_status( host.status.read )
     end
@@ -39,11 +39,8 @@ Example use:
 
     -- The main loop
     while not vlc.misc.should_die() do
-        -- accept new connections
-        h:accept()
-
-        -- select active clients
-        local write, read = h:select( 0.1 ) -- 0.1 is a timeout in seconds
+        -- accept new connections and select active clients
+        local write, read = h:accept_and_select()
 
         -- handle clients in write mode
         for _, client in pairs(write) do
@@ -55,6 +52,7 @@ Example use:
         -- handle clients in read mode
         for _, client in pairs(read) do
             local str = client:recv(1000)
+            if not str then break end
             str = string.gsub(str,"\r?\n$","")
             client.buffer = "Got `"..str.."'.\r\n"
             client:switch_status( host.status.write )
@@ -67,7 +65,11 @@ For complete examples see existing VLC Lua interface modules (ie telnet.lua)
 module("host",package.seeall)
 
 status = { init = 0, read = 1, write = 2, password = 3 }
-client_type = { net = 1, stdio = 2, fifo = 3 }
+client_type = { net = 1, stdio = 2, fifo = 3, telnet = 4 }
+
+function is_flag_set(val, flag)
+    return (((val - (val % flag)) / flag) % 2 ~= 0)
+end
 
 function host()
     -- private data
@@ -75,21 +77,7 @@ function host()
     local listeners = {}
     local status_callbacks = {}
 
-    -- private data
-    local fds_read = vlc.net.fd_set_new()
-    local fds_write = vlc.net.fd_set_new()
-
     -- private methods
-    local function client_accept( clients, listen )
-        local wait
-        if #clients == 0 then
-            wait = -1
-        else
-            wait = 0
-        end
-        return listen:accept( wait )
-    end
-
     local function fd_client( client )
         if client.status == status.read then
             return client.rfd
@@ -133,7 +121,8 @@ function host()
         end
         for i, c in pairs(clients) do
             if c == client then
-                if client.type == client_type.net then
+                if client.type == client_type.net
+                or client.type == client_type.telnet then
                     if client.wfd ~= client.rfd then
                         vlc.net.close( client.rfd )
                     end
@@ -145,7 +134,7 @@ function host()
         end
         vlc.msg.err("couldn't find client to remove.")
     end
-    
+
     local function switch_status( client, s )
         if client.status == s then return end
         client.status = s
@@ -162,7 +151,7 @@ function host()
     local function new_client( h, fd, wfd, t )
         if fd < 0 then return end
         local w, r
-        if t == client_type.net then
+        if t == client_type.net or t == client_type.telnet then
             w = send
             r = recv
         else if t == client_type.stdio or t == client_type.fifo then
@@ -176,6 +165,7 @@ function host()
                          wfd = wfd or fd,
                          status = status.init,
                          buffer = "",
+                         cmds = "",
                          type = t,
                          -- methods
                          fd = fd_client,
@@ -190,20 +180,8 @@ function host()
         client:switch_status(status.password)
     end
 
-    function filter_client( fd, status, status2 )
-        local l = 0
-        fd:zero()
-        for _, client in pairs(clients) do
-            if client.status == status or client.status == status2 then
-                fd:set( client:fd() )
-                l = math.max( l, client:fd() )
-            end
-        end
-        return l
-    end
-
     -- public methods
-    local function _listen_tcp( h, host, port )
+    local function _listen_tcp( h, host, port, telnet )
         if listeners.tcp and listeners.tcp[host]
                          and listeners.tcp[host][port] then
             error("Already listening on tcp host `"..host..":"..tostring(port).."'")
@@ -214,19 +192,19 @@ function host()
         if not listeners.tcp[host] then
             listeners.tcp[host] = {}
         end
-        local listener = vlc.net.listen_tcp( host, port )
-        listeners.tcp[host][port] = listener
+        listeners.tcp[host][port] = true
         if not listeners.tcp.list then
             -- FIXME: if host == "list" we'll have a problem
             listeners.tcp.list = {}
-            local m = { __mode = "v" } -- week values
-            setmetatable( listeners.tcp.list, m )
         end
-        table.insert( listeners.tcp.list, listener )
+        local listener = vlc.net.listen_tcp( host, port )
+        local type = telnet and client_type.telnet or client_type.net;
+        table.insert( listeners.tcp.list, { data = listener,
+                                            type = type,
+                                          } )
     end
 
     local function _listen_stdio( h )
-        
         if listeners.stdio then
             error("Already listening on stdio")
         end
@@ -245,51 +223,70 @@ function host()
                 h:listen_stdio()
             else
                 u = vlc.net.url_parse( url )
-                h:listen_tcp( u.host, u.port )
+                h:listen_tcp( u.host, u.port, (u.protocol == "telnet") )
             end
         end
     end
 
-    local function _accept( h )
+    local function _accept_and_select( h, timeout )
+        local function filter_client( fds, status, event )
+            for _, client in pairs(clients) do
+                if client.status == status then
+                    fds[client:fd()] = event
+                end
+            end
+        end
+
+        local pollfds = {}
+        filter_client( pollfds, status.read, vlc.net.POLLIN )
+        filter_client( pollfds, status.password, vlc.net.POLLIN )
+        filter_client( pollfds, status.write, vlc.net.POLLOUT )
         if listeners.tcp then
-            local wait
-            if #clients == 0 and not listeners.stdio and #listeners.tcp.list == 1 then
-                wait = -1 -- blocking
-            else
-                wait = 0
-            end
             for _, listener in pairs(listeners.tcp.list) do
-                local fd = listener:accept( wait )
-                new_client( h, fd, fd, client_type.net )
+                for _, fd in pairs({listener.data:fds()}) do
+                    pollfds[fd] = vlc.net.POLLIN
+                end
             end
         end
-    end
 
-    local function _select( h, timeout )
-        local nfds = math.max( filter_client( fds_read, status.read, status.password ),
-                               filter_client( fds_write, status.write ) ) + 1
-        local ret = vlc.net.select( nfds, fds_read, fds_write,
-                                    timeout or 0.5 )
+        local ret = vlc.net.poll( pollfds )
         local wclients = {}
         local rclients = {}
         if ret > 0 then
             for _, client in pairs(clients) do
-                if fds_write:isset( client:fd() ) then
+                if is_flag_set(pollfds[client:fd()], vlc.net.POLLERR)
+                or is_flag_set(pollfds[client:fd()], vlc.net.POLLHUP)
+                or is_flag_set(pollfds[client:fd()], vlc.net.POLLNVAL) then
+                    del_client(client)
+                elseif is_flag_set(pollfds[client:fd()], vlc.net.POLLOUT) then
                     table.insert(wclients,client)
-                end
-                if fds_read:isset( client:fd() ) then
+                elseif is_flag_set(pollfds[client:fd()], vlc.net.POLLIN) then
                     table.insert(rclients,client)
                 end
             end
+            if listeners.tcp then
+                for _, listener in pairs(listeners.tcp.list) do
+                    for _, fd in pairs({listener.data:fds()}) do
+                        if is_flag_set(pollfds[fd], vlc.net.POLLIN) then
+                            local afd = listener.data:accept()
+                            new_client( h, afd, afd, listener.type )
+                            break
+                        end
+                    end
+                end
+            end
         end
+
         return wclients, rclients
     end
 
+    -- FIXME: this is never called, client sockets are leaked
     local function destructor( h )
         print "destructor"
         for _,client in pairs(clients) do
-            client:send("Shutting down.")
-            if client.type == client_type.tcp then
+            --client:send("Shutting down.")
+            if client.type == client_type.net
+            or client.type == client_type.telnet then
                 if client.wfd ~= client.rfd then
                     vlc.net.close(client.rfd)
                 end
@@ -311,19 +308,9 @@ function host()
                 listen = _listen,
                 listen_tcp = _listen_tcp,
                 listen_stdio = _listen_stdio,
-                accept = _accept,
-                select = _select,
+                accept_and_select = _accept_and_select,
                 broadcast = _broadcast,
               }
-
-    -- the metatable
-    local m = { -- data
-                __metatable = "Nothing to see here. Move along.",
-                -- methods
-                __gc = destructor,
-              }
-
-    setmetatable( h, m )
 
     return h
 end

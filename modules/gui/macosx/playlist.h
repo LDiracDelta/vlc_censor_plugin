@@ -22,6 +22,8 @@
  * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston MA 02110-1301, USA.
  *****************************************************************************/
 
+#import "PXSourceList.h"
+
 /*****************************************************************************
  * VLCPlaylistView interface
  *****************************************************************************/
@@ -34,17 +36,17 @@
 /*****************************************************************************
  * VLCPlaylistCommon interface
  *****************************************************************************/
-@interface VLCPlaylistCommon : NSObject
+@interface VLCPlaylistCommon : NSObject <NSOutlineViewDataSource, NSOutlineViewDelegate>
 {
     IBOutlet id o_tc_name;
     IBOutlet id o_tc_author;
     IBOutlet id o_tc_duration;
-    IBOutlet id o_outline_view;
+    IBOutlet VLCPlaylistView* o_outline_view;
 
     IBOutlet id o_tc_name_other;
     IBOutlet id o_tc_author_other;
     IBOutlet id o_tc_duration_other;
-    IBOutlet id o_outline_view_other;
+    IBOutlet VLCPlaylistView* o_outline_view_other;
 
     NSMutableDictionary *o_outline_dict;
 }
@@ -76,9 +78,6 @@
 
     IBOutlet id o_btn_playlist;
     IBOutlet id o_playlist_view;
-    IBOutlet id o_sidebar;
-    IBOutlet id o_status_field;
-    IBOutlet id o_status_field_embed;
     IBOutlet id o_search_field;
     IBOutlet id o_search_field_other;
     IBOutlet id o_mi_save_playlist;
@@ -118,10 +117,6 @@
     BOOL b_selected_item_met;
     BOOL b_isSortDescending;
     id o_tc_sortColumn;
-
-    /* "add node" button and menu entry */
-    IBOutlet id o_mi_addNode;
-    IBOutlet id o_btn_addNode;
 }
 
 - (void)searchfieldChanged:(NSNotification *)o_notification;
@@ -130,7 +125,7 @@
 - (IBAction)searchItem:(id)sender;
 
 - (void)playlistUpdated;
-- (void)playModeUpdated;
+- (void)outlineViewSelectionDidChange:(NSNotification *)notification;
 - (void)sortNode:(int)i_mode;
 - (void)updateRowSelection;
 
@@ -148,9 +143,6 @@
 - (IBAction)sortNodeByAuthor:(id)sender;
 - (IBAction)recursiveExpandNode:(id)sender;
 
-- (IBAction)addNode:(id)sender;
-
-- (void)playSidebarItem:(id)item;
 - (id)playingItem;
 
 - (void)appendArray:(NSArray*)o_array atPos:(int)i_position enqueue:(BOOL)b_enqueue;

@@ -37,8 +37,8 @@
 #include <vlc_common.h>
 #include <vlc_plugin.h>
 #include <vlc_sout.h>
-#include <vlc_codecs.h>
 #include <vlc_block.h>
+#include <vlc_rand.h>
 
 #include <vlc_iso_lang.h>
 
@@ -46,25 +46,14 @@
 #include "pes.h"
 #include "csa.h"
 
-#ifdef HAVE_DVBPSI_DR_H
-#   include <dvbpsi/dvbpsi.h>
-#   include <dvbpsi/demux.h>
-#   include <dvbpsi/descriptor.h>
-#   include <dvbpsi/pat.h>
-#   include <dvbpsi/pmt.h>
-#   include <dvbpsi/sdt.h>
-#   include <dvbpsi/dr.h>
-#   include <dvbpsi/psi.h>
-#else
-#   include "dvbpsi.h"
-#   include "demux.h"
-#   include "descriptor.h"
-#   include "tables/pat.h"
-#   include "tables/pmt.h"
-#   include "tables/sdt.h"
-#   include "descriptors/dr.h"
-#   include "psi.h"
-#endif
+# include <dvbpsi/dvbpsi.h>
+# include <dvbpsi/demux.h>
+# include <dvbpsi/descriptor.h>
+# include <dvbpsi/pat.h>
+# include <dvbpsi/pmt.h>
+# include <dvbpsi/sdt.h>
+# include <dvbpsi/dr.h>
+# include <dvbpsi/psi.h>
 
 /*
  * TODO:
@@ -122,7 +111,7 @@ static void    Close  ( vlc_object_t * );
 
 #define PID_TEXT N_("Set PID to ID of ES")
 #define PID_LONGTEXT N_("Sets PID to the ID if the incoming ES. This is for " \
-  "use with --ts-es-id-pid, and allows to have the same PIDs in the input " \
+  "use with --ts-es-id-pid, and allows having the same PIDs in the input " \
   "and output streams.")
 
 #define ALIGNMENT_TEXT N_("Data alignment")
@@ -183,8 +172,8 @@ static void    Close  ( vlc_object_t * );
     "encrypting." )
 
 #define SOUT_CFG_PREFIX "sout-ts-"
-#define MAX_PMT 64       /* Maximum number of programs. FIXME: I just chose an arbitary number. Where is the maximum in the spec? */
-#define MAX_PMT_PID 64       /* Maximum pids in each pmt.  FIXME: I just chose an arbitary number. Where is the maximum in the spec? */
+#define MAX_PMT 64       /* Maximum number of programs. FIXME: I just chose an arbitrary number. Where is the maximum in the spec? */
+#define MAX_PMT_PID 64       /* Maximum pids in each pmt.  FIXME: I just chose an arbitrary number. Where is the maximum in the spec? */
 
 vlc_module_begin ()
     set_description( N_("TS muxer (libdvbpsi)") )
@@ -194,57 +183,57 @@ vlc_module_begin ()
     set_capability( "sout mux", 120 )
     add_shortcut( "ts" )
 
-    add_integer( SOUT_CFG_PREFIX "pid-video", 0, NULL,VPID_TEXT, VPID_LONGTEXT,
+    add_integer( SOUT_CFG_PREFIX "pid-video", 0,VPID_TEXT, VPID_LONGTEXT,
                                   true )
-    add_integer( SOUT_CFG_PREFIX "pid-audio", 0, NULL, APID_TEXT,
+    add_integer( SOUT_CFG_PREFIX "pid-audio", 0, APID_TEXT,
                  APID_LONGTEXT, true )
-    add_integer( SOUT_CFG_PREFIX "pid-spu", 0, NULL, SPUPID_TEXT,
+    add_integer( SOUT_CFG_PREFIX "pid-spu", 0, SPUPID_TEXT,
                  SPUPID_LONGTEXT, true )
-    add_integer( SOUT_CFG_PREFIX "pid-pmt", 0, NULL, PMTPID_TEXT,
+    add_integer( SOUT_CFG_PREFIX "pid-pmt", 0, PMTPID_TEXT,
                  PMTPID_LONGTEXT, true )
-    add_integer( SOUT_CFG_PREFIX "tsid", 0, NULL, TSID_TEXT,
+    add_integer( SOUT_CFG_PREFIX "tsid", 0, TSID_TEXT,
                  TSID_LONGTEXT, true )
 #ifdef HAVE_DVBPSI_SDT
-    add_integer( SOUT_CFG_PREFIX "netid", 0, NULL, NETID_TEXT,
+    add_integer( SOUT_CFG_PREFIX "netid", 0, NETID_TEXT,
                  NETID_LONGTEXT, true )
 #endif
-    add_string( SOUT_CFG_PREFIX "program-pmt", NULL, NULL, PMTPROG_TEXT,
+    add_string( SOUT_CFG_PREFIX "program-pmt", NULL, PMTPROG_TEXT,
                 PMTPROG_LONGTEXT, true )
-    add_bool( SOUT_CFG_PREFIX "es-id-pid", false, NULL, PID_TEXT, PID_LONGTEXT,
+    add_bool( SOUT_CFG_PREFIX "es-id-pid", false, PID_TEXT, PID_LONGTEXT,
               true )
-    add_string( SOUT_CFG_PREFIX "muxpmt", NULL, NULL, MUXPMT_TEXT, MUXPMT_LONGTEXT, true )
+    add_string( SOUT_CFG_PREFIX "muxpmt", NULL, MUXPMT_TEXT, MUXPMT_LONGTEXT, true )
 #ifdef HAVE_DVBPSI_SDT
-    add_string( SOUT_CFG_PREFIX "sdtdesc", NULL, NULL, SDTDESC_TEXT, SDTDESC_LONGTEXT, true )
+    add_string( SOUT_CFG_PREFIX "sdtdesc", NULL, SDTDESC_TEXT, SDTDESC_LONGTEXT, true )
 #endif
-    add_bool( SOUT_CFG_PREFIX "alignment", true, NULL, ALIGNMENT_TEXT,
+    add_bool( SOUT_CFG_PREFIX "alignment", true, ALIGNMENT_TEXT,
               ALIGNMENT_LONGTEXT, true )
 
-    add_integer( SOUT_CFG_PREFIX "shaping", 200, NULL, SHAPING_TEXT,
+    add_integer( SOUT_CFG_PREFIX "shaping", 200, SHAPING_TEXT,
                  SHAPING_LONGTEXT, true )
-    add_bool( SOUT_CFG_PREFIX "use-key-frames", false, NULL, KEYF_TEXT,
+    add_bool( SOUT_CFG_PREFIX "use-key-frames", false, KEYF_TEXT,
               KEYF_LONGTEXT, true )
 
-    add_integer( SOUT_CFG_PREFIX "pcr", 70, NULL, PCR_TEXT, PCR_LONGTEXT,
+    add_integer( SOUT_CFG_PREFIX "pcr", 70, PCR_TEXT, PCR_LONGTEXT,
                  true )
-    add_integer( SOUT_CFG_PREFIX "bmin", 0, NULL, BMIN_TEXT, BMIN_LONGTEXT,
+    add_integer( SOUT_CFG_PREFIX "bmin", 0, BMIN_TEXT, BMIN_LONGTEXT,
                  true )
-    add_integer( SOUT_CFG_PREFIX "bmax", 0, NULL, BMAX_TEXT, BMAX_LONGTEXT,
+    add_integer( SOUT_CFG_PREFIX "bmax", 0, BMAX_TEXT, BMAX_LONGTEXT,
                  true )
-    add_integer( SOUT_CFG_PREFIX "dts-delay", 400, NULL, DTS_TEXT,
+    add_integer( SOUT_CFG_PREFIX "dts-delay", 400, DTS_TEXT,
                  DTS_LONGTEXT, true )
 
-    add_bool( SOUT_CFG_PREFIX "crypt-audio", true, NULL, ACRYPT_TEXT,
+    add_bool( SOUT_CFG_PREFIX "crypt-audio", true, ACRYPT_TEXT,
               ACRYPT_LONGTEXT, true )
-    add_bool( SOUT_CFG_PREFIX "crypt-video", true, NULL, VCRYPT_TEXT,
+    add_bool( SOUT_CFG_PREFIX "crypt-video", true, VCRYPT_TEXT,
               VCRYPT_LONGTEXT, true )
 
-    add_string( SOUT_CFG_PREFIX "csa-ck", NULL, NULL, CK_TEXT, CK_LONGTEXT,
+    add_string( SOUT_CFG_PREFIX "csa-ck", NULL, CK_TEXT, CK_LONGTEXT,
                 true )
-    add_string( SOUT_CFG_PREFIX "csa2-ck", NULL, NULL, CK2_TEXT, CK2_LONGTEXT,
+    add_string( SOUT_CFG_PREFIX "csa2-ck", NULL, CK2_TEXT, CK2_LONGTEXT,
                 true )
-    add_string( SOUT_CFG_PREFIX "csa-use", "1", NULL, CU_TEXT, CU_LONGTEXT,
+    add_string( SOUT_CFG_PREFIX "csa-use", "1", CU_TEXT, CU_LONGTEXT,
                 true )
-    add_integer( SOUT_CFG_PREFIX "csa-pkt", 188, NULL, CPKT_TEXT, CPKT_LONGTEXT, true )
+    add_integer( SOUT_CFG_PREFIX "csa-pkt", 188, CPKT_TEXT, CPKT_LONGTEXT, true )
 
     set_callbacks( Open, Close )
 vlc_module_end ()
@@ -253,10 +242,13 @@ vlc_module_end ()
  * Local data structures
  *****************************************************************************/
 static const char *const ppsz_sout_options[] = {
-    "pid-video", "pid-audio", "pid-spu", "pid-pmt", "tsid", "netid",
+    "pid-video", "pid-audio", "pid-spu", "pid-pmt", "tsid",
+#ifdef HAVE_DVBPSI_SDT
+    "netid", "sdtdesc",
+#endif
     "es-id-pid", "shaping", "pcr", "bmin", "bmax", "use-key-frames",
     "dts-delay", "csa-ck", "csa2-ck", "csa-use", "csa-pkt", "crypt-audio", "crypt-video",
-    "muxpmt", "sdtdesc", "program-pmt", "alignment",
+    "muxpmt", "program-pmt", "alignment",
     NULL
 };
 
@@ -520,7 +512,6 @@ static int Open( vlc_object_t *p_this )
     p_mux->pf_mux       = Mux;
     p_mux->p_sys        = p_sys;
 
-    srand( (uint32_t)mdate() );
     for ( i = 0; i < MAX_PMT; i++ )
         p_sys->sdt_descriptors[i].psz_service_name
             = p_sys->sdt_descriptors[i].psz_provider = NULL;
@@ -529,8 +520,7 @@ static int Open( vlc_object_t *p_this )
     p_sys->i_audio_bound = 0;
     p_sys->i_video_bound = 0;
 
-    var_Get( p_mux, SOUT_CFG_PREFIX "es-id-pid", &val );
-    p_sys->b_es_id_pid = val.b_bool;
+    p_sys->b_es_id_pid = var_GetBool( p_mux, SOUT_CFG_PREFIX "es-id-pid" );
 
     var_Get( p_mux, SOUT_CFG_PREFIX "muxpmt", &val );
     /*
@@ -548,7 +538,7 @@ static int Open( vlc_object_t *p_this )
         {
             i_pid = strtoul( psz, &psz_next, 0 );
 
-            if ( strlen(psz_next) > 0 )
+            if ( psz_next[0] != '\0' )
                 psz = &psz_next[1];
             if ( i_pid == 0 )
             {
@@ -583,7 +573,9 @@ static int Open( vlc_object_t *p_this )
     }
     free( val.psz_string );
 
-    p_sys->i_pat_version_number = rand() % 32;
+    unsigned short subi[3];
+    vlc_rand_bytes(subi, sizeof(subi));
+    p_sys->i_pat_version_number = nrand48(subi) & 0x1f;
     p_sys->pat.i_pid = 0;
     p_sys->pat.i_continuity_counter = 0;
     p_sys->pat.b_discontinuity = false;
@@ -592,16 +584,16 @@ static int Open( vlc_object_t *p_this )
     if ( val.i_int )
         p_sys->i_tsid = val.i_int;
     else
-        p_sys->i_tsid = rand() % 65536;
+        p_sys->i_tsid = nrand48(subi) & 0xffff;
 
-    p_sys->i_netid = rand() % 65536;
+    p_sys->i_netid = nrand48(subi) & 0xffff;
 #ifdef HAVE_DVBPSI_SDT
     var_Get( p_mux, SOUT_CFG_PREFIX "netid", &val );
     if ( val.i_int )
         p_sys->i_netid = val.i_int;
 #endif
 
-    p_sys->i_pmt_version_number = rand() % 32;
+    p_sys->i_pmt_version_number = nrand48(subi) & 0x1f;
     for( i = 0; i < p_sys->i_num_pmt; i++ )
     {
         p_sys->pmt[i].i_continuity_counter = 0;
@@ -651,8 +643,7 @@ static int Open( vlc_object_t *p_this )
     p_sys->b_sdt = false;
 #endif
 
-    var_Get( p_mux, SOUT_CFG_PREFIX "alignment", &val );
-    p_sys->b_data_alignment = val.b_bool;
+    p_sys->b_data_alignment = var_GetBool( p_mux, SOUT_CFG_PREFIX "alignment" );
 
     var_Get( p_mux, SOUT_CFG_PREFIX "program-pmt", &val );
     if( val.psz_string && *val.psz_string )
@@ -666,7 +657,7 @@ static int Open( vlc_object_t *p_this )
         while ( psz != NULL )
         {
             i_pid = strtoul( psz, &psz_next, 0 );
-            if( strlen(psz_next) > 0 )
+            if( psz_next[0] != '\0' )
                 psz = &psz_next[1];
             else
                 psz = NULL;
@@ -706,22 +697,19 @@ static int Open( vlc_object_t *p_this )
 
     p_sys->i_pid_free = p_sys->pmt[p_sys->i_num_pmt - 1].i_pid + 1;
 
-    var_Get( p_mux, SOUT_CFG_PREFIX "pid-video", &val );
-    p_sys->i_pid_video = val.i_int;
+    p_sys->i_pid_video = var_GetInteger( p_mux, SOUT_CFG_PREFIX "pid-video" );
     if ( p_sys->i_pid_video > p_sys->i_pid_free )
     {
         p_sys->i_pid_free = p_sys->i_pid_video + 1;
     }
 
-    var_Get( p_mux, SOUT_CFG_PREFIX "pid-audio", &val );
-    p_sys->i_pid_audio = val.i_int;
+    p_sys->i_pid_audio = var_GetInteger( p_mux, SOUT_CFG_PREFIX "pid-audio" );
     if ( p_sys->i_pid_audio > p_sys->i_pid_free )
     {
         p_sys->i_pid_free = p_sys->i_pid_audio + 1;
     }
 
-    var_Get( p_mux, SOUT_CFG_PREFIX "pid-spu", &val );
-    p_sys->i_pid_spu = val.i_int;
+    p_sys->i_pid_spu = var_GetInteger( p_mux, SOUT_CFG_PREFIX "pid-spu" );
     if ( p_sys->i_pid_spu > p_sys->i_pid_free )
     {
         p_sys->i_pid_free = p_sys->i_pid_spu + 1;
@@ -735,11 +723,9 @@ static int Open( vlc_object_t *p_this )
     p_sys->i_null_continuity_counter = 0;
 
     /* Allow to create constrained stream */
-    var_Get( p_mux, SOUT_CFG_PREFIX "bmin", &val );
-    p_sys->i_bitrate_min = val.i_int;
+    p_sys->i_bitrate_min = var_GetInteger( p_mux, SOUT_CFG_PREFIX "bmin" );
 
-    var_Get( p_mux, SOUT_CFG_PREFIX "bmax", &val );
-    p_sys->i_bitrate_max = val.i_int;
+    p_sys->i_bitrate_max = var_GetInteger( p_mux, SOUT_CFG_PREFIX "bmax" );
 
     if( p_sys->i_bitrate_min > 0 && p_sys->i_bitrate_max > 0 &&
         p_sys->i_bitrate_min > p_sys->i_bitrate_max )
@@ -782,8 +768,7 @@ static int Open( vlc_object_t *p_this )
     msg_Dbg( p_mux, "shaping=%"PRId64" pcr=%"PRId64" dts_delay=%"PRId64,
              p_sys->i_shaping_delay, p_sys->i_pcr_delay, p_sys->i_dts_delay );
 
-    var_Get( p_mux, SOUT_CFG_PREFIX "use-key-frames", &val );
-    p_sys->b_use_key_frames = val.b_bool;
+    p_sys->b_use_key_frames = var_GetBool( p_mux, SOUT_CFG_PREFIX "use-key-frames" );
 
     /* for TS generation */
     p_sys->i_pcr    = 0;
@@ -837,7 +822,8 @@ static int Open( vlc_object_t *p_this )
             var_Get( p_mux, SOUT_CFG_PREFIX "csa-pkt", &pkt_val );
             if( pkt_val.i_int < 12 || pkt_val.i_int > 188 )
             {
-                msg_Err( p_mux, "wrong packet size %d specified.", pkt_val.i_int );
+                msg_Err( p_mux, "wrong packet size %"PRId64" specified.",
+                         pkt_val.i_int );
                 msg_Warn( p_mux, "using default packet size of 188 bytes" );
                 p_sys->i_csa_pkt_size = 188;
             }
@@ -848,11 +834,9 @@ static int Open( vlc_object_t *p_this )
     }
     free( val.psz_string );
 
-    var_Get( p_mux, SOUT_CFG_PREFIX "crypt-audio", &val );
-    p_sys->b_crypt_audio = val.b_bool;
+    p_sys->b_crypt_audio = var_GetBool( p_mux, SOUT_CFG_PREFIX "crypt-audio" );
 
-    var_Get( p_mux, SOUT_CFG_PREFIX "crypt-video", &val );
-    p_sys->b_crypt_video = val.b_bool;
+    p_sys->b_crypt_video = var_GetBool( p_mux, SOUT_CFG_PREFIX "crypt-video" );
 
     return VLC_SUCCESS;
 }
@@ -866,16 +850,13 @@ static void Close( vlc_object_t * p_this )
     sout_mux_sys_t      *p_sys = p_mux->p_sys;
     int i;
 
-    vlc_mutex_lock( &p_sys->csa_lock );
     if( p_sys->csa )
     {
         var_DelCallback( p_mux, SOUT_CFG_PREFIX "csa-ck", ChangeKeyCallback, NULL );
         var_DelCallback( p_mux, SOUT_CFG_PREFIX "csa2-ck", ChangeKeyCallback, NULL );
         var_DelCallback( p_mux, SOUT_CFG_PREFIX "csa-use", ActiveKeyCallback, NULL );
         csa_Delete( p_sys->csa );
-        p_sys->csa = NULL;
     }
-    vlc_mutex_unlock( &p_sys->csa_lock );
 
     for( i = 0; i < MAX_PMT; i++ )
     {
@@ -2030,6 +2011,12 @@ static block_t *TSNew( sout_mux_t *p_mux, ts_stream_t *p_stream,
     }
 
     p_ts = block_New( p_mux, 188 );
+
+    if (b_new_pes && !(p_pes->i_flags & BLOCK_FLAG_NO_KEYFRAME) && p_pes->i_flags & BLOCK_FLAG_TYPE_I)
+    {
+        p_ts->i_flags |= BLOCK_FLAG_TYPE_I;
+    }
+
     p_ts->i_dts = p_pes->i_dts;
 
     p_ts->p_buffer[0] = 0x47;
@@ -2726,7 +2713,6 @@ static void GetPMT( sout_mux_t *p_mux, sout_buffer_chain_t *c )
                                            p_stream->i_decoder_specific_info,
                                            p_stream->p_decoder_specific_info );
             }
-#ifdef _DVBPSI_DR_59_H_
             else
             {
                 /* from the dvbsub transcoder */
@@ -2747,7 +2733,6 @@ static void GetPMT( sout_mux_t *p_mux, sout_buffer_chain_t *c )
                 dvbpsi_PMTESAddDescriptor( p_es, p_descr->i_tag,
                                            p_descr->i_length, p_descr->p_data );
             }
-#endif /* _DVBPSI_DR_59_H_ */
             continue;
         }
 

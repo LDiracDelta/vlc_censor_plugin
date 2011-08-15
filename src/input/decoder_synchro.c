@@ -116,8 +116,8 @@ struct decoder_synchro_t
 
     /* */
     int             i_frame_rate;
-    bool      b_no_skip;
-    bool      b_quiet;
+    bool            b_no_skip;
+    bool            b_quiet;
 
     /* date of the beginning of the decoding of the current picture */
     mtime_t         decoding_start;
@@ -130,7 +130,7 @@ struct decoder_synchro_t
     unsigned int    pi_meaningful[4];            /* number of durations read */
 
     /* render_time filled by SynchroChoose() */
-    int i_render_time;
+    int             i_render_time;
 
     /* stream context */
     int             i_nb_ref;                /* Number of reference pictures */
@@ -166,8 +166,8 @@ decoder_synchro_t * decoder_SynchroInit( decoder_t *p_dec, int i_frame_rate )
         return NULL;
 
     p_synchro->p_dec = p_dec;
-    p_synchro->b_no_skip = !config_GetInt( p_dec, "skip-frames" );
-    p_synchro->b_quiet = config_GetInt( p_dec, "quiet-synchro" );
+    p_synchro->b_no_skip = !var_InheritBool( p_dec, "skip-frames" );
+    p_synchro->b_quiet = var_InheritBool( p_dec, "quiet-synchro" );
 
     /* We use a fake stream pattern, which is often right. */
     p_synchro->i_n_p = p_synchro->i_eta_p = DEFAULT_NB_P;
@@ -215,7 +215,7 @@ bool decoder_SynchroChoose( decoder_synchro_t * p_synchro, int i_coding_type,
                                     + p_synchro->i_render_time)
 #define S (*p_synchro)
     mtime_t         now, period;
-    mtime_t         pts = 0;
+    mtime_t         pts;
     bool      b_decode = 0;
     int       i_current_rate;
 

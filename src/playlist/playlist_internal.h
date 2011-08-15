@@ -101,14 +101,16 @@ typedef struct playlist_private_t
 
 /* Creation/Deletion */
 playlist_t *playlist_Create( vlc_object_t * );
+void playlist_Destroy( playlist_t * );
 
 /* */
 void playlist_Activate( playlist_t * );
 void playlist_Deactivate( playlist_t * );
+void pl_Deactivate (libvlc_int_t *);
 
 /* */
 playlist_item_t *playlist_ItemNewFromInput( playlist_t *p_playlist,
-                                              input_item_t *p_input );
+                                            input_item_t *p_input );
 
 /* Engine */
 playlist_item_t * get_current_status_item( playlist_t * p_playlist);
@@ -130,6 +132,9 @@ void playlist_SendAddNotify( playlist_t *p_playlist, int i_item_id,
 playlist_item_t * playlist_NodeAddInput( playlist_t *, input_item_t *,
         playlist_item_t *,int , int, bool );
 
+int playlist_InsertInputItemTree ( playlist_t *,
+        playlist_item_t *, input_item_node_t *, int, bool );
+
 /* Tree walking */
 playlist_item_t *playlist_ItemFindFromInputAndRoot( playlist_t *p_playlist,
                                 input_item_t *p_input, playlist_item_t *p_root,
@@ -140,9 +145,8 @@ int playlist_DeleteFromInputInParent( playlist_t *, input_item_t *,
 int playlist_DeleteFromItemId( playlist_t*, int );
 int playlist_ItemRelease( playlist_item_t * );
 
-
-void playlist_NodesPairCreate( playlist_t *, const char *, playlist_item_t **, playlist_item_t **, bool );
 int playlist_NodeEmpty( playlist_t *, playlist_item_t *, bool );
+int playlist_DeleteItem( playlist_t * p_playlist, playlist_item_t *, bool);
 
 
 /**

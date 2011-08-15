@@ -32,7 +32,7 @@
 #include <vlc_common.h>
 #include <vlc_plugin.h>
 #include <vlc_interface.h>
-#include <vlc_playlist.h>
+#include <vlc_fs.h>
 #include <vlc_charset.h>
 
 #include <assert.h>
@@ -94,7 +94,7 @@ struct intf_sys_t
 static int  Open    ( vlc_object_t * );
 static void Close   ( vlc_object_t * );
 
-static void Overflow (msg_cb_data_t *p_sys, msg_item_t *p_item, unsigned overruns);
+static void Overflow (msg_cb_data_t *p_sys, const msg_item_t *p_item);
 static void TextPrint         ( const msg_item_t *, FILE * );
 static void HtmlPrint         ( const msg_item_t *, FILE * );
 #ifdef HAVE_SYSLOG_H
@@ -154,6 +154,10 @@ enum                   { fac_entries = sizeof(fac_name)/sizeof(fac_name[0]) };
 
 #endif
 
+#define LOGVERBOSE_TEXT N_("Verbosity")
+#define LOGVERBOSE_LONGTEXT N_("Select the verbosity to use for log or -1 to " \
+"use the same verbosity given by --verbose.")
+
 vlc_module_begin ()
     set_shortname( N_( "Logging" ) )
     set_description( N_("File logging") )
@@ -161,17 +165,19 @@ vlc_module_begin ()
     set_category( CAT_ADVANCED )
     set_subcategory( SUBCAT_ADVANCED_MISC )
 
-    add_file( "logfile", NULL, NULL,
+    add_savefile( "logfile", NULL,
              N_("Log filename"), N_("Specify the log filename."), false )
-    add_string( "logmode", "text", NULL, LOGMODE_TEXT, LOGMODE_LONGTEXT,
+    add_string( "logmode", "text", LOGMODE_TEXT, LOGMODE_LONGTEXT,
                 false )
         change_string_list( mode_list, mode_list_text, 0 )
 #ifdef HAVE_SYSLOG_H
-    add_string( "syslog-facility", fac_name[0], NULL, SYSLOG_FACILITY_TEXT,
+    add_string( "syslog-facility", fac_name[0], SYSLOG_FACILITY_TEXT,
                 SYSLOG_FACILITY_LONGTEXT, true )
         change_string_list( fac_name, fac_name, 0 )
 #endif
-
+    add_integer( "log-verbose", -1, LOGVERBOSE_TEXT, LOGVERBOSE_LONGTEXT,
+           false )
+    
     add_obsolete_string( "rrd-file" )
 
     set_capability( "interface", 0 )
@@ -197,7 +203,7 @@ static int Open( vlc_object_t *p_this )
 
     p_sys->msg.p_intf = p_intf;
     p_sys->msg.i_mode = MODE_TEXT;
-    psz_mode = var_CreateGetString( p_intf, "logmode" );
+    psz_mode = var_InheritString( p_intf, "logmode" );
     if( psz_mode )
     {
         if( !strcmp( psz_mode, "text" ) )
@@ -226,7 +232,7 @@ static int Open( vlc_object_t *p_this )
 
     if( p_sys->msg.i_mode != MODE_SYSLOG )
     {
-        char *psz_file = config_GetPsz( p_intf, "logfile" );
+        char *psz_file = var_InheritString( p_intf, "logfile" );
         if( !psz_file )
         {
 #ifdef __APPLE__
@@ -255,7 +261,7 @@ static int Open( vlc_object_t *p_this )
 
         /* Open the log file and remove any buffering for the stream */
         msg_Dbg( p_intf, "opening logfile `%s'", psz_file );
-        p_sys->msg.p_file = utf8_fopen( psz_file, "at" );
+        p_sys->msg.p_file = vlc_fopen( psz_file, "at" );
         if( p_sys->msg.p_file == NULL )
         {
             msg_Err( p_intf, "error opening logfile `%s'", psz_file );
@@ -284,7 +290,7 @@ static int Open( vlc_object_t *p_this )
         p_sys->msg.p_file = NULL;
 #ifdef HAVE_SYSLOG_H
         int i_facility;
-        char *psz_facility = var_CreateGetString( p_intf, "syslog-facility" );
+        char *psz_facility = var_InheritString( p_intf, "syslog-facility" );
         if( psz_facility )
         {
             bool b_valid = 0;
@@ -360,19 +366,26 @@ static void Close( vlc_object_t *p_this )
 /**
  * Log a message
  */
-static void Overflow (msg_cb_data_t *p_sys, msg_item_t *p_item, unsigned overruns)
+static void Overflow (msg_cb_data_t *p_sys, const msg_item_t *p_item)
 {
-    VLC_UNUSED(overruns);
-    int verbosity = var_CreateGetInteger( p_sys->p_intf, "verbose" );
-    int priority = 0;
+    int verbosity = var_InheritInteger( p_sys->p_intf, "log-verbose" );
+    if (verbosity == -1)
+        verbosity = var_InheritInteger( p_sys->p_intf, "verbose" );
 
     switch( p_item->i_type )
     {
-        case VLC_MSG_WARN: priority = 1; break;
-        case VLC_MSG_DBG:  priority = 2; break;
+        case VLC_MSG_INFO:
+        case VLC_MSG_ERR:
+            if( verbosity < 0 ) return;
+            break;
+        case VLC_MSG_WARN:
+            if( verbosity < 1 ) return;
+            break;
+        case VLC_MSG_DBG:
+            if( verbosity < 2 ) return;
+            break;
     }
-    if (verbosity < priority)
-        return;
+
 
     int canc = vlc_savecancel();
 
@@ -404,8 +417,8 @@ static const char ppsz_type[4][11] = {
 
 static void TextPrint( const msg_item_t *p_msg, FILE *p_file )
 {
-    fprintf( p_file, "%s%s%s\n", p_msg->psz_module, ppsz_type[p_msg->i_type],
-             p_msg->psz_msg );
+    utf8_fprintf( p_file, "%s%s%s\n", p_msg->psz_module,
+                  ppsz_type[p_msg->i_type], p_msg->psz_msg );
 }
 
 #ifdef HAVE_SYSLOG_H
@@ -415,11 +428,11 @@ static void SyslogPrint( const msg_item_t *p_msg )
     int i_priority = i_prio[p_msg->i_type];
 
     if( p_msg->psz_header )
-        syslog( i_priority, "%s %s%s%s", p_msg->psz_header, p_msg->psz_module,
-                ppsz_type[p_msg->i_type], p_msg->psz_msg );
+        syslog( i_priority, "[%s] %s%s%s", p_msg->psz_header,
+                p_msg->psz_module, ppsz_type[p_msg->i_type], p_msg->psz_msg );
     else
-        syslog( i_priority, "%s%s%s", p_msg->psz_module, 
-                ppsz_type[p_msg->i_type], p_msg->psz_msg );
+        syslog( i_priority, "%s%s%s",
+                p_msg->psz_module, ppsz_type[p_msg->i_type], p_msg->psz_msg );
  
 }
 #endif

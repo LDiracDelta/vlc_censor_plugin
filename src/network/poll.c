@@ -26,11 +26,43 @@
 #endif
 
 #include <vlc_common.h>
-#include <stdlib.h>
-#include <vlc_network.h>
 
+#ifdef HAVE_MAEMO
+# include <vlc_network.h>
+# include <signal.h>
+# include <errno.h>
+# include <poll.h>
 
-#ifdef HAVE_POLL
+int vlc_poll (struct pollfd *fds, unsigned nfds, int timeout)
+{
+    struct timespec tsbuf, *ts;
+    sigset_t set;
+    int canc, ret;
+
+    if (timeout != -1)
+    {
+        div_t d = div (timeout, 1000);
+        tsbuf.tv_sec = d.quot;
+        tsbuf.tv_nsec = d.rem * 1000000;
+        ts = &tsbuf;
+    }
+    else
+        ts = NULL;
+
+    pthread_sigmask (SIG_BLOCK, NULL, &set);
+    sigdelset (&set, SIGRTMIN);
+
+    canc = vlc_savecancel ();
+    ret = ppoll (fds, nfds, ts, &set);
+    vlc_restorecancel (canc);
+
+    vlc_testcancel ();
+    return ret;
+}
+
+#elif defined (HAVE_POLL)
+# include <vlc_network.h>
+
 struct pollfd;
 
 int vlc_poll (struct pollfd *fds, unsigned nfds, int timeout)
@@ -38,23 +70,57 @@ int vlc_poll (struct pollfd *fds, unsigned nfds, int timeout)
     (void)fds; (void)nfds; (void)timeout;
     abort ();
 }
-#else /* !HAVE_POLL */
 
+#elif defined (WIN32) || defined(__OS2__)
+
+#include <stdlib.h>
 #include <string.h>
+#include <errno.h>
+#ifndef __OS2__
+#ifdef FD_SETSIZE
+/* No, it's not as simple as #undef FD_SETSIZE */
+# error Header inclusion order compromised!
+#endif
+#define FD_SETSIZE 0
+#endif
+#include <vlc_network.h>
+
+#ifdef __OS2__
+#include <sys/time.h>
+#include <sys/select.h>
+
+#define SOCKET unsigned
+#endif
 
 int vlc_poll (struct pollfd *fds, unsigned nfds, int timeout)
 {
-    fd_set rdset, wrset, exset;
+    size_t setsize = sizeof (fd_set) + nfds * sizeof (SOCKET);
+    fd_set *rdset = malloc (setsize);
+    fd_set *wrset = malloc (setsize);
+    fd_set *exset = malloc (setsize);
     struct timeval tv = { 0, 0 };
     int val;
+
+    if (unlikely(rdset == NULL || wrset == NULL || exset == NULL))
+    {
+        free (rdset);
+        free (wrset);
+        free (exset);
+        errno = ENOMEM;
+        return -1;
+    }
+
+/* Winsock FD_SET uses FD_SETSIZE in its expansion */
+#undef FD_SETSIZE
+#define FD_SETSIZE (nfds)
 
 resume:
     val = -1;
     vlc_testcancel ();
 
-    FD_ZERO (&rdset);
-    FD_ZERO (&wrset);
-    FD_ZERO (&exset);
+    FD_ZERO (rdset);
+    FD_ZERO (wrset);
+    FD_ZERO (exset);
     for (unsigned i = 0; i < nfds; i++)
     {
         int fd = fds[i].fd;
@@ -62,31 +128,28 @@ resume:
             val = fd;
 
         /* With POSIX, FD_SET & FD_ISSET are not defined if fd is negative or
-	 * bigger or equal than FD_SETSIZE. That is one of the reasons why VLC
-	 * uses poll() rather than select(). Most POSIX systems implement
-	 * fd_set has a bit field with no sanity checks. This is especially bad
-	 * on systems (such as BSD) that have no process open files limit by
-	 * default, such that it is quite feasible to get fd >= FD_SETSIZE.
-	 * The next instructions will result in a buffer overflow if run on
-	 * a POSIX system, and the later FD_ISSET will do undefined memory
-	 * access.
-	 *
-	 * With Winsock, fd_set is a table of integers. This is awfully slow.
-	 * However, FD_SET and FD_ISSET silently and safely discard
-	 * overflows. If it happens we will loose socket events. Note that
-	 * most (if not all) Winsock SOCKET handles are actually bigger than
-	 * FD_SETSIZE in terms of absolute value - they are not POSIX file
-	 * descriptors. From Vista, there is a much nicer WSAPoll(), but Mingw
-	 * is yet to support it.
-	 *
-	 * With BeOS, the situation is unknown (FIXME: document).
-	 */
+         * bigger or equal than FD_SETSIZE. That is one of the reasons why VLC
+         * uses poll() rather than select(). Most POSIX systems implement
+         * fd_set has a bit field with no sanity checks. This is especially bad
+         * on systems (such as BSD) that have no process open files limit by
+         * default, such that it is quite feasible to get fd >= FD_SETSIZE.
+         * The next instructions will result in a buffer overflow if run on
+         * a POSIX system, and the later FD_ISSET would perform an undefined
+         * memory read.
+         *
+         * With Winsock, fd_set is a table of integers. This is awfully slow.
+         * However, FD_SET and FD_ISSET silently and safely discard excess
+         * entries. Here, overflow cannot happen anyway: fd_set of adequate
+         * size are allocated.
+         * Note that Vista has a much nicer WSAPoll(), but Mingw does not
+         * support it yet.
+         */
         if (fds[i].events & POLLIN)
-            FD_SET (fd, &rdset);
+            FD_SET ((SOCKET)fd, rdset);
         if (fds[i].events & POLLOUT)
-            FD_SET (fd, &wrset);
+            FD_SET ((SOCKET)fd, wrset);
         if (fds[i].events & POLLPRI)
-            FD_SET (fd, &exset);
+            FD_SET ((SOCKET)fd, exset);
     }
 
 #ifndef HAVE_ALERTABLE_SELECT
@@ -105,7 +168,7 @@ resume:
         tv.tv_usec = d.rem * 1000;
     }
 
-    val = select (val + 1, &rdset, &wrset, &exset,
+    val = select (val + 1, rdset, wrset, exset,
                   /*(timeout >= 0) ?*/ &tv /*: NULL*/);
 
 #ifndef HAVE_ALERTABLE_SELECT
@@ -124,10 +187,16 @@ resume:
     for (unsigned i = 0; i < nfds; i++)
     {
         int fd = fds[i].fd;
-        fds[i].revents = (FD_ISSET (fd, &rdset) ? POLLIN : 0)
-                       | (FD_ISSET (fd, &wrset) ? POLLOUT : 0)
-                       | (FD_ISSET (fd, &exset) ? POLLPRI : 0);
+        fds[i].revents = (FD_ISSET (fd, rdset) ? POLLIN : 0)
+                       | (FD_ISSET (fd, wrset) ? POLLOUT : 0)
+                       | (FD_ISSET (fd, exset) ? POLLPRI : 0);
     }
+    free (exset);
+    free (wrset);
+    free (rdset);
     return val;
 }
-#endif /* !HAVE_POLL */
+
+#else
+# error poll() not implemented!
+#endif

@@ -35,7 +35,6 @@
 #include <vlc_block.h>
 #include <assert.h>
 
-#include <vlc_codecs.h>
 #include "pes.h"
 #include "bits.h"
 
@@ -342,13 +341,42 @@ int  EStoPES ( sout_instance_t *p_sout, block_t **pp_pes, block_t *p_es,
         i_max_pes_size = PES_PAYLOAD_SIZE_MAX;
     }
 
-    if( p_fmt->i_codec == VLC_CODEC_MP4V &&
+    if( ( p_fmt->i_codec == VLC_CODEC_MP4V ||
+          p_fmt->i_codec == VLC_CODEC_H264 ) &&
         p_es->i_flags & BLOCK_FLAG_TYPE_I )
     {
-        /* For MPEG4 video, add VOL before I-frames */
+        /* For MPEG4 video, add VOL before I-frames,
+           for H264 add SPS/PPS before keyframes*/
         p_es = block_Realloc( p_es, p_fmt->i_extra, p_es->i_buffer );
 
         memcpy( p_es->p_buffer, p_fmt->p_extra, p_fmt->i_extra );
+    }
+
+    if( p_fmt->i_codec == VLC_CODEC_H264 )
+    {
+        unsigned offset=2;
+        while(offset < p_es->i_buffer )
+        {
+            if( p_es->p_buffer[offset-2] == 0 &&
+                p_es->p_buffer[offset-1] == 0 &&
+                p_es->p_buffer[offset] == 1 )
+                break;
+            offset++;
+        }
+        offset++;
+        if( offset <= p_es->i_buffer-4 &&
+            ((p_es->p_buffer[offset] & 0x1f) != 9) ) /* Not AUD */
+        {
+            /* Make similar AUD as libavformat does */
+            p_es = block_Realloc( p_es, 6, p_es->i_buffer );
+            p_es->p_buffer[0] = 0x00;
+            p_es->p_buffer[1] = 0x00;
+            p_es->p_buffer[2] = 0x00;
+            p_es->p_buffer[3] = 0x01;
+            p_es->p_buffer[4] = 0x09;
+            p_es->p_buffer[5] = 0xe0;
+        }
+
     }
 
     i_pts = p_es->i_pts <= 0 ? 0 : p_es->i_pts * 9 / 100; // 90000 units clock

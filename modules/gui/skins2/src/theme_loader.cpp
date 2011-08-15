@@ -30,8 +30,6 @@
 #include "../src/vlcproc.hpp"
 #include "../src/window_manager.hpp"
 
-#include <cctype>
-
 #ifdef HAVE_FCNTL_H
 #   include <fcntl.h>
 #endif
@@ -43,11 +41,6 @@
 #elif defined( WIN32 ) && !defined( UNDER_CE )
 #   include <direct.h>
 #endif
-
-#ifdef HAVE_DIRENT_H
-#   include <dirent.h>
-#endif
-
 
 #if defined( HAVE_ZLIB_H )
 #   include <zlib.h>
@@ -79,7 +72,7 @@ bool ThemeLoader::load( const string &fileName )
 
     //Before all, let's see if the file is present
     struct stat p_stat;
-    if( utf8_stat( path.c_str(), &p_stat ) )
+    if( vlc_stat( fileName.c_str(), &p_stat ) )
         return false;
 
     // First, we try to un-targz the file, and if it fails we hope it's a XML
@@ -95,26 +88,13 @@ bool ThemeLoader::load( const string &fileName )
 
     Theme *pNewTheme = getIntf()->p_sys->p_theme;
     if( !pNewTheme )
-    {
         return false;
-    }
 
-    // Check if the skin to load is in the config file, to load its config
-    char *skin_last = config_GetPsz( getIntf(), "skins2-last" );
-    if( skin_last != NULL && fileName == (string)skin_last )
-    {
-        // Restore the theme configuration
-        getIntf()->p_sys->p_theme->loadConfig();
-        // Used to anchor the windows at the beginning
-        pNewTheme->getWindowManager().stopMove();
-    }
-    else
-    {
-        config_PutPsz( getIntf(), "skins2-last", fileName.c_str() );
-        // Show the windows
-        pNewTheme->getWindowManager().showAll( true );
-    }
-    free( skin_last );
+    // Restore the theme configuration
+    getIntf()->p_sys->p_theme->loadConfig();
+
+    // Retain new loaded skins in config
+    config_PutPsz( getIntf(), "skins2-last", fileName.c_str() );
 
     return true;
 }
@@ -156,6 +136,8 @@ bool ThemeLoader::extractTarGz( const string &tarFile, const string &rootDir )
 
 bool ThemeLoader::extractZip( const string &zipFile, const string &rootDir )
 {
+    bool b_isWsz = strstr( zipFile.c_str(), ".wsz" );
+
     // Try to open the ZIP file
     unzFile file = unzOpen( zipFile.c_str() );
     unz_global_info info;
@@ -167,7 +149,7 @@ bool ThemeLoader::extractZip( const string &zipFile, const string &rootDir )
     // Extract all the files in the archive
     for( unsigned long i = 0; i < info.number_entry; i++ )
     {
-        if( !extractFileInZip( file, rootDir ) )
+        if( !extractFileInZip( file, rootDir, b_isWsz ) )
         {
             msg_Warn( getIntf(), "error while unzipping %s",
                       zipFile.c_str() );
@@ -192,7 +174,8 @@ bool ThemeLoader::extractZip( const string &zipFile, const string &rootDir )
 }
 
 
-bool ThemeLoader::extractFileInZip( unzFile file, const string &rootDir )
+bool ThemeLoader::extractFileInZip( unzFile file, const string &rootDir,
+                                    bool isWsz )
 {
     // Read info for the current file
     char filenameInZip[256];
@@ -204,16 +187,11 @@ bool ThemeLoader::extractFileInZip( unzFile file, const string &rootDir )
         return false;
     }
 
-#ifdef WIN32
-
     // Convert the file name to lower case, because some winamp skins
     // use the wrong case...
-    for( size_t i=0; i< strlen( filenameInZip ); i++)
-    {
-        filenameInZip[i] = tolower( filenameInZip[i] );
-    }
-
-#endif
+    if( isWsz )
+        for( size_t i = 0; i < strlen( filenameInZip ); i++ )
+            filenameInZip[i] = tolower( filenameInZip[i] );
 
     // Allocate the buffer
     void *pBuffer = malloc( ZIP_BUFFER_SIZE );
@@ -316,7 +294,7 @@ bool ThemeLoader::extract( const string &fileName )
             // Look for winamp2.xml in the resource path
             list<string> resPath = pOsFactory->getResourcePath();
             list<string>::const_iterator it;
-            for( it = resPath.begin(); it != resPath.end(); it++ )
+            for( it = resPath.begin(); it != resPath.end(); ++it )
             {
                 if( findFile( *it, WINAMP2_XML_FILE, xmlFile ) )
                     break;
@@ -417,7 +395,7 @@ bool ThemeLoader::findFile( const string &rootDir, const string &rFileName,
     char *pszDirContent;
 
     // Open the dir
-    pCurrDir = utf8_opendir( rootDir.c_str() );
+    pCurrDir = vlc_opendir( rootDir.c_str() );
 
     if( pCurrDir == NULL )
     {
@@ -427,7 +405,7 @@ bool ThemeLoader::findFile( const string &rootDir, const string &rFileName,
     }
 
     // While we still have entries in the directory
-    while( ( pszDirContent = utf8_readdir( pCurrDir ) ) != NULL )
+    while( ( pszDirContent = vlc_readdir( pCurrDir ) ) != NULL )
     {
         string newURI = rootDir + sep + pszDirContent;
 
@@ -438,7 +416,7 @@ bool ThemeLoader::findFile( const string &rootDir, const string &rFileName,
 #if defined( S_ISDIR )
             struct stat stat_data;
 
-            if( ( utf8_stat( newURI.c_str(), &stat_data ) == 0 )
+            if( ( vlc_stat( newURI.c_str(), &stat_data ) == 0 )
              && S_ISDIR(stat_data.st_mode) )
 #elif defined( DT_DIR )
             if( pDirContent->d_type & DT_DIR )
@@ -515,6 +493,8 @@ union tar_buffer {
 
 int tar_open( TAR **t, char *pathname, int oflags )
 {
+    (void)oflags;
+
     gzFile f = gzopen( pathname, "rb" );
     if( f == NULL )
     {
@@ -579,34 +559,33 @@ int tar_extract_all( TAR *t, char *prefix )
 
             switch( buffer.header.typeflag )
             {
-                case DIRTYPE:
-                    makedir( fname );
-                    break;
-                case REGTYPE:
-                case AREGTYPE:
-                    remaining = getoct( buffer.header.size, 12 );
-                    if( remaining )
+            case DIRTYPE:
+                makedir( fname );
+                break;
+            case REGTYPE:
+            case AREGTYPE:
+                remaining = getoct( buffer.header.size, 12 );
+                if( !remaining ) outfile = NULL; else
+                {
+                    outfile = fopen( fname, "wb" );
+                    if( outfile == NULL )
                     {
-                        outfile = fopen( fname, "wb" );
-                        if( outfile == NULL )
+                        /* try creating directory */
+                        char *p = strrchr( fname, '/' );
+                        if( p != NULL )
                         {
-                            /* try creating directory */
-                            char *p = strrchr( fname, '/' );
-                            if( p != NULL )
+                            *p = '\0';
+                            makedir( fname );
+                            *p = '/';
+                            outfile = fopen( fname, "wb" );
+                            if( !outfile )
                             {
-                                *p = '\0';
-                                makedir( fname );
-                                *p = '/';
-                                outfile = fopen( fname, "wb" );
-                                if( !outfile )
-                                {
-                                    fprintf( stderr, "tar couldn't create %s\n",
-                                             fname );
-                                }
+                                fprintf( stderr, "tar couldn't create %s\n",
+                                         fname );
                             }
                         }
                     }
-                    else outfile = NULL;
+                }
 
                 /*
                  * could have no contents
@@ -736,21 +715,23 @@ static void * currentGzVp = NULL;
 
 int gzopen_frontend( const char *pathname, int oflags, int mode )
 {
+    (void)mode;
+
     const char *gzflags;
     gzFile gzf;
 
     switch( oflags )
     {
-        case O_WRONLY:
-            gzflags = "wb";
-            break;
-        case O_RDONLY:
-            gzflags = "rb";
-            break;
-        case O_RDWR:
-        default:
-            errno = EINVAL;
-            return -1;
+    case O_WRONLY:
+        gzflags = "wb";
+        break;
+    case O_RDONLY:
+        gzflags = "rb";
+        break;
+    case O_RDWR:
+    default:
+        errno = EINVAL;
+        return -1;
     }
 
     gzf = gzopen( pathname, gzflags );

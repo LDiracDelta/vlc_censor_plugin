@@ -1,12 +1,14 @@
 /*****************************************************************************
  * VLCMediaPlayer.m: VLCKit.framework VLCMediaPlayer implementation
  *****************************************************************************
- * Copyright (C) 2007 Pierre d'Herbemont
- * Copyright (C) 2007 the VideoLAN team
+ * Copyright (C) 2007-2009 Pierre d'Herbemont
+ * Copyright (C) 2007-2009 the VideoLAN team
+ * Partial Copyright (C) 2009 Felix Paul Kühne
  * $Id$
  *
  * Authors: Pierre d'Herbemont <pdherbemont # videolan.org>
  *          Faustion Osuna <enrique.osuna # gmail.com>
+ *          Felix Paul Kühne <fkuehne # videolan.org>
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -27,16 +29,20 @@
 #import "VLCMediaPlayer.h"
 #import "VLCEventManager.h"
 #import "VLCLibVLCBridging.h"
-#import "VLCVideoView.h"
+#if !TARGET_OS_IPHONE
+# import "VLCVideoView.h"
+#endif
 #ifdef HAVE_CONFIG_H
 # include "config.h"
 #endif
 
+#if !TARGET_OS_IPHONE
 /* prevent system sleep */
-#import <CoreServices/CoreServices.h>
+# import <CoreServices/CoreServices.h>
 /* FIXME: Ugly hack! */
-#ifdef __x86_64__
-#import <CoreServices/../Frameworks/OSServices.framework/Headers/Power.h>
+# ifdef __x86_64__
+#  import <CoreServices/../Frameworks/OSServices.framework/Headers/Power.h>
+# endif
 #endif
 
 #include <vlc/vlc.h>
@@ -70,24 +76,24 @@ static void HandleMediaInstanceVolumeChanged(const libvlc_event_t * event, void 
 static void HandleMediaTimeChanged(const libvlc_event_t * event, void * self)
 {
     NSAutoreleasePool * pool = [[NSAutoreleasePool alloc] init];
-    [[VLCEventManager sharedManager] callOnMainThreadObject:self 
-                                                 withMethod:@selector(mediaPlayerTimeChanged:) 
+    [[VLCEventManager sharedManager] callOnMainThreadObject:self
+                                                 withMethod:@selector(mediaPlayerTimeChanged:)
                                        withArgumentAsObject:[NSNumber numberWithLongLong:event->u.media_player_time_changed.new_time]];
 
     [[VLCEventManager sharedManager] callOnMainThreadDelegateOfObject:self
                                                    withDelegateMethod:@selector(mediaPlayerTimeChanged:)
                                                  withNotificationName:VLCMediaPlayerTimeChanged];
-    [pool release];
+    [pool drain];
 }
 
 static void HandleMediaPositionChanged(const libvlc_event_t * event, void * self)
 {
     NSAutoreleasePool * pool = [[NSAutoreleasePool alloc] init];
 
-    [[VLCEventManager sharedManager] callOnMainThreadObject:self 
-                                                 withMethod:@selector(mediaPlayerPositionChanged:) 
+    [[VLCEventManager sharedManager] callOnMainThreadObject:self
+                                                 withMethod:@selector(mediaPlayerPositionChanged:)
                                        withArgumentAsObject:[NSNumber numberWithFloat:event->u.media_player_position_changed.new_position]];
-    [pool release];
+    [pool drain];
 }
 
 static void HandleMediaInstanceStateChanged(const libvlc_event_t * event, void * self)
@@ -102,6 +108,10 @@ static void HandleMediaInstanceStateChanged(const libvlc_event_t * event, void *
         newState = VLCMediaPlayerStateStopped;
     else if( event->type == libvlc_MediaPlayerEncounteredError )
         newState = VLCMediaPlayerStateError;
+    else if( event->type == libvlc_MediaPlayerBuffering )
+        newState = VLCMediaPlayerStateBuffering;
+    else if( event->type == libvlc_MediaPlayerOpening )
+        newState = VLCMediaPlayerStateOpening;
     else
     {
         NSLog(@"%s: Unknown event", __FUNCTION__);
@@ -110,15 +120,27 @@ static void HandleMediaInstanceStateChanged(const libvlc_event_t * event, void *
 
     NSAutoreleasePool * pool = [[NSAutoreleasePool alloc] init];
 
-    [[VLCEventManager sharedManager] callOnMainThreadObject:self 
-                                                 withMethod:@selector(mediaPlayerStateChanged:) 
+    [[VLCEventManager sharedManager] callOnMainThreadObject:self
+                                                 withMethod:@selector(mediaPlayerStateChanged:)
                                        withArgumentAsObject:[NSNumber numberWithInt:newState]];
 
     [[VLCEventManager sharedManager] callOnMainThreadDelegateOfObject:self
                                                    withDelegateMethod:@selector(mediaPlayerStateChanged:)
                                                  withNotificationName:VLCMediaPlayerStateChanged];
 
-    [pool release];
+    [pool drain];
+
+}
+
+static void HandleMediaPlayerMediaChanged(const libvlc_event_t * event, void * self)
+{
+    NSAutoreleasePool * pool = [[NSAutoreleasePool alloc] init];
+
+    [[VLCEventManager sharedManager] callOnMainThreadObject:self
+                                                 withMethod:@selector(mediaPlayerMediaChanged:)
+                                       withArgumentAsObject:[VLCMedia mediaWithLibVLCMediaDescriptor:event->u.media_player_media_changed.new_media]];
+
+    [pool drain];
 
 }
 
@@ -132,6 +154,7 @@ static void HandleMediaInstanceStateChanged(const libvlc_event_t * event, void *
 - (void)mediaPlayerTimeChanged:(NSNumber *)newTime;
 - (void)mediaPlayerPositionChanged:(NSNumber *)newTime;
 - (void)mediaPlayerStateChanged:(NSNumber *)newState;
+- (void)mediaPlayerMediaChanged:(VLCMedia *)media;
 @end
 
 @implementation VLCMediaPlayer
@@ -165,6 +188,7 @@ static void HandleMediaInstanceStateChanged(const libvlc_event_t * event, void *
     return [self initWithDrawable:nil];
 }
 
+#if !TARGET_OS_IPHONE
 - (id)initWithVideoView:(VLCVideoView *)aVideoView
 {
     return [self initWithDrawable: aVideoView];
@@ -174,33 +198,32 @@ static void HandleMediaInstanceStateChanged(const libvlc_event_t * event, void *
 {
     return [self initWithDrawable: aVideoLayer];
 }
-
-- (void)release
-{
-    @synchronized(self)
-    {
-        if([self retainCount] <= 1)
-        {
-            /* We must make sure we won't receive new event after an upcoming dealloc
-             * We also may receive a -retain in some event callback that may occcur
-             * Before libvlc_event_detach. So this can't happen in dealloc */
-            [self unregisterObservers];
-        }
-        [super release];
-    }
-}
+#endif
 
 - (void)dealloc
 {
+    NSAssert(libvlc_media_player_get_state(instance) == libvlc_Stopped, @"You released the media player before ensuring that it is stopped");
+
+    [self unregisterObservers];
+    [[VLCEventManager sharedManager] cancelCallToObject:self];
+
     // Always get rid of the delegate first so we can stop sending messages to it
     // TODO: Should we tell the delegate that we're shutting down?
     delegate = nil;
 
-    libvlc_media_player_release((libvlc_media_player_t *)instance);
-    
+    // Clear our drawable as we are going to release it, we don't
+    // want the core to use it from this point. This won't happen as
+    // the media player must be stopped.
+    libvlc_media_player_set_nsobject(instance, nil);
+
+    libvlc_media_player_release(instance);
+
     // Get rid of everything else
     [media release];
     [cachedTime release];
+    [cachedRemainingTime release];
+    [drawable release];
+    [audio release];
 
     [super dealloc];
 }
@@ -215,8 +238,9 @@ static void HandleMediaInstanceStateChanged(const libvlc_event_t * event, void *
     return delegate;
 }
 
+#if !TARGET_OS_IPHONE
 - (void)setVideoView:(VLCVideoView *)aVideoView
-{    
+{
     [self setDrawable: aVideoView];
 }
 
@@ -224,159 +248,134 @@ static void HandleMediaInstanceStateChanged(const libvlc_event_t * event, void *
 {
     [self setDrawable: aVideoLayer];
 }
+#endif
 
 - (void)setDrawable:(id)aDrawable
 {
     // Make sure that this instance has been associated with the drawing canvas.
-    libvlc_exception_t ex;
-    libvlc_exception_init( &ex );
-    libvlc_media_player_set_nsobject(instance, aDrawable, &ex);
-    catch_exception( &ex );
+    libvlc_media_player_set_nsobject(instance, aDrawable);
 }
 
 - (id)drawable
 {
-    libvlc_exception_t ex;
-    libvlc_exception_init( &ex );
-    id ret = libvlc_media_player_get_nsobject(instance);
-    catch_exception( &ex );
-    return ret;
+    return libvlc_media_player_get_nsobject(instance);
 }
 
 - (VLCAudio *)audio
 {
-    return [[VLCLibrary sharedLibrary] audio];
+    if (!audio)
+        audio = [[VLCAudio alloc] initWithMediaPlayer:self];
+    return audio;
 }
 
-- (void)setVideoAspectRatio:(char *)value
+#pragma mark -
+#pragma mark Subtitles
+
+- (void)setCurrentVideoSubTitleIndex:(NSUInteger)index
 {
-    libvlc_video_set_aspect_ratio( instance, value, NULL );
+    libvlc_video_set_spu(instance, (int)index);
 }
 
-- (char *)videoAspectRatio
+- (NSUInteger)currentVideoSubTitleIndex
 {
-    libvlc_exception_t ex;
-    libvlc_exception_init( &ex );
-    char * result = libvlc_video_get_aspect_ratio( instance, &ex );
-    catch_exception( &ex );
-    return result;
+    NSInteger count = libvlc_video_get_spu_count(instance);
+
+    if (count <= 0)
+        return NSNotFound;
+
+    return libvlc_video_get_spu(instance);
 }
 
-- (void)setVideoSubTitles:(int)value
+- (BOOL)openVideoSubTitlesFromFile:(NSString *)path
 {
-    libvlc_video_set_spu( instance, value, NULL );
+    return libvlc_video_set_subtitle_file(instance, [path UTF8String]);
 }
 
-- (int)videoSubTitles
+- (NSArray *)videoSubTitles
 {
-    libvlc_exception_t ex;
-    libvlc_exception_init( &ex );
-    int result = libvlc_video_get_spu( instance, &ex );
-    catch_exception( &ex );
-    return result;
+    libvlc_track_description_t *currentTrack = libvlc_video_get_spu_description(instance);
+
+    NSMutableArray *tempArray = [NSMutableArray array];
+    while (currentTrack) {
+        [tempArray addObject:[NSString stringWithUTF8String:currentTrack->psz_name]];
+        currentTrack = currentTrack->p_next;
+    }
+    libvlc_track_description_release(currentTrack);
+    return [NSArray arrayWithArray: tempArray];
 }
+
+
+#pragma mark -
+#pragma mark Video Crop geometry
 
 - (void)setVideoCropGeometry:(char *)value
 {
-    libvlc_video_set_crop_geometry( instance, value, NULL );
+    libvlc_video_set_crop_geometry(instance, value);
 }
 
 - (char *)videoCropGeometry
 {
-    libvlc_exception_t ex;
-    libvlc_exception_init( &ex );
-    char * result = libvlc_video_get_crop_geometry( instance, &ex );
-    catch_exception( &ex );
+    char * result = libvlc_video_get_crop_geometry(instance);
     return result;
 }
 
-- (void)setVideoTeleText:(int)value
+- (void)setVideoAspectRatio:(char *)value
 {
-    libvlc_video_set_teletext( instance, value, NULL );
+    libvlc_video_set_aspect_ratio( instance, value );
 }
 
-- (int)videoTeleText
+- (char *)videoAspectRatio
 {
-    libvlc_exception_t ex;
-    libvlc_exception_init( &ex );
-    int result = libvlc_video_get_teletext( instance, &ex );
-    catch_exception( &ex );
+    char * result = libvlc_video_get_aspect_ratio( instance );
     return result;
 }
 
-- (void)saveVideoSnapshotAt: (NSString *)path withWidth:(NSUInteger)width andHeight:(NSUInteger)height
+- (void)saveVideoSnapshotAt:(NSString *)path withWidth:(NSUInteger)width andHeight:(NSUInteger)height
 {
-    libvlc_exception_t ex;
-    libvlc_exception_init( &ex );
-    libvlc_video_take_snapshot( instance, [path UTF8String], width, height, &ex );
-    catch_exception( &ex );
+    int failure = libvlc_video_take_snapshot(instance, 0, [path UTF8String], width, height);
+    if (failure)
+        [[NSException exceptionWithName:@"Can't take a video snapshot" reason:@"No video output" userInfo:nil] raise];
 }
 
-- (void)setDeinterlaceFilter: (NSString *)name enabled: (BOOL)enabled
+- (void)setDeinterlaceFilter:(NSString *)name
 {
-    libvlc_exception_t ex;
-    libvlc_exception_init( &ex );
-    libvlc_video_set_deinterlace( instance, (int)enabled , [name UTF8String], &ex );
-    catch_exception( &ex );
+    libvlc_video_set_deinterlace(instance, [name UTF8String]);
 }
 
 - (void)setRate:(float)value
 {
-    libvlc_media_player_set_rate( instance, value, NULL );
+    libvlc_media_player_set_rate(instance, value);
 }
 
 - (float)rate
 {
-    libvlc_exception_t ex;
-    libvlc_exception_init( &ex );
-    float result = libvlc_media_player_get_rate( instance, &ex );
-    catch_exception( &ex );
-    return result;
+    return libvlc_media_player_get_rate(instance);
 }
 
-- (NSSize)videoSize
+- (CGSize)videoSize
 {
-    libvlc_exception_t ex;
-    libvlc_exception_init( &ex );
-    NSSize result = NSMakeSize(libvlc_video_get_height((libvlc_media_player_t *)instance, &ex),
-                               libvlc_video_get_width((libvlc_media_player_t *)instance, &ex));
-    catch_exception( &ex );
-    return result;
+    unsigned height = 0, width = 0;
+    int failure = libvlc_video_get_size(instance, 0, &width, &height);
+    if (failure)
+        [[NSException exceptionWithName:@"Can't get video size" reason:@"No video output" userInfo:nil] raise];
+    return CGSizeMake(width, height);
 }
 
 - (BOOL)hasVideoOut
 {
-    libvlc_exception_t ex;
-    libvlc_exception_init( &ex );
-    BOOL result = libvlc_media_player_has_vout((libvlc_media_player_t *)instance, &ex);
-    if (libvlc_exception_raised( &ex ))
-    {
-        libvlc_exception_clear( &ex );
-        return NO;
-    }
-    else
-        return result;
+    return libvlc_media_player_has_vout(instance);
 }
 
 - (float)framesPerSecond
 {
-    libvlc_exception_t ex;
-    libvlc_exception_init( &ex );
-    float result = libvlc_media_player_get_fps( (libvlc_media_player_t *)instance, &ex );
-    catch_exception( &ex );
-    return result;
+    return libvlc_media_player_get_fps(instance);
 }
 
 - (void)setTime:(VLCTime *)value
 {
-    libvlc_exception_t ex;
-    libvlc_exception_init( &ex );
     // Time is managed in seconds, while duration is managed in microseconds
     // TODO: Redo VLCTime to provide value numberAsMilliseconds, numberAsMicroseconds, numberAsSeconds, numberAsMinutes, numberAsHours
-    libvlc_media_player_set_time( (libvlc_media_player_t *)instance, 
-                                    (value ? [[value numberValue] longLongValue] / 1000 : 0),
-                                    &ex );
-    catch_exception( &ex );
+    libvlc_media_player_set_time(instance, value ? [[value numberValue] longLongValue] : 0);
 }
 
 - (VLCTime *)time
@@ -384,64 +383,141 @@ static void HandleMediaInstanceStateChanged(const libvlc_event_t * event, void *
     return cachedTime;
 }
 
-- (void)setChapter:(int)value;
+- (VLCTime *)remainingTime
 {
-    libvlc_media_player_set_chapter( instance, value, NULL );
+    return cachedRemainingTime;
 }
 
-- (int)chapter
+- (NSUInteger)fps
 {
-    libvlc_exception_t ex;
-    libvlc_exception_init( &ex );
-    int result = libvlc_media_player_get_chapter( instance, &ex );
-    catch_exception( &ex );
+    return libvlc_media_player_get_fps(instance);
+}
+
+#pragma mark -
+#pragma mark Chapters
+- (void)setCurrentChapterIndex:(NSUInteger)value;
+{
+    libvlc_media_player_set_chapter(instance, value);
+}
+
+- (NSUInteger)currentChapterIndex
+{
+    NSInteger count = libvlc_media_player_get_chapter_count(instance);
+    if (count <= 0)
+        return NSNotFound;
+    NSUInteger result = libvlc_media_player_get_chapter(instance);
     return result;
 }
 
-- (int)countOfChapters
+- (void)nextChapter
 {
-    libvlc_exception_t ex;
-    libvlc_exception_init( &ex );
-    int result = libvlc_media_player_get_chapter_count( instance, &ex );
-    catch_exception( &ex );
+    libvlc_media_player_next_chapter(instance);
+}
+
+- (void)previousChapter
+{
+    libvlc_media_player_previous_chapter(instance);
+}
+
+- (NSArray *)chaptersForTitleIndex:(NSUInteger)title
+{
+    NSInteger count = libvlc_media_player_get_chapter_count(instance);
+    if (count <= 0)
+        return [NSArray array];
+
+    libvlc_track_description_t *tracks = libvlc_video_get_chapter_description(instance, title);
+    NSMutableArray *tempArray = [NSMutableArray array];
+    NSInteger i;
+    for (i = 0; i < count ; i++)
+    {
+        [tempArray addObject:[NSString stringWithUTF8String:tracks->psz_name]];
+        tracks = tracks->p_next;
+    }
+    libvlc_track_description_release(tracks);
+    return [NSArray arrayWithArray:tempArray];
+}
+
+#pragma mark -
+#pragma mark Titles
+
+- (void)setCurrentTitleIndex:(NSUInteger)value
+{
+    libvlc_media_player_set_title(instance, value);
+}
+
+- (NSUInteger)currentTitleIndex
+{
+    NSInteger count = libvlc_media_player_get_title_count(instance);
+    if (count <= 0)
+        return NSNotFound;
+
+    return libvlc_media_player_get_title(instance);
+}
+
+- (NSUInteger)countOfTitles
+{
+    NSUInteger result = libvlc_media_player_get_title_count(instance);
     return result;
 }
 
-- (void)setAudioTrack:(int)value
+- (NSArray *)titles
 {
-    libvlc_audio_set_track( instance, value, NULL );
+    libvlc_track_description_t *tracks = libvlc_video_get_title_description(instance);
+    NSMutableArray *tempArray = [NSMutableArray array];
+    NSInteger i;
+    for (i = 0; i < [self countOfTitles] ; i++)
+    {
+        [tempArray addObject:[NSString stringWithUTF8String: tracks->psz_name]];
+        tracks = tracks->p_next;
+    }
+    libvlc_track_description_release(tracks);
+    return [NSArray arrayWithArray: tempArray];
 }
 
-- (int)audioTrack
+#pragma mark -
+#pragma mark Audio tracks
+- (void)setCurrentAudioTrackIndex:(NSUInteger)value
 {
-    libvlc_exception_t ex;
-    libvlc_exception_init( &ex );
-    int result = libvlc_audio_get_track( instance, &ex );
-    catch_exception( &ex );
+    libvlc_audio_set_track( instance, (int)value);
+}
+
+- (NSUInteger)currentAudioTrackIndex
+{
+    NSInteger count = libvlc_audio_get_track_count(instance);
+    if (count <= 0)
+        return NSNotFound;
+
+    NSUInteger result = libvlc_audio_get_track(instance);
     return result;
 }
 
-- (int)countOfAudioTracks
+- (NSArray *)audioTracks
 {
-    libvlc_exception_t ex;
-    libvlc_exception_init( &ex );
-    int result = libvlc_audio_get_track_count( instance, &ex );
-    catch_exception( &ex );
-    return result;
+    NSInteger count = libvlc_audio_get_track_count(instance);
+    if (count <= 0)
+        return [NSArray array];
+
+    libvlc_track_description_t *tracks = libvlc_audio_get_track_description(instance);
+    NSMutableArray *tempArray = [NSMutableArray array];
+    NSUInteger i;
+    for (i = 0; i < count ; i++)
+    {
+        [tempArray addObject:[NSString stringWithUTF8String: tracks->psz_name]];
+        tracks = tracks->p_next;
+    }
+    libvlc_track_description_release(tracks);
+
+    return [NSArray arrayWithArray: tempArray];
 }
 
-- (void)setAudioChannel:(int)value
+- (void)setAudioChannel:(NSInteger)value
 {
-    libvlc_audio_set_channel( instance, value, NULL );
+    libvlc_audio_set_channel(instance, value);
 }
 
-- (int)audioChannel
+- (NSInteger)audioChannel
 {
-    libvlc_exception_t ex;
-    libvlc_exception_init( &ex );
-    int result = libvlc_audio_get_channel( instance, &ex );
-    catch_exception( &ex );
-    return result;
+    return libvlc_audio_get_channel(instance);
 }
 
 - (void)setMedia:(VLCMedia *)value
@@ -450,14 +526,11 @@ static void HandleMediaInstanceStateChanged(const libvlc_event_t * event, void *
     {
         if (media && [media compare:value] == NSOrderedSame)
             return;
-        
+
         [media release];
         media = [value retain];
 
-        libvlc_exception_t ex;
-        libvlc_exception_init( &ex );
-        libvlc_media_player_set_media( instance, [media libVLCMediaDescriptor], &ex );
-        catch_exception( &ex );
+        libvlc_media_player_set_media(instance, [media libVLCMediaDescriptor]);
     }
 }
 
@@ -467,11 +540,8 @@ static void HandleMediaInstanceStateChanged(const libvlc_event_t * event, void *
 }
 
 - (BOOL)play
-{    
-    libvlc_exception_t ex;
-    libvlc_exception_init( &ex );
-    libvlc_media_player_play( (libvlc_media_player_t *)instance, &ex );
-    catch_exception( &ex );
+{
+    libvlc_media_player_play(instance);
     return YES;
 }
 
@@ -481,35 +551,25 @@ static void HandleMediaInstanceStateChanged(const libvlc_event_t * event, void *
     {
         /* Hack because we create a dead lock here, when the vout is stopped
          * and tries to recontact us on the main thread */
-        /* FIXME: to do this properly we need to do some locking. We may want 
+        /* FIXME: to do this properly we need to do some locking. We may want
          * to move that to libvlc */
         [self performSelectorInBackground:@selector(pause) withObject:nil];
         return;
     }
 
     // Pause the stream
-    libvlc_exception_t ex;
-    libvlc_exception_init( &ex );
-    libvlc_media_player_pause( (libvlc_media_player_t *)instance, &ex );
-    catch_exception( &ex );
+    libvlc_media_player_pause(instance);
 }
 
 - (void)stop
 {
-    if( 0 && [NSThread isMainThread] )
-    {
-        /* Hack because we create a dead lock here, when the vout is stopped
-         * and tries to recontact us on the main thread */
-        /* FIXME: to do this properly we need to do some locking. We may want 
-         * to move that to libvlc */
-        [self performSelectorInBackground:@selector(stop) withObject:nil];
-        return;
-    }
-    
-    libvlc_exception_t ex;
-    libvlc_exception_init( &ex );
-    libvlc_media_player_stop((libvlc_media_player_t *)instance, &ex);
-    catch_exception( &ex );
+    libvlc_media_player_stop(instance);
+}
+
+- (void)gotoNextFrame
+{
+    libvlc_media_player_next_frame(instance);
+
 }
 
 - (void)fastForward
@@ -536,7 +596,7 @@ static void HandleMediaInstanceStateChanged(const libvlc_event_t * event, void *
 {
     if( [self isSeekable] )
     {
-        interval = interval * 1000000;
+        interval = interval * 1000;
         [self setTime: [VLCTime timeWithInt: ([[self time] intValue] - interval)]];
     }
 }
@@ -545,7 +605,7 @@ static void HandleMediaInstanceStateChanged(const libvlc_event_t * event, void *
 {
     if( [self isSeekable] )
     {
-        interval = interval * 1000000;
+        interval = interval * 1000;
         [self setTime: [VLCTime timeWithInt: ([[self time] intValue] + interval)]];
     }
 }
@@ -604,16 +664,7 @@ static void HandleMediaInstanceStateChanged(const libvlc_event_t * event, void *
 
 - (BOOL)willPlay
 {
-    libvlc_exception_t ex;
-    libvlc_exception_init( &ex );
-    BOOL ret = libvlc_media_player_will_play( (libvlc_media_player_t *)instance, &ex );
-    if (libvlc_exception_raised(&ex))
-    {
-        libvlc_exception_clear(&ex);
-        return NO;
-    }
-    else
-        return ret;
+    return libvlc_media_player_will_play(instance);
 }
 
 static const VLCMediaPlayerState libvlc_to_local_state[] =
@@ -639,28 +690,17 @@ static const VLCMediaPlayerState libvlc_to_local_state[] =
 
 - (void)setPosition:(float)newPosition
 {
-    libvlc_exception_t ex;
-    libvlc_exception_init( &ex );
-    libvlc_media_player_set_position( instance, newPosition, &ex );
-    catch_exception( &ex );
+    libvlc_media_player_set_position(instance, newPosition);
 }
 
 - (BOOL)isSeekable
 {
-    libvlc_exception_t ex;
-    libvlc_exception_init( &ex );
-    BOOL ret = libvlc_media_player_is_seekable( instance, &ex );
-    catch_exception( &ex );
-    return ret;
+    return libvlc_media_player_is_seekable(instance);
 }
 
 - (BOOL)canPause
 {
-    libvlc_exception_t ex;
-    libvlc_exception_init( &ex );
-    BOOL ret = libvlc_media_player_can_pause( instance, &ex );
-    catch_exception( &ex );
-    return ret;
+    return libvlc_media_player_can_pause(instance);
 }
 
 - (void *)libVLCMediaPlayer
@@ -677,19 +717,17 @@ static const VLCMediaPlayerState libvlc_to_local_state[] =
         delegate = nil;
         media = nil;
         cachedTime = [[VLCTime nullTime] retain];
+        cachedRemainingTime = [[VLCTime nullTime] retain];
         position = 0.0f;
         cachedState = VLCMediaPlayerStateStopped;
 
         // Create a media instance, it doesn't matter what library we start off with
         // it will change depending on the media descriptor provided to the media
         // instance
-        libvlc_exception_t ex;
-        libvlc_exception_init( &ex );
-        instance = (void *)libvlc_media_player_new([VLCLibrary sharedInstance], &ex);
-        catch_exception( &ex );
-        
+        instance = libvlc_media_player_new([VLCLibrary sharedInstance]);
+
         [self registerObservers];
-        
+
         [self setDrawable:aDrawable];
     }
     return self;
@@ -697,50 +735,63 @@ static const VLCMediaPlayerState libvlc_to_local_state[] =
 
 - (void)registerObservers
 {
-    libvlc_exception_t ex;
-    libvlc_exception_init( &ex );
-
     // Attach event observers into the media instance
-    libvlc_event_manager_t * p_em = libvlc_media_player_event_manager( instance, &ex );
-    libvlc_event_attach( p_em, libvlc_MediaPlayerPlaying,          HandleMediaInstanceStateChanged, self, &ex );
-    libvlc_event_attach( p_em, libvlc_MediaPlayerPaused,           HandleMediaInstanceStateChanged, self, &ex );
-    libvlc_event_attach( p_em, libvlc_MediaPlayerEncounteredError, HandleMediaInstanceStateChanged, self, &ex );
-    libvlc_event_attach( p_em, libvlc_MediaPlayerEndReached,       HandleMediaInstanceStateChanged, self, &ex );
+    libvlc_event_manager_t * p_em = libvlc_media_player_event_manager(instance);
+    libvlc_event_attach(p_em, libvlc_MediaPlayerPlaying,          HandleMediaInstanceStateChanged, self);
+    libvlc_event_attach(p_em, libvlc_MediaPlayerPaused,           HandleMediaInstanceStateChanged, self);
+    libvlc_event_attach(p_em, libvlc_MediaPlayerEncounteredError, HandleMediaInstanceStateChanged, self);
+    libvlc_event_attach(p_em, libvlc_MediaPlayerEndReached,       HandleMediaInstanceStateChanged, self);
+    libvlc_event_attach(p_em, libvlc_MediaPlayerOpening,          HandleMediaInstanceStateChanged, self);
+    libvlc_event_attach(p_em, libvlc_MediaPlayerBuffering,        HandleMediaInstanceStateChanged, self);
+
     /* FIXME: We may want to turn that off when none is interested by that */
-    libvlc_event_attach( p_em, libvlc_MediaPlayerPositionChanged, HandleMediaPositionChanged,      self, &ex );
-    libvlc_event_attach( p_em, libvlc_MediaPlayerTimeChanged,     HandleMediaTimeChanged,          self, &ex );
-    catch_exception( &ex );
+    libvlc_event_attach(p_em, libvlc_MediaPlayerPositionChanged,  HandleMediaPositionChanged,      self);
+    libvlc_event_attach(p_em, libvlc_MediaPlayerTimeChanged,      HandleMediaTimeChanged,          self);
+    libvlc_event_attach(p_em, libvlc_MediaPlayerMediaChanged,     HandleMediaPlayerMediaChanged,   self);
 }
 
 - (void)unregisterObservers
 {
-    libvlc_event_manager_t * p_em = libvlc_media_player_event_manager( instance, NULL );
-    libvlc_event_detach( p_em, libvlc_MediaPlayerPlaying,          HandleMediaInstanceStateChanged, self, NULL );
-    libvlc_event_detach( p_em, libvlc_MediaPlayerPaused,           HandleMediaInstanceStateChanged, self, NULL );
-    libvlc_event_detach( p_em, libvlc_MediaPlayerEncounteredError, HandleMediaInstanceStateChanged, self, NULL );
-    libvlc_event_detach( p_em, libvlc_MediaPlayerEndReached,       HandleMediaInstanceStateChanged, self, NULL );
-    libvlc_event_detach( p_em, libvlc_MediaPlayerPositionChanged,  HandleMediaPositionChanged,      self, NULL );
-    libvlc_event_detach( p_em, libvlc_MediaPlayerTimeChanged,      HandleMediaTimeChanged,          self, NULL );
+    libvlc_event_manager_t * p_em = libvlc_media_player_event_manager(instance);
+    libvlc_event_detach(p_em, libvlc_MediaPlayerPlaying,          HandleMediaInstanceStateChanged, self);
+    libvlc_event_detach(p_em, libvlc_MediaPlayerPaused,           HandleMediaInstanceStateChanged, self);
+    libvlc_event_detach(p_em, libvlc_MediaPlayerEncounteredError, HandleMediaInstanceStateChanged, self);
+    libvlc_event_detach(p_em, libvlc_MediaPlayerEndReached,       HandleMediaInstanceStateChanged, self);
+    libvlc_event_detach(p_em, libvlc_MediaPlayerOpening,          HandleMediaInstanceStateChanged, self);
+    libvlc_event_detach(p_em, libvlc_MediaPlayerBuffering,        HandleMediaInstanceStateChanged, self);
+
+    libvlc_event_detach(p_em, libvlc_MediaPlayerPositionChanged,  HandleMediaPositionChanged,      self);
+    libvlc_event_detach(p_em, libvlc_MediaPlayerTimeChanged,      HandleMediaTimeChanged,          self);
+    libvlc_event_detach(p_em, libvlc_MediaPlayerMediaChanged,     HandleMediaPlayerMediaChanged,   self);
 }
 
 - (void)mediaPlayerTimeChanged:(NSNumber *)newTime
 {
     [self willChangeValueForKey:@"time"];
+    [self willChangeValueForKey:@"remainingTime"];
     [cachedTime release];
     cachedTime = [[VLCTime timeWithNumber:newTime] retain];
-
+    [cachedRemainingTime release];
+    double currentTime = [[cachedTime numberValue] doubleValue];
+    double remaining = currentTime / position * (1 - position);
+    cachedRemainingTime = [[VLCTime timeWithNumber:[NSNumber numberWithDouble:-remaining]] retain];
+    [self didChangeValueForKey:@"remainingTime"];
     [self didChangeValueForKey:@"time"];
 }
 
+#if !TARGET_OS_IPHONE
 - (void)delaySleep
 {
     UpdateSystemActivity(UsrActivity);
 }
+#endif
 
 - (void)mediaPlayerPositionChanged:(NSNumber *)newPosition
 {
+#if !TARGET_OS_IPHONE
     // This seems to be the most relevant place to delay sleeping and screen saver.
     [self delaySleep];
+#endif
 
     [self willChangeValueForKey:@"position"];
     position = [newPosition floatValue];
@@ -752,6 +803,17 @@ static const VLCMediaPlayerState libvlc_to_local_state[] =
     [self willChangeValueForKey:@"state"];
     cachedState = [newState intValue];
     [self didChangeValueForKey:@"state"];
+}
+
+- (void)mediaPlayerMediaChanged:(VLCMedia *)newMedia
+{
+    [self willChangeValueForKey:@"media"];
+    if (media != newMedia)
+    {
+        [media release];
+        media = [newMedia retain];
+    }
+    [self didChangeValueForKey:@"media"];
 }
 
 @end

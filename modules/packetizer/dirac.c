@@ -23,7 +23,7 @@
 
 /* Dirac packetizer, formed of three parts:
  *  1) Bitstream synchroniser (dirac_DoSync)
- *      - Given an arbitary sequence of bytes, extract whole Dirac Data Units
+ *      - Given an arbitrary sequence of bytes, extract whole Dirac Data Units
  *      - Maps timestamps in supplied block_t's to the extracted Data Unit
  *        A time stamp applies to the next Data Unit to commence at, or after
  *        the first byte of the block_t with the timestamp.
@@ -51,7 +51,7 @@
  *        distinguish from the fake dts case.)
  *
  *  DIRAC_NON_DATED is used to show a block should not have a time stamp
- *  associated (ie, don't interpolate a counter).  At the ouput, these
+ *  associated (ie, don't interpolate a counter).  At the output, these
  *  blocks get dated with the last used timestamp (or are merged with
  *  another encapsulation unit).
  */
@@ -279,7 +279,7 @@ static int block_ChainToArray( block_t *p_block, block_t ***ppp_array)
     block_ChainProperties( p_block, &i_num_blocks, NULL, NULL );
 
     *ppp_array = calloc( i_num_blocks, sizeof( block_t* ) );
-    if( !ppp_array ) return 0;
+    if( !*ppp_array ) return 0;
 
     for( int i = 0; i < i_num_blocks; i++ )
     {
@@ -1258,7 +1258,7 @@ static block_t *Packetize( decoder_t *p_dec, block_t **pp_block )
     block_t *p_output = NULL;
     block_t **pp_output = &p_output;
 
-    /* extract all the dated packets from the head of the ouput queue */
+    /* extract all the dated packets from the head of the output queue */
     /* explicitly nondated packets repeat the previous timestamps to
      * stop vlc discarding them */
     while( (p_block = p_sys->p_outqueue) )
@@ -1365,7 +1365,7 @@ static int Open( vlc_object_t *p_this )
     p_sys->i_dts_last_out = p_sys->i_pts_last_out = VLC_TS_INVALID;
 
     p_sys->i_state = NOT_SYNCED;
-    p_sys->bytestream = block_BytestreamInit();
+    block_BytestreamInit( &p_sys->bytestream );
 
     p_sys->pp_outqueue_last = &p_sys->p_outqueue;
     p_sys->pp_eu_last = &p_sys->p_eu;

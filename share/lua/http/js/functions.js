@@ -374,6 +374,10 @@ function volume_up()
 {
     loadXMLDoc( 'requests/status.xml?command=volume&val=%2B20', parse_status );
 }
+function volume_mute()
+{
+    loadXMLDoc( 'requests/status.xml?command=volume&val=0', parse_status );
+}
 function seek( pos )
 {
     loadXMLDoc( 'requests/status.xml?command=seek&val='+pos, parse_status );
@@ -411,6 +415,48 @@ function reset_search()
         search.value = '<search>'
         update_playlist_search('')
     }
+}
+function audiodelay_down()
+{
+    var curdel = parseFloat(req.responseXML.documentElement.getElementsByTagName( 'audiodelay' )[0].firstChild.data);
+    var curdelnew = curdel - 0.05;
+    curdelnew=curdelnew.toFixed(2);
+    loadXMLDoc( 'requests/status.xml?command=audiodelay&val='+encodeURIComponent(curdelnew), parse_status );
+}
+function audiodelay_up()
+{
+    var curdel = parseFloat(req.responseXML.documentElement.getElementsByTagName( 'audiodelay' )[0].firstChild.data);
+    var curdelnew = curdel + 0.05;
+    curdelnew=curdelnew.toFixed(2);
+    loadXMLDoc( 'requests/status.xml?command=audiodelay&val='+encodeURIComponent(curdelnew), parse_status );
+}
+function playrate_down()
+{
+    var currate = parseFloat(req.responseXML.documentElement.getElementsByTagName( 'rate' )[0].firstChild.data);
+    var curratenew = currate - 0.05;
+    curratenew=curratenew.toFixed(2);
+    loadXMLDoc( 'requests/status.xml?command=rate&val='+encodeURIComponent(curratenew), parse_status );
+}
+function playrate_up()
+{
+    var currate = parseFloat(req.responseXML.documentElement.getElementsByTagName( 'rate' )[0].firstChild.data);
+    var curratenew = currate + 0.05;
+    curratenew=curratenew.toFixed(2);
+    loadXMLDoc( 'requests/status.xml?command=rate&val='+encodeURIComponent(curratenew), parse_status );
+}
+function subdel_down()
+{
+    var curdel = parseFloat(req.responseXML.documentElement.getElementsByTagName( 'subtitledelay' )[0].firstChild.data);
+    var curdelnew = curdel - 0.05;
+    curdelnew=curdelnew.toFixed(2);
+    loadXMLDoc( 'requests/status.xml?command=subdelay&val='+encodeURIComponent(curdelnew), parse_status );
+}
+function subdel_up()
+{
+    var curdel = parseFloat(req.responseXML.documentElement.getElementsByTagName( 'subtitledelay' )[0].firstChild.data);
+    var curdelnew = curdel + 0.05;
+    curdelnew=curdelnew.toFixed(2);
+    loadXMLDoc( 'requests/status.xml?command=subdelay&val='+encodeURIComponent(curdelnew), parse_status );
 }
 
 /**********************************************************************
@@ -463,6 +509,12 @@ function parse_status()
             old_time = new_time;
             set_text( 'time', format_time( new_time ) );
             set_text( 'length', format_time( length ) );
+            var audio_delay = (parseFloat(req.responseXML.documentElement.getElementsByTagName( 'audiodelay' )[0].firstChild.data).toFixed(2))*1000;
+            set_text( 'a_del', audio_delay ); 
+            var play_rate = (parseFloat(req.responseXML.documentElement.getElementsByTagName( 'rate' )[0].firstChild.data).toFixed(2));
+            set_text( 'p_rate', play_rate ); 
+            var subs_delay = (parseFloat(req.responseXML.documentElement.getElementsByTagName( 'subtitledelay' )[0].firstChild.data).toFixed(2))*1000;
+            set_text( 's_del', subs_delay ); 
             if( status.getElementsByTagName( 'volume' ).length != 0 )
                 set_text( 'volume', Math.floor(status.getElementsByTagName( 'volume' )[0].firstChild.data/5.12)+'%' );
             var statetag = status.getElementsByTagName( 'state' );
@@ -616,7 +668,7 @@ function parse_playlist()
                     pl.appendChild( document.createTextNode( elt.getAttribute( 'name' ) ) );
                     var duration = elt.getAttribute( 'duration' );
                     if( duration > 0 )
-                        pl.appendChild( document.createTextNode( " (" + format_time( elt.getAttribute( 'duration' ) / 1000000 ) + ")" ) );
+                        pl.appendChild( document.createTextNode( " (" + format_time( elt.getAttribute( 'duration' ) ) + ")" ) );
                     pos.appendChild( pl );
 
                     if( elt.getAttribute( 'ro' ) == 'rw' )
@@ -802,8 +854,6 @@ function update_input_net()
     if( type == "udp" )
     {
         mrl.value += "udp://";
-        if( checked( 'input_net_udp_forceipv6' ) )
-            mrl.value += "[::]";
         if( value( 'input_net_udp_port' ) )
             mrl.value += ":"+value( 'input_net_udp_port' );
     }
@@ -1035,8 +1085,8 @@ function update_sout()
     if( ( transcode || output ) && checked( 'sout_all' ) )
         input_options.push( ":sout-all" );
 
-    /*var mrl = document.getElementById( 'sout_mrl' );
-    mrl.value = input_options.join( " " )*/
+    var mrl = document.getElementById( 'sout_mrl' );
+    mrl.value = option;
 
     refresh_input_options_list();
 }

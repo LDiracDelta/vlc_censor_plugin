@@ -103,7 +103,7 @@ static int Create( vlc_object_t *p_this )
             break;
 
         default:
-            msg_Err( p_filter, "Unsupported input chroma (%4s)",
+            msg_Err( p_filter, "Unsupported input chroma (%4.4s)",
                      (char*)&(p_fmt->i_chroma) );
             return VLC_EGENERIC;
     }
@@ -114,8 +114,7 @@ static int Create( vlc_object_t *p_this )
         return VLC_ENOMEM;
 
     p_sys->b_old = false;
-    p_sys->p_old = picture_New( p_fmt->i_chroma,
-                                p_fmt->i_width, p_fmt->i_height, 0 );
+    p_sys->p_old = picture_NewFromFormat( p_fmt );
     p_sys->p_buf  = calloc( p_fmt->i_width * p_fmt->i_height, sizeof(*p_sys->p_buf) );
     p_sys->p_buf2 = calloc( p_fmt->i_width * p_fmt->i_height, sizeof(*p_sys->p_buf) );
 
@@ -169,13 +168,6 @@ static picture_t *Filter( filter_t *p_filter, picture_t *p_inpic )
     const uint8_t *p_inpix = p_inpic->p[Y_PLANE].p_pixels;
     const int i_src_pitch = p_inpic->p[Y_PLANE].i_pitch;
 
-    if( !p_sys->b_old )
-    {
-        picture_Copy( p_sys->p_old, p_inpic );
-        p_sys->b_old = true;
-        return p_inpic;
-    }
-
     p_outpic = filter_NewPicture( p_filter );
     if( !p_outpic )
     {
@@ -183,6 +175,14 @@ static picture_t *Filter( filter_t *p_filter, picture_t *p_inpic )
         return NULL;
     }
     picture_Copy( p_outpic, p_inpic );
+
+    if( !p_sys->b_old )
+    {
+        picture_Copy( p_sys->p_old, p_inpic );
+        picture_Release( p_inpic );
+        p_sys->b_old = true;
+        return p_outpic;
+    }
 
     /**
      * Substract Y planes
@@ -292,7 +292,7 @@ static picture_t *FilterPacked( filter_t *p_filter, picture_t *p_inpic )
     if( GetPackedYuvOffsets( p_fmt->i_chroma,
                              &i_y_offset, &i_u_offset, &i_v_offset ) )
     {
-        msg_Warn( p_filter, "Unsupported input chroma (%4s)",
+        msg_Warn( p_filter, "Unsupported input chroma (%4.4s)",
                   (char*)&p_fmt->i_chroma );
         return p_inpic;
     }

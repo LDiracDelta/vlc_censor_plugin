@@ -154,13 +154,15 @@ static void test_strings( libvlc_int_t *p_libvlc )
 
 static void test_address( libvlc_int_t *p_libvlc )
 {
+    char dummy[i_var_count];
+
     int i;
     for( i = 0; i < i_var_count; i++ )
          var_Create( p_libvlc, psz_var_name[i], VLC_VAR_ADDRESS );
 
     for( i = 0; i < i_var_count; i++ )
     {
-        var_value[i].p_address = rand();
+        var_value[i].p_address = dummy + i;
         var_SetAddress( p_libvlc, psz_var_name[i], var_value[i].p_address );
     }
 
@@ -446,9 +448,8 @@ int main( void )
     test_init();
 
     log( "Testing the core variables\n" );
-    libvlc_exception_init( &ex );
-    p_vlc = libvlc_new( test_defaults_nargs, test_defaults_args, &ex );
-    catch();
+    p_vlc = libvlc_new( test_defaults_nargs, test_defaults_args );
+    assert( p_vlc != NULL );
 
     test_variables( p_vlc );
 

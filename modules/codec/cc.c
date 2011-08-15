@@ -36,22 +36,15 @@
 #ifdef HAVE_CONFIG_H
 # include "config.h"
 #endif
+#include <string.h>
+#include <assert.h>
 
 #include <vlc_common.h>
 #include <vlc_plugin.h>
 #include <vlc_codec.h>
-#include <vlc_input.h>
-
-#include <vlc_osd.h>
-#include <vlc_filter.h>
-#include <vlc_image.h>
 #include <vlc_charset.h>
-#include <vlc_stream.h>
-#include <vlc_xml.h>
-#include <errno.h>
-#include <string.h>
 
-#include <assert.h>
+#include "substext.h"
 
 /*****************************************************************************
  * Module descriptor.
@@ -294,11 +287,11 @@ static block_t *Pop( decoder_t *p_dec )
         return NULL;
 
     p_block = p_sys->pp_block[i_index = 0];
-    if( p_block->i_pts > 0 )
+    if( p_block->i_pts > VLC_TS_INVALID )
     {
         for( i = 1; i < p_sys->i_block-1; i++ )
         {
-            if( p_sys->pp_block[i]->i_pts > 0 && p_block->i_pts > 0 &&
+            if( p_sys->pp_block[i]->i_pts > VLC_TS_INVALID && p_block->i_pts > VLC_TS_INVALID &&
                 p_sys->pp_block[i]->i_pts < p_block->i_pts )
                 p_block = p_sys->pp_block[i_index = i];
         }
@@ -314,10 +307,9 @@ static subpicture_t *Subtitle( decoder_t *p_dec, char *psz_subtitle, char *psz_h
 {
     //decoder_sys_t *p_sys = p_dec->p_sys;
     subpicture_t *p_spu = NULL;
-    video_format_t fmt;
 
     /* We cannot display a subpicture with no date */
-    if( i_pts == 0 )
+    if( i_pts <= VLC_TS_INVALID )
     {
         msg_Warn( p_dec, "subtitle without a date" );
         return NULL;
@@ -328,44 +320,23 @@ static subpicture_t *Subtitle( decoder_t *p_dec, char *psz_subtitle, char *psz_h
         EnsureUTF8( psz_html );
 
     /* Create the subpicture unit */
-    p_spu = decoder_NewSubpicture( p_dec );
+    p_spu = decoder_NewSubpictureText( p_dec );
     if( !p_spu )
     {
-        msg_Warn( p_dec, "can't get spu buffer" );
         free( psz_subtitle );
         free( psz_html );
         return NULL;
     }
-
-    /* Create a new subpicture region */
-    memset( &fmt, 0, sizeof(video_format_t) );
-    fmt.i_chroma = VLC_CODEC_TEXT;
-    fmt.i_aspect = 0;
-    fmt.i_width = fmt.i_height = 0;
-    fmt.i_x_offset = fmt.i_y_offset = 0;
-    p_spu->p_region = subpicture_region_New( &fmt );
-    if( !p_spu->p_region )
-    {
-        msg_Err( p_dec, "cannot allocate SPU region" );
-        free( psz_subtitle );
-        free( psz_html );
-        decoder_DeleteSubpicture( p_dec, p_spu );
-        return NULL;
-    }
-
-    /* Decode and format the subpicture unit */
-    /* Normal text subs, easy markup */
-    p_spu->p_region->i_align = SUBPICTURE_ALIGN_BOTTOM;// | SUBPICTURE_ALIGN_LEFT;// | p_sys->i_align;
-    p_spu->p_region->i_x = 0; //p_sys->i_align ? 20 : 0;
-    p_spu->p_region->i_y = 10;
-
-    p_spu->p_region->psz_text = psz_subtitle;
-    p_spu->p_region->psz_html = psz_html;
-
-    p_spu->i_start = i_pts;
-    p_spu->i_stop = i_pts + 10000000;   /* 10s max */
-    p_spu->b_ephemer = true;
+    p_spu->i_start    = i_pts;
+    p_spu->i_stop     = i_pts + 10000000;   /* 10s max */
+    p_spu->b_ephemer  = true;
     p_spu->b_absolute = false;
+
+    subpicture_updater_sys_t *p_spu_sys = p_spu->updater.p_sys;
+
+    p_spu_sys->align = SUBPICTURE_ALIGN_BOTTOM;
+    p_spu_sys->text  = psz_subtitle;
+    p_spu_sys->html  = psz_html;
 
     return p_spu;
 }
@@ -565,6 +536,9 @@ static void Eia608EraseToEndOfRow( eia608_t *h )
 
 static void Eia608RollUp( eia608_t *h )
 {
+    if( h->mode == EIA608_MODE_TEXT )
+        return;
+
     const int i_screen = Eia608GetWritingScreenIndex( h );
     eia608_screen *screen = &h->screen[i_screen];
 
@@ -618,15 +592,10 @@ static void Eia608ParseChannel( eia608_t *h, const uint8_t d[2] )
 
     /* */
     const int d1 = d[0] & 0x7f;
-    // const int d2 = d[1] & 0x7f;
-    if( d1 == 0x14 )
-        h->i_channel = 1;
-    else if( d1 == 0x1c )
-        h->i_channel = 2;
-    else if( d1 == 0x15 )
+    if( d1 >= 0x10 && d1 <= 0x1f )
+        h->i_channel = 1 + ((d1 & 0x08) != 0);
+    else if( d1 < 0x10 )
         h->i_channel = 3;
-    else if( d1 == 0x1d )
-        h->i_channel = 4;
 }
 static bool Eia608ParseTextAttribute( eia608_t *h, uint8_t d2 )
 {

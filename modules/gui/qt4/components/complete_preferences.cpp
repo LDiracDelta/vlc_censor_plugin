@@ -35,13 +35,13 @@
 #include <QScrollArea>
 #include <QVBoxLayout>
 #include <QGridLayout>
-#include <QHeaderView>
 
 #include "components/complete_preferences.hpp"
 #include "components/preferences_widgets.hpp"
 
 #include <vlc_config_cat.h>
 #include <vlc_intf_strings.h>
+#include <vlc_modules.h>
 #include <assert.h>
 
 #define ITEM_HEIGHT 25
@@ -53,15 +53,14 @@ PrefsTree::PrefsTree( intf_thread_t *_p_intf, QWidget *_parent ) :
                             QTreeWidget( _parent ), p_intf( _p_intf )
 {
     /* General Qt options */
-    setColumnCount( 1 );
     setAlternatingRowColors( true );
-    header()->hide();
+    setHeaderHidden( true );
 
     setIconSize( QSize( ITEM_HEIGHT,ITEM_HEIGHT ) );
     setTextElideMode( Qt::ElideNone );
 
     /* Nice icons */
-#define BI( a,b) QIcon a##_icon = QIcon( QPixmap( b ))
+#define BI( a,b) QIcon a##_icon = QIcon( b )
     BI( audio, ":/prefsmenu/advanced/audio" );
     BI( video, ":/prefsmenu/advanced/video" );
     BI( input, ":/prefsmenu/advanced/codec" );
@@ -125,7 +124,7 @@ PrefsTree::PrefsTree( intf_thread_t *_p_intf, QWidget *_parent ) :
             current_item = new QTreeWidgetItem();
             current_item->setText( 0, data->name );
             current_item->setIcon( 0 , icon );
-            current_item->setSizeHint( 0, QSize( -1, ITEM_HEIGHT ) );
+            //current_item->setSizeHint( 0, QSize( -1, ITEM_HEIGHT ) );
             current_item->setData( 0, Qt::UserRole,
                                    qVariantFromValue( data ) );
             addTopLevelItem( current_item );
@@ -177,7 +176,7 @@ PrefsTree::PrefsTree( intf_thread_t *_p_intf, QWidget *_parent ) :
             subcat_item->setText( 0, data_sub->name );
             subcat_item->setData( 0, Qt::UserRole,
                                   qVariantFromValue( data_sub ) );
-            subcat_item->setSizeHint( 0, QSize( -1, ITEM_HEIGHT ) );
+            //subcat_item->setSizeHint( 0, QSize( -1, ITEM_HEIGHT ) );
 
             /* Add it to the parent */
             assert( current_item );
@@ -214,7 +213,7 @@ PrefsTree::PrefsTree( intf_thread_t *_p_intf, QWidget *_parent ) :
             else if( p_item->i_type == CONFIG_SUBCATEGORY )
                 i_subcategory = p_item->value.i;
 
-            if( p_item->i_type & CONFIG_ITEM )
+            if( CONFIG_ITEM(p_item->i_type) )
                 b_options = true;
 
             if( b_options && i_category && i_subcategory )
@@ -266,12 +265,17 @@ PrefsTree::PrefsTree( intf_thread_t *_p_intf, QWidget *_parent ) :
         PrefsItemData *module_data = new PrefsItemData();
         module_data->i_type = TYPE_MODULE;
         module_data->psz_name = strdup( module_get_object( p_module ) );
+        module_data->name = qtr( module_get_name( p_module, false ) );
         module_data->help.clear();
+        const char *psz_help = module_get_help( p_module );
+        if ( psz_help )
+            module_data->help = qtr( psz_help );
+
         QTreeWidgetItem *module_item = new QTreeWidgetItem();
-        module_item->setText( 0, qtr( module_get_name( p_module, false ) ) );
+        module_item->setText( 0, module_data->name );
         module_item->setData( 0, Qt::UserRole,
                               QVariant::fromValue( module_data) );
-        module_item->setSizeHint( 0, QSize( -1, ITEM_HEIGHT ) );
+        //module_item->setSizeHint( 0, QSize( -1, ITEM_HEIGHT ) );
         subcat_item->addChild( module_item );
     }
 
@@ -279,6 +283,7 @@ PrefsTree::PrefsTree( intf_thread_t *_p_intf, QWidget *_parent ) :
     sortItems( 0, Qt::AscendingOrder );
 
     module_list_free( p_list );
+    resizeColumnToContents( 0 );
 }
 
 PrefsTree::~PrefsTree() {}
@@ -338,6 +343,165 @@ void PrefsTree::doAll( bool doclean )
     }
 }
 
+/* apply filter on tree item and recursively on its sub items
+ * returns whether the item was filtered */
+bool PrefsTree::filterItems( QTreeWidgetItem *item, const QString &text,
+                           Qt::CaseSensitivity cs )
+{
+    bool sub_filtered = true;
+
+    for( int i = 0; i < item->childCount(); i++ )
+    {
+        QTreeWidgetItem *sub_item = item->child( i );
+        if ( !filterItems( sub_item, text, cs ) )
+        {
+            /* not all the sub items were filtered */
+            sub_filtered = false;
+        }
+    }
+
+    PrefsItemData *data = item->data( 0, Qt::UserRole ).value<PrefsItemData *>();
+
+    bool filtered = sub_filtered && !data->contains( text, cs );
+    item->setExpanded( !sub_filtered );
+    item->setHidden( filtered );
+
+    return filtered;
+}
+
+
+/* collapse item if it's not selected or one of its sub items
+ * returns whether the item was collapsed */
+bool PrefsTree::collapseUnselectedItems( QTreeWidgetItem *item )
+{
+    bool sub_collapsed = true;
+
+    for( int i = 0; i < item->childCount(); i++ )
+    {
+        QTreeWidgetItem *sub_item = item->child( i );
+        if ( !collapseUnselectedItems( sub_item ) )
+        {
+            /* not all the sub items were collapsed */
+            sub_collapsed = false;
+        }
+    }
+
+    bool collapsed = sub_collapsed && !item->isSelected();
+    item->setExpanded( !sub_collapsed );
+    item->setHidden( false );
+
+    return collapsed;
+}
+
+/* apply filter on tree */
+void PrefsTree::filter( const QString &text )
+{
+    bool clear_filter = text.isEmpty();
+
+    for( int i = 0 ; i < topLevelItemCount(); i++ )
+    {
+        QTreeWidgetItem *cat_item = topLevelItem( i );
+        if ( clear_filter )
+        {
+            collapseUnselectedItems( cat_item );
+        }
+        else
+        {
+            filterItems( cat_item, text, Qt::CaseInsensitive );
+        }
+    }
+}
+
+/* go over the module config items and search text in psz_text
+ * also search the module name and head */
+bool PrefsItemData::contains( const QString &text, Qt::CaseSensitivity cs )
+{
+    /* Find our module */
+    module_t *p_module = NULL;
+    if( this->i_type == TYPE_CATEGORY )
+        return false;
+    else if( this->i_type == TYPE_MODULE )
+        p_module = module_find( this->psz_name );
+    else
+    {
+        p_module = module_get_main();
+        assert( p_module );
+    }
+
+    unsigned confsize;
+    module_config_t *const p_config = module_config_get (p_module, &confsize),
+                    *p_item = p_config,
+                    *p_end = p_config + confsize;
+
+    if( this->i_type == TYPE_SUBCATEGORY || this->i_type ==  TYPE_CATSUBCAT )
+    {
+        while ( p_item < p_end )
+        {
+            if( p_item->i_type == CONFIG_SUBCATEGORY &&
+                (
+                    ( this->i_type == TYPE_SUBCATEGORY &&
+                              p_item->value.i == this->i_object_id )
+                    ||
+                    ( this->i_type == TYPE_CATSUBCAT &&
+                              p_item->value.i == this->i_subcat_id )
+                )
+              )
+                break;
+            p_item++;
+        }
+    }
+
+    QString head;
+
+    if( this->i_type == TYPE_SUBCATEGORY || this->i_type ==  TYPE_CATSUBCAT )
+    {
+        head.clear();
+        p_item++; // Why that ? +1
+    }
+    else
+    {
+        head = QString( qtr( module_GetLongName( p_module ) ) );
+    }
+
+    if (name.contains( text, cs ) || head.contains( text, cs ) || help.contains( text, cs ))
+    {
+        module_release( p_module );
+        return true;
+    }
+
+    if( p_item ) do
+    {
+        if (
+            (
+                ( this->i_type == TYPE_SUBCATEGORY && p_item->value.i != this->i_object_id )
+                ||
+                ( this->i_type == TYPE_CATSUBCAT && p_item->value.i != this->i_subcat_id )
+            ) &&
+            ( p_item->i_type == CONFIG_CATEGORY || p_item->i_type == CONFIG_SUBCATEGORY )
+           ) break;
+
+        if( p_item->b_internal ) continue;
+
+        if ( p_item->psz_text && qtr( p_item->psz_text ).contains( text, cs ) )
+        {
+            module_release( p_module );
+            return true;
+        }
+    }
+    while (
+            !(
+                ( this->i_type == TYPE_SUBCATEGORY || this->i_type == TYPE_CATSUBCAT )
+                &&
+                ( p_item->i_type == CONFIG_CATEGORY || p_item->i_type == CONFIG_SUBCATEGORY )
+             )
+             && ( ++p_item < p_end )
+          );
+
+
+    module_release( p_module );
+    return false;
+}
+
 /*********************************************************************
  * The Panel
  *********************************************************************/
@@ -394,19 +558,12 @@ AdvPrefsPanel::AdvPrefsPanel( intf_thread_t *_p_intf, QWidget *_parent,
     }
     else
     {
-        const char *psz_help = module_get_help (p_module);
         head = QString( qtr( module_GetLongName( p_module ) ) );
-        if( psz_help )
-        {
-            help.append( "\n" );
-            help.append( qtr( psz_help ) );
-        }
     }
 
     QLabel *titleLabel = new QLabel( head );
-    QFont titleFont = QApplication::font( static_cast<QWidget*>(0) );
+    QFont titleFont = QApplication::font();
     titleFont.setPointSize( titleFont.pointSize() + 6 );
-    titleFont.setFamily( "Verdana" );
     titleLabel->setFont( titleFont );
 
     // Title <hr>
@@ -441,7 +598,7 @@ AdvPrefsPanel::AdvPrefsPanel( intf_thread_t *_p_intf, QWidget *_parent,
             ( p_item->i_type == CONFIG_CATEGORY ||
               p_item->i_type == CONFIG_SUBCATEGORY ) )
             break;
-        if( p_item->b_internal == true ) continue;
+        if( p_item->b_internal ) continue;
 
         if( p_item->i_type == CONFIG_SECTION )
         {
@@ -457,12 +614,12 @@ AdvPrefsPanel::AdvPrefsPanel( intf_thread_t *_p_intf, QWidget *_parent,
             boxlayout = new QGridLayout();
         }
         /* Only one hotkey control */
-        if( has_hotkey && p_item->i_type & CONFIG_ITEM && p_item->psz_name &&
-                                         strstr( p_item->psz_name, "key-" ) )
-            continue;
-        if( p_item->i_type & CONFIG_ITEM && p_item->psz_name &&
-                                            strstr( p_item->psz_name, "key-" ) )
+        if( p_item->i_type == CONFIG_ITEM_KEY )
+        {
+            if( has_hotkey )
+                continue;
             has_hotkey = true;
+        }
 
         ConfigControl *control;
         if( ! box )
@@ -503,12 +660,8 @@ AdvPrefsPanel::AdvPrefsPanel( intf_thread_t *_p_intf, QWidget *_parent,
 
 void AdvPrefsPanel::apply()
 {
-    QList<ConfigControl *>::Iterator i;
-    for( i = controls.begin() ; i != controls.end() ; i++ )
-    {
-        ConfigControl *c = qobject_cast<ConfigControl *>(*i);
-        c->doApply( p_intf );
-    }
+    foreach ( ConfigControl *cfg, controls )
+        cfg->doApply();
 }
 
 void AdvPrefsPanel::clean()

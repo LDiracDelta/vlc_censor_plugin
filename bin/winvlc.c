@@ -1,7 +1,7 @@
 /*****************************************************************************
- * winvlc.c: the Windows VLC player
+ * winvlc.c: the Windows VLC media player
  *****************************************************************************
- * Copyright (C) 1998-2008 the VideoLAN team
+ * Copyright (C) 1998-2011 the VideoLAN team
  *
  * Authors: Vincent Seguin <seguin@via.ecp.fr>
  *          Samuel Hocevar <sam@zoy.org>
@@ -30,18 +30,15 @@
 
 #define UNICODE
 #include <vlc/vlc.h>
-#include <string.h>
-#include <stdio.h>
-#include <stdlib.h>
 #include <windows.h>
 
 #if !defined(UNDER_CE)
 # ifndef _WIN32_IE
 #   define  _WIN32_IE 0x501
 # endif
-#   include <shlobj.h>
-#   include <tlhelp32.h>
-#   include <wininet.h>
+# include <shlobj.h>
+# include <wininet.h>
+# define HeapEnableTerminationOnCorruption (HEAP_INFORMATION_CLASS)1
 # ifndef _WIN64
 static void check_crashdump(void);
 LONG WINAPI vlc_exception_filter(struct _EXCEPTION_POINTERS *lpExceptionInfo);
@@ -117,28 +114,52 @@ int WINAPI WinMain( HINSTANCE hInstance, HINSTANCE hPrevInstance,
 #endif
                     int nCmdShow )
 {
-    int argc, ret;
+    int argc;
+
 #ifndef UNDER_CE
+#ifdef TOP_BUILDDIR
+    putenv("VLC_PLUGIN_PATH=Z:"TOP_BUILDDIR"/modules");
+#endif
+
+    HeapSetInformation(NULL, HeapEnableTerminationOnCorruption, NULL, 0);
+
+    /* SetProcessDEPPolicy */
+    HINSTANCE h_Kernel32 = LoadLibraryW(L"kernel32.dll");
+    if(h_Kernel32)
+    {
+        BOOL (WINAPI * mySetProcessDEPPolicy)( DWORD dwFlags);
+# define PROCESS_DEP_ENABLE 1
+
+        mySetProcessDEPPolicy = (BOOL WINAPI (*)(DWORD))
+                            GetProcAddress(h_Kernel32, "SetProcessDEPPolicy");
+        if(mySetProcessDEPPolicy)
+            mySetProcessDEPPolicy(PROCESS_DEP_ENABLE);
+        FreeLibrary(h_Kernel32);
+    }
+
+    /* Args */
     wchar_t **wargv = CommandLineToArgvW (GetCommandLine (), &argc);
     if (wargv == NULL)
         return 1;
 
-    char *argv[argc + 1];
+    char *argv[argc + 3];
     BOOL crash_handling = TRUE;
     int j = 0;
 
+    argv[j++] = FromWide( L"--media-library" );
     argv[j++] = FromWide( L"--no-ignore-config" );
+#ifdef TOP_SRCDIR
+    argv[j++] = FromWide (L"--data-path=Z:"TOP_SRCDIR"/share");
+#endif
     for (int i = 1; i < argc; i++)
     {
         if(!wcscmp(wargv[i], L"--no-crashdump"))
         {
             crash_handling = FALSE;
+            continue; /* don't give argument to libvlc */
         }
-        else
-        {
-            argv[j] = FromWide (wargv[i]);
-            j++;
-        }
+
+        argv[j++] = FromWide (wargv[i]);
     }
 
     argc = j;
@@ -146,14 +167,15 @@ int WINAPI WinMain( HINSTANCE hInstance, HINSTANCE hPrevInstance,
     LocalFree (wargv);
 
 # ifndef _WIN64
+    /* We don't know how to manage crashes on Win64 yet */
     if(crash_handling)
     {
         check_crashdump();
         SetUnhandledExceptionFilter(vlc_exception_filter);
     }
-# endif /* WIN64 */
+# endif
 
-#else
+#else /* UNDER_CE */
     char **argv, psz_cmdline[wcslen(lpCmdLine) * 4];
 
     WideCharToMultiByte( CP_UTF8, 0, lpCmdLine, -1,
@@ -162,35 +184,27 @@ int WINAPI WinMain( HINSTANCE hInstance, HINSTANCE hPrevInstance,
     argc = parse_cmdline (psz_cmdline, &argv);
 #endif
 
-    libvlc_exception_t ex, dummy;
-    libvlc_exception_init (&ex);
-    libvlc_exception_init (&dummy);
-
     /* Initialize libvlc */
     libvlc_instance_t *vlc;
-    vlc = libvlc_new (argc, (const char **)argv, &ex);
+    vlc = libvlc_new (argc, (const char **)argv);
     if (vlc != NULL)
     {
-        libvlc_add_intf (vlc, "globalhotkeys,none", &ex);
-        libvlc_add_intf (vlc, NULL, &ex);
-        libvlc_playlist_play (vlc, -1, 0, NULL, &dummy);
+        libvlc_add_intf (vlc, "globalhotkeys,none");
+        libvlc_add_intf (vlc, NULL);
+        libvlc_playlist_play (vlc, -1, 0, NULL);
         libvlc_wait (vlc);
         libvlc_release (vlc);
     }
-
-    ret = libvlc_exception_raised (&ex);
-    libvlc_exception_clear (&ex);
-    libvlc_exception_clear (&dummy);
 
     for (int i = 0; i < argc; i++)
         free (argv[i]);
 
     (void)hInstance; (void)hPrevInstance; (void)lpCmdLine; (void)nCmdShow;
-    return ret;
+    return 0;
 }
 
 #if !defined( UNDER_CE ) && !defined( _WIN64 )
-
+/* Crashdumps handling */
 static void get_crashdump_path(wchar_t * wdir)
 {
     if( S_OK != SHGetFolderPathW( NULL,
@@ -229,12 +243,30 @@ static void check_crashdump()
                     swprintf( remote_file, L"/crashs/%04d%02d%02d%02d%02d%02d",now.wYear,
                             now.wMonth, now.wDay, now.wHour, now.wMinute, now.wSecond  );
 
-                    FtpPutFile( ftp, wdir, remote_file, FTP_TRANSFER_TYPE_BINARY, 0);
+                    if( FtpPutFile( ftp, wdir, remote_file, FTP_TRANSFER_TYPE_BINARY, 0) )
+                        MessageBox( NULL, L"Report sent correctly. Thanks a lot for the help.",
+                                    L"Report sent", MB_OK);
+                    else
+                        MessageBox( NULL, L"There was an error while transferring to the FTP server. "\
+                                    "Thanks a lot for the help anyway.",
+                                    L"Report sending failed", MB_OK);
                     InternetCloseHandle(ftp);
                 }
                 else
-                    fprintf(stderr,"Can't connect to FTP server%d\n",GetLastError());
+                {
+                    MessageBox( NULL, L"There was an error while connecting to the FTP server. "\
+                                    "Thanks a lot for the help anyway.",
+                                    L"Report sending failed", MB_OK);
+                    fprintf(stderr,"Can't connect to FTP server 0x%08lu\n",
+                            (unsigned long)GetLastError());
+                }
                 InternetCloseHandle(Hint);
+            }
+            else
+            {
+                  MessageBox( NULL, L"There was an error while connecting to Internet. "\
+                                    "Thanks a lot for the help anyway.",
+                                    L"Report sending failed", MB_OK);
             }
         }
 
@@ -288,7 +320,7 @@ LONG WINAPI vlc_exception_filter(struct _EXCEPTION_POINTERS *lpExceptionInfo)
         {
             unsigned int i;
             for( i = 0; i < pException->NumberParameters; i++ )
-                fprintf( fd, " | %08x", pException->ExceptionInformation[i] );
+                fwprintf( fd, L" | %08x", pException->ExceptionInformation[i] );
         }
 
         fwprintf( fd, L"\n\n[context]\nEDI:%08x\nESI:%08x\n" \
@@ -310,6 +342,7 @@ LONG WINAPI vlc_exception_filter(struct _EXCEPTION_POINTERS *lpExceptionInfo)
         DWORD pEbp = pContext->Ebp;
         DWORD caller = *((DWORD*)pEbp + 1);
 
+        unsigned i_line = 0;
         do
         {
             VirtualQuery( (DWORD *)caller, &mbi, sizeof( mbi ) ) ;
@@ -318,8 +351,9 @@ LONG WINAPI vlc_exception_filter(struct _EXCEPTION_POINTERS *lpExceptionInfo)
             fwprintf( fd, L"%08x|%s\n", caller, module );
             pEbp = *(DWORD*)pEbp ;
             caller = *((DWORD*)pEbp + 1) ;
+            i_line++;
             /*The last EBP points to NULL!*/
-        }while(caller);
+        }while(caller && i_line< 100);
 
         fclose( fd );
         fflush( stderr );

@@ -40,10 +40,6 @@
 
 #ifdef ENABLE_VLM
 
-#ifndef WIN32
-#   include <sys/time.h>                                   /* gettimeofday() */
-#endif
-
 #include <time.h>                                                 /* ctime() */
 
 #include <vlc_input.h>
@@ -51,7 +47,9 @@
 #include <vlc_stream.h>
 #include "vlm_internal.h"
 #include <vlc_charset.h>
+#include <vlc_fs.h>
 #include <vlc_sout.h>
+#include <vlc_url.h>
 #include "../stream_output/stream_output.h"
 #include "../libvlc.h"
 
@@ -137,7 +135,7 @@ static int Unescape( char *out, const char *in )
         // Don't escape the end of the string if we find a '#'
         // that's the begining of a vlc command
         // TODO: find a better solution
-        if( c == '#' || param )
+        if( ( c == '#' && !quote ) || param )
         {
             param = true;
             *out++ = c;
@@ -462,43 +460,6 @@ static int ExecuteControl( vlm_t *p_vlm, const char *psz_name, const int i_arg, 
             i_result = VLC_EGENERIC;
         }
     }
-    else if( !strcmp( psz_control, "rewind" ) )
-    {
-        if( psz_argument )
-        {
-            const double d_scale = us_atof( psz_argument );
-            double d_position;
-
-            vlm_ControlInternal( p_vlm, VLM_GET_MEDIA_INSTANCE_POSITION, p_media->cfg.id, psz_instance, &d_position );
-            d_position -= (d_scale / 1000.0);
-            if( d_position < 0.0 )
-                d_position = 0.0;
-            i_result = vlm_ControlInternal( p_vlm, VLM_SET_MEDIA_INSTANCE_POSITION, p_media->cfg.id, psz_instance, d_position );
-        }
-        else
-        {
-            i_result = VLC_EGENERIC;
-        }
-    }
-    else if( !strcmp( psz_control, "forward" ) )
-    {
-        if( psz_argument )
-        {
-            const double d_scale = us_atof( psz_argument );
-            double d_position;
-
-            vlm_ControlInternal( p_vlm, VLM_GET_MEDIA_INSTANCE_POSITION, p_media->cfg.id, psz_instance, &d_position );
-            d_position += (d_scale / 1000.0);
-            if( d_position > 1.0 )
-                d_position = 1.0;
-            i_result = vlm_ControlInternal( p_vlm, VLM_SET_MEDIA_INSTANCE_POSITION, p_media->cfg.id, psz_instance, d_position );
-
-        }
-        else
-        {
-            i_result = VLC_EGENERIC;
-        }
-    }
     else if( !strcmp( psz_control, "stop" ) )
     {
         i_result = vlm_ControlInternal( p_vlm, VLM_STOP_MEDIA_INSTANCE, p_media->cfg.id, psz_instance );
@@ -532,7 +493,7 @@ static int ExecuteExport( vlm_t *p_vlm, vlm_message_t **pp_status )
 
 static int ExecuteSave( vlm_t *p_vlm, const char *psz_file, vlm_message_t **pp_status )
 {
-    FILE *f = utf8_fopen( psz_file, "wt" );
+    FILE *f = vlc_fopen( psz_file, "wt" );
     char *psz_save = NULL;
 
     if( !f )
@@ -562,10 +523,12 @@ error:
     return VLC_EGENERIC;
 }
 
-static int ExecuteLoad( vlm_t *p_vlm, const char *psz_url, vlm_message_t **pp_status )
+static int ExecuteLoad( vlm_t *p_vlm, const char *psz_path, vlm_message_t **pp_status )
 {
+    char *psz_url = make_URI( psz_path, NULL );
     stream_t *p_stream = stream_UrlNew( p_vlm, psz_url );
-    int64_t i_size;
+    free( psz_url );
+    uint64_t i_size;
     char *psz_buffer;
 
     if( !p_stream )
@@ -584,6 +547,8 @@ static int ExecuteLoad( vlm_t *p_vlm, const char *psz_url, vlm_message_t **pp_st
     }
 
     i_size = stream_Size( p_stream );
+    if( i_size > SIZE_MAX - 1 )
+        i_size = SIZE_MAX - 1;
 
     psz_buffer = malloc( i_size + 1 );
     if( !psz_buffer )
@@ -640,7 +605,8 @@ static int ExecuteScheduleProperty( vlm_t *p_vlm, vlm_schedule_sys_t *p_schedule
             psz_line = strdup( ppsz_property[i] );
             for( j = i+1; j < i_property; j++ )
             {
-                psz_line = realloc( psz_line, strlen(psz_line) + strlen(ppsz_property[j]) + 1 + 1 );
+                psz_line = xrealloc( psz_line,
+                        strlen(psz_line) + strlen(ppsz_property[j]) + 1 + 1 );
                 strcat( psz_line, " " );
                 strcat( psz_line, ppsz_property[j] );
             }
@@ -664,6 +630,12 @@ static int ExecuteScheduleProperty( vlm_t *p_vlm, vlm_schedule_sys_t *p_schedule
         }
     }
     *pp_status = vlm_MessageSimpleNew( psz_cmd );
+
+    vlc_mutex_lock( &p_vlm->lock_manage );
+    p_vlm->input_state_changed = true;
+    vlc_cond_signal( &p_vlm->wait_manage );
+    vlc_mutex_unlock( &p_vlm->lock_manage );
+
     return VLC_SUCCESS;
 
 error:
@@ -1213,6 +1185,7 @@ static int vlm_ScheduleSetup( vlm_schedule_sys_t *schedule, const char *psz_cmd,
     {
         return 1;
     }
+
     return 0;
 }
 
@@ -1335,7 +1308,6 @@ static vlm_message_t *vlm_ShowMedia( vlm_media_sys_t *p_media )
         vlm_media_instance_sys_t *p_instance = p_media->instance[i];
         vlc_value_t val;
         vlm_message_t *p_msg_instance;
-        char *psz_tmp;
 
         val.i_int = END_S;
         if( p_instance->p_input )
@@ -1354,29 +1326,20 @@ static vlm_message_t *vlm_ShowMedia( vlm_media_sys_t *p_media )
         /* FIXME should not do that this way */
         if( p_instance->p_input )
         {
-#define APPEND_INPUT_INFO( a, format, type ) \
-            if( asprintf( &psz_tmp, format, \
-                      var_Get ## type( p_instance->p_input, a ) ) != -1 ) \
-            { \
-                vlm_MessageAdd( p_msg_instance, vlm_MessageNew( a, \
-                                "%s", psz_tmp ) ); \
-                free( psz_tmp ); \
-            }
+#define APPEND_INPUT_INFO( key, format, type ) \
+            vlm_MessageAdd( p_msg_instance, vlm_MessageNew( key, format, \
+                            var_Get ## type( p_instance->p_input, key ) ) )
             APPEND_INPUT_INFO( "position", "%f", Float );
             APPEND_INPUT_INFO( "time", "%"PRIi64, Time );
             APPEND_INPUT_INFO( "length", "%"PRIi64, Time );
-            APPEND_INPUT_INFO( "rate", "%d", Integer );
-            APPEND_INPUT_INFO( "title", "%d", Integer );
-            APPEND_INPUT_INFO( "chapter", "%d", Integer );
+            APPEND_INPUT_INFO( "rate", "%f", Float );
+            APPEND_INPUT_INFO( "title", "%"PRId64, Integer );
+            APPEND_INPUT_INFO( "chapter", "%"PRId64, Integer );
             APPEND_INPUT_INFO( "can-seek", "%d", Bool );
         }
 #undef APPEND_INPUT_INFO
-        if( asprintf( &psz_tmp, "%d", p_instance->i_index + 1 ) != -1 )
-        {
-            vlm_MessageAdd( p_msg_instance, vlm_MessageNew( "playlistindex",
-                            "%s", psz_tmp ) );
-            free( psz_tmp );
-        }
+        vlm_MessageAdd( p_msg_instance, vlm_MessageNew( "playlistindex",
+                        "%d", p_instance->i_index + 1 ) );
     }
     return p_msg;
 }
@@ -1415,17 +1378,13 @@ static vlm_message_t *vlm_Show( vlm_t *vlm, vlm_media_sys_t *media,
         {
             struct tm date;
             time_t i_time = (time_t)( schedule->i_date / 1000000 );
-            char *psz_date;
 
             localtime_r( &i_time, &date);
-            if( asprintf( &psz_date, "%d/%d/%d-%d:%d:%d",
-                          date.tm_year + 1900, date.tm_mon + 1, date.tm_mday,
-                          date.tm_hour, date.tm_min, date.tm_sec ) != -1 )
-            {
-                 vlm_MessageAdd( msg_schedule,
-                                 vlm_MessageNew( "date", "%s", psz_date ) );
-                 free( psz_date );
-            }
+            vlm_MessageAdd( msg_schedule,
+                            vlm_MessageNew( "date", "%d/%d/%d-%d:%d:%d",
+                                            date.tm_year + 1900, date.tm_mon + 1,
+                                            date.tm_mday, date.tm_hour, date.tm_min,
+                                            date.tm_sec ) );
         }
         else
             vlm_MessageAdd( msg_schedule, vlm_MessageNew("date", "now") );
@@ -1477,10 +1436,8 @@ static vlm_message_t *vlm_Show( vlm_t *vlm, vlm_media_sys_t *media,
         vlm_message_t *p_msg;
         vlm_message_t *p_msg_child;
         int i_vod = 0, i_broadcast = 0;
-        int i;
-        char *psz_count;
 
-        for( i = 0; i < vlm->i_media; i++ )
+        for( int i = 0; i < vlm->i_media; i++ )
         {
             if( vlm->media[i]->cfg.b_vod )
                 i_vod++;
@@ -1488,15 +1445,12 @@ static vlm_message_t *vlm_Show( vlm_t *vlm, vlm_media_sys_t *media,
                 i_broadcast++;
         }
 
-        if( asprintf( &psz_count, "( %d broadcast - %d vod )", i_broadcast,
-                      i_vod) == -1 )
-            return NULL;
         p_msg = vlm_MessageSimpleNew( "show" );
-        p_msg_child = vlm_MessageAdd( p_msg, vlm_MessageNew( "media", "%s",
-                                                             psz_count ) );
-        free( psz_count );
+        p_msg_child = vlm_MessageAdd( p_msg, vlm_MessageNew( "media",
+                                      "( %d broadcast - %d vod )", i_broadcast,
+                                      i_vod ) );
 
-        for( i = 0; i < vlm->i_media; i++ )
+        for( int i = 0; i < vlm->i_media; i++ )
             vlm_MessageAdd( p_msg_child, vlm_ShowMedia( vlm->media[i] ) );
 
         return p_msg;
@@ -1542,18 +1496,13 @@ static vlm_message_t *vlm_Show( vlm_t *vlm, vlm_media_sys_t *media,
             if( i_next_date > i_time )
             {
                 time_t i_date = (time_t) (i_next_date / 1000000) ;
+                struct tm tm;
+                char psz_date[32];
 
-#if !defined( UNDER_CE )
-#ifdef HAVE_CTIME_R
-                char psz_date[500];
-                ctime_r( &i_date, psz_date );
-#else
-                char *psz_date = ctime( &i_date );
-#endif
-
+                strftime( psz_date, sizeof(psz_date), "%Y-%m-%d %H:%M:%S (%a)",
+                          localtime_r( &i_date, &tm ) );
                 vlm_MessageAdd( msg_schedule,
                                 vlm_MessageNew( "next launch", "%s", psz_date ) );
-#endif
             }
         }
 
@@ -1646,12 +1595,12 @@ static char *Save( vlm_t *vlm )
         else
             i_length += strlen( "new * broadcast " ) + strlen(p_cfg->psz_name);
 
-        if( p_cfg->b_enabled == true )
+        if( p_cfg->b_enabled )
             i_length += strlen( "enabled" );
         else
             i_length += strlen( "disabled" );
 
-        if( !p_cfg->b_vod && p_cfg->broadcast.b_loop == true )
+        if( !p_cfg->b_vod && p_cfg->broadcast.b_loop )
             i_length += strlen( " loop\n" );
         else
             i_length += strlen( "\n" );
@@ -1675,7 +1624,7 @@ static char *Save( vlm_t *vlm )
 
         i_length += strlen( "new  schedule " ) + strlen( schedule->psz_name );
 
-        if( schedule->b_enabled == true )
+        if( schedule->b_enabled )
         {
             i_length += strlen( "date //-:: enabled\n" ) + 14;
         }
@@ -1766,7 +1715,7 @@ static char *Save( vlm_t *vlm )
         localtime_r( &i_time, &date);
         p += sprintf( p, "new %s schedule ", schedule->psz_name);
 
-        if( schedule->b_enabled == true )
+        if( schedule->b_enabled )
         {
             p += sprintf( p, "date %d/%d/%d-%d:%d:%d enabled\n",
                           date.tm_year + 1900, date.tm_mon + 1, date.tm_mday,

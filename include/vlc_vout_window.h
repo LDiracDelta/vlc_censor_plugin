@@ -43,13 +43,20 @@ typedef struct vout_window_sys_t vout_window_sys_t;
 enum {
     VOUT_WINDOW_TYPE_XID,
     VOUT_WINDOW_TYPE_HWND,
+    VOUT_WINDOW_TYPE_NSOBJECT,
 };
+
+#if defined (WIN32)
+# define VOUT_WINDOW_TYPE_NATIVE VOUT_WINDOW_TYPE_HWND
+#elif defined (__unix__)
+# define VOUT_WINDOW_TYPE_NATIVE VOUT_WINDOW_TYPE_XID
+#endif
 
 /**
  * Control query for vout_window_t
  */
 enum {
-    VOUT_WINDOW_SET_ON_TOP, /* int b_on_top */
+    VOUT_WINDOW_SET_STATE, /* unsigned state */
     VOUT_WINDOW_SET_SIZE,   /* unsigned i_width, unsigned i_height */
     VOUT_WINDOW_SET_FULLSCREEN, /* int b_fullscreen */
 };
@@ -78,19 +85,20 @@ typedef struct {
 struct vout_window_t {
     VLC_COMMON_MEMBERS
 
-    /* Initial state (reserved).
-     * Once the open function is called, it will be set to NULL
-     */
-    const vout_window_cfg_t *cfg;
-
     /* window handle (mandatory)
      *
      * It must be filled in the open function.
      */
     union {
-        void     *hwnd;   /* Win32 window handle */
-        uint32_t xid;     /* X11 windows ID */
+        void     *hwnd;     /* Win32 window handle */
+        uint32_t xid;       /* X11 windows ID */
+        void     *nsobject; /* Mac OSX view object */
     } handle;
+
+    /* display server (mandatory) */
+    union {
+        char     *x11; /* X11 display (NULL = use default) */
+    } display;
 
     /* Control on the module (mandatory)
      *
@@ -106,38 +114,42 @@ struct vout_window_t {
 };
 
 /** 
- * It creates a new window.
- * 
+ * Creates a new window.
+ *
+ * @param module plugin name (usually "$window")
  * @note If you are inside a "vout display", you must use
- * vout_display_New/DeleteWindow when possible to allow window recycling.
+ / vout_display_NewWindow() and vout_display_DeleteWindow() instead.
+ * This enables recycling windows.
  */
-VLC_EXPORT( vout_window_t *, vout_window_New, (vlc_object_t *, const char *module, const vout_window_cfg_t *) );
+VLC_API vout_window_t * vout_window_New(vlc_object_t *, const char *module, const vout_window_cfg_t *);
 
 /**
- * It deletes a window created by vout_window_New().
+ * Deletes a window created by vout_window_New().
  *
  * @note See vout_window_New() about window recycling.
  */
-VLC_EXPORT( void, vout_window_Delete, (vout_window_t *) );
+VLC_API void vout_window_Delete(vout_window_t *);
+
 
 /**
- * It allows configuring a window.
+ * Reconfigures a window.
+ *
+ * @note The vout_window_* wrappers should be used instead of this function.
  *
  * @warning The caller must own the window, as vout_window_t is not thread safe.
- * You should use it the vout_window_* wrappers instead of this function.
  */
-VLC_EXPORT( int, vout_window_Control, (vout_window_t *, int query, ...) );
+VLC_API int vout_window_Control(vout_window_t *, int query, ...);
 
 /**
- * Configure the "On Top" properties of a windows.
+ * Configures the window manager state for this window.
  */
-static inline int vout_window_SetOnTop(vout_window_t *window, bool is_on_top)
+static inline int vout_window_SetState(vout_window_t *window, unsigned state)
 {
-    return vout_window_Control(window, VOUT_WINDOW_SET_ON_TOP, is_on_top);
+    return vout_window_Control(window, VOUT_WINDOW_SET_STATE, state);
 }
 
 /**
- * Configure the windows display size.
+ * Configures the window display (i.e. inner/useful) size.
  */
 static inline int vout_window_SetSize(vout_window_t *window,
                                       unsigned width, unsigned height)
@@ -146,7 +158,7 @@ static inline int vout_window_SetSize(vout_window_t *window,
 }
 
 /**
- * Configure the windows fullscreen mode.
+ * Sets fullscreen mode.
  */
 static inline int vout_window_SetFullScreen(vout_window_t *window, bool full)
 {
@@ -154,4 +166,3 @@ static inline int vout_window_SetFullScreen(vout_window_t *window, bool full)
 }
 
 #endif /* VLC_VOUT_WINDOW_H */
-

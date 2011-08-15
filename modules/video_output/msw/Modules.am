@@ -1,6 +1,14 @@
+SOURCES_direct2d = \
+        direct2d.c \
+        common.h \
+        events.h \
+        events.c \
+        common.c \
+        $(NULL)
+
 SOURCES_directx = \
 	directx.c \
-	vout.h \
+	common.h \
 	events.h \
 	events.c \
 	common.c \
@@ -8,7 +16,7 @@ SOURCES_directx = \
 
 SOURCES_direct3d = \
 	direct3d.c \
-	vout.h \
+	common.h \
 	events.h \
 	events.c \
 	common.c \
@@ -16,15 +24,17 @@ SOURCES_direct3d = \
 
 SOURCES_glwin32 = \
 	glwin32.c \
-	vout.h \
+	../opengl.h \
+	common.h \
 	events.h \
 	events.c \
 	common.c \
+	../opengl.c \
 	$(NULL)
 
 SOURCES_wingdi = \
 	wingdi.c \
-	vout.h \
+	common.h \
 	events.h \
 	events.c \
 	common.c \
@@ -32,7 +42,7 @@ SOURCES_wingdi = \
 
 SOURCES_wingapi = \
 	wingdi.c \
-	vout.h \
+	common.h \
 	events.h \
 	events.c \
 	common.c \

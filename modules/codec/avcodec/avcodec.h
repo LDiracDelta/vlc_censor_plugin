@@ -21,15 +21,13 @@
  * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston MA 02110-1301, USA.
  *****************************************************************************/
 
+#include "chroma.h"
 /* VLC <-> avcodec tables */
 int GetFfmpegCodec( vlc_fourcc_t i_fourcc, int *pi_cat,
                     int *pi_ffmpeg_codec, const char **ppsz_name );
 int GetVlcFourcc( int i_ffmpeg_codec, int *pi_cat,
                   vlc_fourcc_t *pi_fourcc, const char **ppsz_name );
-int TestFfmpegChroma( const int i_ffmpeg_id, const vlc_fourcc_t i_vlc_fourcc );
-int GetFfmpegChroma( int *i_ffmpeg_chroma, const video_format_t fmt );
-int GetVlcChroma( video_format_t *fmt, const int i_ffmpeg_chroma );
-
+void GetVlcAudioFormat( vlc_fourcc_t *, unsigned *pi_bits, int i_sample_fmt );
 
 picture_t * DecodeVideo    ( decoder_t *, block_t ** );
 aout_buffer_t * DecodeAudio( decoder_t *, block_t ** );
@@ -64,6 +62,8 @@ int InitSubtitleDec( decoder_t *p_dec, AVCodecContext *p_context,
                      AVCodec *p_codec, int i_codec_id, const char *psz_namecodec );
 void EndSubtitleDec( decoder_t *p_dec );
 
+/* Initialize decoder */
+int ffmpeg_OpenCodec( decoder_t *p_dec );
 
 /*****************************************************************************
  * Module descriptor help strings
@@ -136,6 +136,9 @@ void EndSubtitleDec( decoder_t *p_dec );
 
 #define HW_TEXT N_("Hardware decoding")
 #define HW_LONGTEXT N_("This allows hardware decoding when available.")
+
+#define THREADS_TEXT N_( "Threads" )
+#define THREADS_LONGTEXT N_( "Number of threads used for decoding, 0 meaning auto" )
 
 /*
  * Encoder options
@@ -253,7 +256,7 @@ void EndSubtitleDec( decoder_t *p_dec );
    "for encoding the audio bitstream. It takes the following options: " \
    "main, low, ssr (not supported) and ltp (default: main)" )
 
-#define FFMPEG_COMMON_MEMBERS   \
+#define AVCODEC_COMMON_MEMBERS   \
     int i_cat;                  \
     int i_codec_id;             \
     const char *psz_namecodec;  \
@@ -265,6 +268,44 @@ void EndSubtitleDec( decoder_t *p_dec );
 #   define AV_VERSION_INT(a, b, c) ((a)<<16 | (b)<<8 | (c))
 #endif
 
-/* Uncomment it to enable compilation with vaapi (you also must change the build
+#if defined(FF_THREAD_FRAME)
+#   define HAVE_AVCODEC_MT
+#endif
+
+/* Uncomment it to enable compilation with vaapi/dxva2 (you also must change the build
  * system) */
 //#define HAVE_AVCODEC_VAAPI 1
+//#define HAVE_AVCODEC_DXVA2 1
+
+/* Ugly ifdefinitions to provide backwards compatibility with older ffmpeg/libav
+ * versions */
+#ifndef AV_CPU_FLAG_FORCE
+#   define AV_CPU_FLAG_FORCE       FF_MM_FORCE
+#   define AV_CPU_FLAG_MMX         FF_MM_MMX
+#   define AV_CPU_FLAG_3DNOW       FF_MM_3DNOW
+#   define AV_CPU_FLAG_MMX2        FF_MM_MMX2
+#   define AV_CPU_FLAG_SSE         FF_MM_SSE
+#   define AV_CPU_FLAG_SSE2        FF_MM_SSE2
+#   define AV_CPU_FLAG_SSE2SLOW    FF_MM_SSE2SLOW
+#   define AV_CPU_FLAG_3DNOWEXT    FF_MM_3DNOWEXT
+#   define AV_CPU_FLAG_SSE3        FF_MM_SSE3
+#   define AV_CPU_FLAG_SSE3SLOW    FF_MM_SSE3SLOW
+#   define AV_CPU_FLAG_SSSE3       FF_MM_SSSE3
+#   define AV_CPU_FLAG_SSE4        FF_MM_SSE4
+#   define AV_CPU_FLAG_SSE42       FF_MM_SSE42
+#   define AV_CPU_FLAG_IWMMXT      FF_MM_IWMMXT
+#   define AV_CPU_FLAG_ALTIVEC     FF_MM_ALTIVEC
+#endif
+
+#if LIBAVCODEC_VERSION_MAJOR < 53
+#   define AVMediaType             CodecType
+#   define AVMEDIA_TYPE_AUDIO      CODEC_TYPE_AUDIO
+#   define AVMEDIA_TYPE_VIDEO      CODEC_TYPE_VIDEO
+#   define AVMEDIA_TYPE_SUBTITLE   CODEC_TYPE_SUBTITLE
+#   define AVMEDIA_TYPE_DATA       CODEC_TYPE_DATA
+#   define AVMEDIA_TYPE_ATTACHMENT CODEC_TYPE_ATTACHMENT
+#endif
+
+#ifndef AV_PKT_FLAG_KEY
+#   define AV_PKT_FLAG_KEY         PKT_FLAG_KEY
+#endif

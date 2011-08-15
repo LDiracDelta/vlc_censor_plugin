@@ -21,16 +21,13 @@
  * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston MA 02110-1301, USA.
  *****************************************************************************/
 
-#if !defined( __LIBVLC__ )
-  #error You are not libvlc or one of its plugins. You cannot include this file
-#endif
-
 #ifdef HAVE_CONFIG_H
 #include "config.h"
 #endif
 
 #include <vlc_common.h>
 #include <vlc_sql.h>
+#include <vlc_modules.h>
 #include <assert.h>
 #include "libvlc.h"
 
@@ -41,14 +38,12 @@ sql_t *sql_Create( vlc_object_t *p_this, const char *psz_name,
 {
     sql_t *p_sql;
 
-    p_sql = ( sql_t * ) vlc_custom_create( p_this, sizeof( sql_t ),
-                                           VLC_OBJECT_GENERIC, "sql" );
+    p_sql = ( sql_t * ) vlc_custom_create( p_this, sizeof( sql_t ), "sql" );
     if( !p_sql )
     {
         msg_Err( p_this, "unable to create sql object" );
         return NULL;
     }
-    vlc_object_attach( p_sql, p_this );
 
     p_sql->psz_host = strdup( psz_host );
     p_sql->psz_user = strdup( psz_user );

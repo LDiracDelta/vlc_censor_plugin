@@ -32,6 +32,7 @@
  */
 
 #include <vlc_picture.h>
+#include <vlc_text_style.h>
 
 /**
  * \defgroup subpicture Video Subpictures
@@ -84,7 +85,7 @@ struct subpicture_region_t
  *
  * You must use subpicture_region_Delete to destroy it.
  */
-VLC_EXPORT( subpicture_region_t *, subpicture_region_New, ( const video_format_t *p_fmt ) );
+VLC_API subpicture_region_t * subpicture_region_New( const video_format_t *p_fmt );
 
 /**
  * This function will destroy a subpicture region allocated by
@@ -92,7 +93,7 @@ VLC_EXPORT( subpicture_region_t *, subpicture_region_New, ( const video_format_t
  *
  * You may give it NULL.
  */
-VLC_EXPORT( void, subpicture_region_Delete, ( subpicture_region_t *p_region ) );
+VLC_API void subpicture_region_Delete( subpicture_region_t *p_region );
 
 /**
  * This function will destroy a list of subpicture regions allocated by
@@ -100,7 +101,27 @@ VLC_EXPORT( void, subpicture_region_Delete, ( subpicture_region_t *p_region ) );
  *
  * Provided for convenience.
  */
-VLC_EXPORT( void, subpicture_region_ChainDelete, ( subpicture_region_t *p_head ) );
+VLC_API void subpicture_region_ChainDelete( subpicture_region_t *p_head );
+
+/**
+ *
+ */
+typedef struct subpicture_updater_sys_t subpicture_updater_sys_t;
+typedef struct
+{
+    int  (*pf_validate)( subpicture_t *,
+                         bool has_src_changed, const video_format_t *p_fmt_src,
+                         bool has_dst_changed, const video_format_t *p_fmt_dst,
+                         mtime_t);
+    void (*pf_update)  ( subpicture_t *,
+                         const video_format_t *p_fmt_src,
+                         const video_format_t *p_fmt_dst,
+                         mtime_t );
+    void (*pf_destroy) ( subpicture_t * );
+    subpicture_updater_sys_t *p_sys;
+} subpicture_updater_t;
+
+typedef struct subpicture_private_t subpicture_private_t;
 
 /**
  * Video subtitle
@@ -124,6 +145,8 @@ struct subpicture_t
     subpicture_t *  p_next;               /**< next subtitle to be displayed */
     /**@}*/
 
+    subpicture_region_t *p_region;  /**< region list composing this subtitle */
+
     /** \name Date properties */
     /**@{*/
     mtime_t         i_start;                  /**< beginning of display date */
@@ -133,45 +156,35 @@ struct subpicture_t
     bool            b_fade;                               /**< enable fading */
     /**@}*/
 
-    subpicture_region_t *p_region;  /**< region list composing this subtitle */
-
     /** \name Display properties
      * These properties are only indicative and may be
      * changed by the video output thread, or simply ignored depending of the
      * subtitle type. */
     /**@{*/
-    int          i_original_picture_width;  /**< original width of the movie */
-    int          i_original_picture_height;/**< original height of the movie */
     bool         b_subtitle;            /**< the picture is a movie subtitle */
     bool         b_absolute;                       /**< position is absolute */
+    int          i_original_picture_width;  /**< original width of the movie */
+    int          i_original_picture_height;/**< original height of the movie */
     int          i_alpha;                                  /**< transparency */
      /**@}*/
 
-    /** Pointer to function that cleans up the private data of this subtitle */
-    void ( *pf_destroy ) ( subpicture_t * );
+    subpicture_updater_t updater;
 
-    /** Pointer to function that update the regions before rendering (optionnal) */
-    void (*pf_update_regions)( spu_t *,
-                               subpicture_t *, const video_format_t *, mtime_t );
-
-    /** Private data - the subtitle plugin might want to put stuff here to
-     * keep track of the subpicture */
-    subpicture_sys_t *p_sys;                              /* subpicture data */
+    subpicture_private_t *p_private;    /* Reserved to the core */
 };
-
 
 /**
  * This function create a new empty subpicture.
  *
  * You must use subpicture_Delete to destroy it.
  */
-VLC_EXPORT( subpicture_t *, subpicture_New, ( void ) );
+VLC_API subpicture_t * subpicture_New( const subpicture_updater_t * );
 
 /**
  * This function delete a subpicture created by subpicture_New.
  * You may give it NULL.
  */
-VLC_EXPORT( void,  subpicture_Delete, ( subpicture_t *p_subpic ) );
+VLC_API void subpicture_Delete( subpicture_t *p_subpic );
 
 /**
  * This function will create a subpicture having one region in the requested
@@ -180,7 +193,13 @@ VLC_EXPORT( void,  subpicture_Delete, ( subpicture_t *p_subpic ) );
  * The picture_t given is not released nor used inside the
  * returned subpicture_t.
  */
-VLC_EXPORT( subpicture_t *, subpicture_NewFromPicture, ( vlc_object_t *, picture_t *, vlc_fourcc_t i_chroma ) );
+VLC_API subpicture_t * subpicture_NewFromPicture( vlc_object_t *, picture_t *, vlc_fourcc_t i_chroma );
+
+/**
+ * This function will update the content of a subpicture created with
+ * a non NULL subpicture_updater_t.
+ */
+VLC_API void subpicture_Update( subpicture_t *, const video_format_t *src, const video_format_t *, mtime_t );
 
 /**@}*/
 

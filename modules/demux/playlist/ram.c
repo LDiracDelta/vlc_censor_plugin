@@ -50,8 +50,7 @@ http://service.real.com/help/library/guides/realone/IntroGuide/HTML/htmfiles/ram
 #include <vlc_common.h>
 #include <vlc_demux.h>
 #include <vlc_url.h>
-
-#include <ctype.h>
+#include <vlc_charset.h>
 
 #include "playlist.h"
 
@@ -216,6 +215,8 @@ static int Demux( demux_t *p_demux )
 
     input_item_t *p_current_input = GetCurrentItem(p_demux);
 
+    input_item_node_t *p_subitems = input_item_node_Create( p_current_input );
+
     psz_line = stream_ReadLine( p_demux->s );
     while( psz_line )
     {
@@ -282,8 +283,12 @@ static int Demux( demux_t *p_demux )
                            &psz_cdnum, &psz_comments ); /* clipinfo has various sub parameters, which is parsed by this function */
                     }
                     else if( !strcmp( psz_param, "author" ) )
-                        psz_author = decode_URI(psz_value);
-                    else if( !strcmp( psz_param, "start" ) )
+                    {
+                        psz_author = decode_URI_duplicate(psz_value);
+                        EnsureUTF8( psz_author );
+                    }
+                    else if( !strcmp( psz_param, "start" )
+                            && strncmp( psz_mrl, "rtsp", 4 ) /* Our rtsp-real or our real demuxer is wrong */  )
                     {
                         i_start = ParseTime( psz_value, strlen( psz_value ) );
                         char *temp;
@@ -304,9 +309,15 @@ static int Demux( demux_t *p_demux )
                         }
                     }
                     else if( !strcmp( psz_param, "title" ) )
-                        psz_title = decode_URI(psz_value);
+                    {
+                        psz_title = decode_URI_duplicate(psz_value);
+                        EnsureUTF8( psz_title );
+                    }
                     else if( !strcmp( psz_param, "copyright" ) )
-                        psz_copyright = decode_URI(psz_value);
+                    {
+                        psz_copyright = decode_URI_duplicate(psz_value);
+                        EnsureUTF8( psz_copyright );
+                    }
                     else
                     {   /* TODO: insert option anyway? Currently ignores*/
                         /* INSERT_ELEM( ppsz_options, i_options, i_options, psz_option ); */
@@ -315,7 +326,7 @@ static int Demux( demux_t *p_demux )
             }
 
             /* Create the input item and pump in all the options into playlist item */
-            p_input = input_item_NewExt( p_demux, psz_mrl, psz_title, i_options, ppsz_options, 0, i_duration );
+            p_input = input_item_NewExt( psz_mrl, psz_title, i_options, ppsz_options, 0, i_duration );
 
             if( !EMPTY_STR( psz_artist ) ) input_item_SetArtist( p_input, psz_artist );
             if( !EMPTY_STR( psz_author ) ) input_item_SetPublisher( p_input, psz_author );
@@ -327,7 +338,7 @@ static int Demux( demux_t *p_demux )
             if( !EMPTY_STR( psz_cdnum ) ) input_item_SetTrackNum( p_input, psz_cdnum );
             if( !EMPTY_STR( psz_comments ) ) input_item_SetDescription( p_input, psz_comments );
 
-            input_item_AddSubItem( p_current_input, p_input );
+            input_item_node_AppendItem( p_subitems, p_input );
             vlc_gc_decref( p_input );
             free( psz_mrl );
         }
@@ -360,6 +371,7 @@ static int Demux( demux_t *p_demux )
             b_cleanup = false;
         }
     }
+    input_item_node_PostAndDelete( p_subitems );
     vlc_gc_decref(p_current_input);
     var_Destroy( p_demux, "m3u-extvlcopt" );
     return 0; /* Needed for correct operation of go back */
@@ -433,19 +445,19 @@ static void ParseClipInfo( const char *psz_clipinfo, char **ppsz_artist, char **
             break;
         /* Put into args */
         if( !strcmp( psz_param, "artist name" ) )
-            *ppsz_artist = decode_URI( psz_value );
+            *ppsz_artist = decode_URI_duplicate( psz_value );
         else if( !strcmp( psz_param, "title" ) )
-            *ppsz_title = decode_URI( psz_value );
+            *ppsz_title = decode_URI_duplicate( psz_value );
         else if( !strcmp( psz_param, "album name" ) )
-            *ppsz_album = decode_URI( psz_value );
+            *ppsz_album = decode_URI_duplicate( psz_value );
         else if( !strcmp( psz_param, "genre" ) )
-            *ppsz_genre = decode_URI( psz_value );
+            *ppsz_genre = decode_URI_duplicate( psz_value );
         else if( !strcmp( psz_param, "year" ) )
-            *ppsz_year = decode_URI( psz_value );
+            *ppsz_year = decode_URI_duplicate( psz_value );
         else if( !strcmp( psz_param, "cdnum" ) )
-            *ppsz_cdnum = decode_URI( psz_value );
+            *ppsz_cdnum = decode_URI_duplicate( psz_value );
         else if( !strcmp( psz_param, "comments" ) )
-            *ppsz_comments = decode_URI( psz_value );
+            *ppsz_comments = decode_URI_duplicate( psz_value );
 
         free( psz_suboption );
         psz_option_next++;

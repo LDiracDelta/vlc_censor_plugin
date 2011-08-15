@@ -37,19 +37,23 @@
 #ifndef WIN32
 #include <unistd.h>
 #include <sys/wait.h>
+#include <signal.h>
+#else
+#include <errno.h>
+#endif
+#include <assert.h>
+
+#ifdef __APPLE__
+#include <sys/sysctl.h>
 #endif
 
 #include "libvlc.h"
 
-#if defined(__APPLE__) && (defined(__ppc__) || defined(__ppc64__))
-#include <sys/sysctl.h>
-#endif
-
 #if defined( __i386__ ) || defined( __x86_64__ ) || defined( __powerpc__ ) \
  || defined( __ppc__ ) || defined( __ppc64__ ) || defined( __powerpc64__ )
+# ifndef WIN32
 static bool check_OS_capability( const char *psz_capability, pid_t pid )
 {
-#ifndef WIN32
     int status;
 
     if( pid == -1 )
@@ -65,14 +69,25 @@ static bool check_OS_capability( const char *psz_capability, pid_t pid )
     fprintf( stderr, "         some optimizations will be disabled unless "
                      "you upgrade your OS\n" );
     return false;
-#else
-# warning FIXME!
-# define fork() (errno = ENOSYS, -1)
-    (void)pid;
-    (void)psz_capability;
-    return true;
-#endif
 }
+
+#  define check_capability(name, flag, code)   \
+     do {                                      \
+        pid_t pid = fork();                    \
+        if( pid == 0 )                         \
+        {                                      \
+            signal(SIGILL, SIG_DFL);           \
+            __asm__ __volatile__ ( code : : ); \
+            _exit(0);                          \
+        }                                      \
+        if( check_OS_capability((name), pid )) \
+            i_capabilities |= (flag);          \
+     } while(0)
+
+# else /* WIN32 */
+#  define check_capability(name, flag, code)   \
+        i_capabilities |= (flag);
+# endif
 #endif
 
 /*****************************************************************************
@@ -112,7 +127,7 @@ uint32_t CPUCapabilities( void )
                          : "a"  ( reg )        \
                          : "cc" );
 #   endif
-
+     /* Check if the OS really supports the requested instructions */
 # if defined (__i386__) && !defined (__i486__) && !defined (__i586__) \
   && !defined (__i686__) && !defined (__pentium4__) \
   && !defined (__k6__) && !defined (__athlon__) && !defined (__k8__)
@@ -167,54 +182,50 @@ uint32_t CPUCapabilities( void )
         i_capabilities |= CPU_CAPABILITY_MMXEXT;
 
 #   ifdef CAN_COMPILE_SSE
-        /* We test if OS supports the SSE instructions */
-        pid_t pid = fork();
-        if( pid == 0 )
-        {
-            /* Test a SSE instruction */
-            __asm__ __volatile__ ( "xorps %%xmm0,%%xmm0\n" : : );
-            exit(0);
-        }
-        if( check_OS_capability( "SSE", pid ) )
-            i_capabilities |= CPU_CAPABILITY_SSE;
+        check_capability( "SSE", CPU_CAPABILITY_SSE,
+                          "xorps %%xmm0,%%xmm0\n" );
 #   endif
     }
 # endif
 
 # if defined (__SSE2__)
     i_capabilities |= CPU_CAPABILITY_SSE2;
-# elif defined (CAN_COMPILE_SSE)
+# elif defined (CAN_COMPILE_SSE2)
     if( i_edx & 0x04000000 )
-    {
-        /* We test if OS supports the SSE2 instructions */
-        pid_t pid = fork();
-        if( pid == 0 )
-        {
-            /* Test a SSE2 instruction */
-            __asm__ __volatile__ ( "movupd %%xmm0, %%xmm0\n" : : );
-            exit(0);
-        }
-        if( check_OS_capability( "SSE2", pid ) )
-            i_capabilities |= CPU_CAPABILITY_SSE2;
-    }
+        check_capability( "SSE2", CPU_CAPABILITY_SSE2,
+                          "movupd %%xmm0, %%xmm0\n" );
 # endif
 
 # if defined (__SSE3__)
     i_capabilities |= CPU_CAPABILITY_SSE3;
 # elif defined (CAN_COMPILE_SSE3)
     if( i_ecx & 0x00000001 )
-    {
-        /* We test if OS supports the SSE3 instructions */
-        pid_t pid = fork();
-        if( pid == 0 )
-        {
-            /* Test a SSE3 instruction */
-            __asm__ __volatile__ ( "movsldup %%xmm1, %%xmm0\n" : : );
-            exit(0);
-        }
-        if( check_OS_capability( "SSE3", pid ) )
-            i_capabilities |= CPU_CAPABILITY_SSE3;
-    }
+        check_capability( "SSE3", CPU_CAPABILITY_SSE3,
+                          "movsldup %%xmm1, %%xmm0\n" );
+# endif
+
+# if defined (__SSSE3__)
+    i_capabilities |= CPU_CAPABILITY_SSSE3;
+# elif defined (CAN_COMPILE_SSSE3)
+    if( i_ecx & 0x00000200 )
+        check_capability( "SSSE3", CPU_CAPABILITY_SSSE3,
+                          "pabsw %%xmm1, %%xmm0\n" );
+# endif
+
+# if defined (__SSE4_1__)
+    i_capabilities |= CPU_CAPABILITY_SSE4_1;
+# elif defined (CAN_COMPILE_SSE4_1)
+    if( i_ecx & 0x00080000 )
+        check_capability( "SSE4.1", CPU_CAPABILITY_SSE4_1,
+                          "pmaxsb %%xmm1, %%xmm0\n" );
+# endif
+
+# if defined (__SSE4_2__)
+    i_capabilities |= CPU_CAPABILITY_SSE4_2;
+# elif defined (CAN_COMPILE_SSE4_2)
+    if( i_ecx & 0x00100000 )
+        check_capability( "SSE4.2", CPU_CAPABILITY_SSE4_2,
+                          "pcmpgtq %%xmm1, %%xmm0\n" );
 # endif
 
     /* test for additional capabilities */
@@ -230,17 +241,8 @@ uint32_t CPUCapabilities( void )
     i_capabilities |= CPU_CAPABILITY_3DNOW;
 # elif defined (CAN_COMPILE_3DNOW)
     if( i_edx & 0x80000000 )
-    {
-        pid_t pid = fork();
-        if( pid == 0 )
-        {
-            /* Test a 3D Now! instruction */
-            __asm__ __volatile__ ( "pfadd %%mm0,%%mm0\n" "femms\n" : : );
-            exit(0);
-        }
-        if( check_OS_capability( "3D Now!", pid ) )
-            i_capabilities |= CPU_CAPABILITY_3DNOW;
-    }
+        check_capability( "3D Now!", CPU_CAPABILITY_3DNOW,
+                          "pfadd %%mm0,%%mm0\n" "femms\n" );
 # endif
 
     if( b_amd && ( i_edx & 0x00400000 ) )
@@ -249,16 +251,52 @@ uint32_t CPUCapabilities( void )
     }
 out:
 
-#elif defined( __arm__ )
-#   if defined( __ARM_NEON__ )
+#elif defined (__arm__)
+
+# if defined (__ARM_NEON__)
     i_capabilities |= CPU_CAPABILITY_NEON;
+# elif defined (CAN_COMPILE_NEON)
+#  define NEED_RUNTIME_CPU_CHECK 1
+# endif
+
+# ifdef NEED_RUNTIME_CPU_CHECK
+#  if defined (__linux__)
+    FILE *info = fopen ("/proc/cpuinfo", "rt");
+    if (info != NULL)
+    {
+        char *line = NULL;
+        size_t linelen = 0;
+
+        while (getline (&line, &linelen, info) != -1)
+        {
+             const char *cap;
+
+             if (strncmp (line, "Features\t:", 10))
+                 continue;
+#   if defined (CAN_COMPILE_NEON) && !defined (__ARM_NEON__)
+             cap = strstr (line + 10, " neon");
+             if (cap != NULL && (cap[5] == '\0' || cap[5] == ' '))
+                 i_capabilities |= CPU_CAPABILITY_NEON;
 #   endif
+             break;
+        }
+        fclose (info);
+        free (line);
+    }
+#  else
+#   warning Run-time CPU detection missing: optimizations disabled!
+#  endif
+# endif
 
 #elif defined( __powerpc__ ) || defined( __ppc__ ) || defined( __powerpc64__ ) \
     || defined( __ppc64__ )
 
-#   if defined(__APPLE__)
+#   if defined(__APPLE__) || defined(__OpenBSD__)
+#   if defined(__OpenBSD__)
+    int selectors[2] = { CTL_MACHDEP, CPU_ALTIVEC };
+#   else
     int selectors[2] = { CTL_HW, HW_VECTORUNIT };
+#   endif
     int i_has_altivec = 0;
     size_t i_length = sizeof( i_has_altivec );
     int i_error = sysctl( selectors, 2, &i_has_altivec, &i_length, NULL, 0);
@@ -270,11 +308,12 @@ out:
     pid_t pid = fork();
     if( pid == 0 )
     {
+        signal(SIGILL, SIG_DFL);
         asm volatile ("mtspr 256, %0\n\t"
                       "vand %%v0, %%v0, %%v0"
                       :
                       : "r" (-1));
-        exit(0);
+        _exit(0);
     }
 
     if( check_OS_capability( "Altivec", pid ) )
@@ -298,14 +337,11 @@ unsigned vlc_CPU (void)
 }
 
 static vlc_memcpy_t pf_vlc_memcpy = memcpy;
-static vlc_memset_t pf_vlc_memset = memset;
 
-void vlc_fastmem_register (vlc_memcpy_t cpy, vlc_memset_t set)
+void vlc_fastmem_register (vlc_memcpy_t cpy)
 {
-    if (cpy)
-        pf_vlc_memcpy = cpy;
-    if (set)
-        pf_vlc_memset = set;
+    assert (cpy != NULL);
+    pf_vlc_memcpy = cpy;
 }
 
 /**
@@ -317,9 +353,29 @@ void *vlc_memcpy (void *tgt, const void *src, size_t n)
 }
 
 /**
- * vlc_memset: fast CPU-dependent memset
+ * Returned an aligned pointer on newly allocated memory.
+ * \param alignment must be a power of 2 and a multiple of sizeof(void*)
+ * \param size is the size of the usable memory returned.
+ *
+ * It must not be freed directly, *base must.
  */
-void *vlc_memset (void *tgt, int c, size_t n)
+void *vlc_memalign(void **base, size_t alignment, size_t size)
 {
-    return pf_vlc_memset (tgt, c, n);
+    assert(alignment >= sizeof(void*));
+    for (size_t t = alignment; t > 1; t >>= 1)
+        assert((t&1) == 0);
+#if defined(HAVE_POSIX_MEMALIGN)
+    if (posix_memalign(base, alignment, size)) {
+        *base = NULL;
+        return NULL;
+    }
+    return *base;
+#elif defined(HAVE_MEMALIGN)
+    return *base = memalign(alignment, size);
+#else
+    unsigned char *p = *base = malloc(size + alignment - 1);
+    if (!p)
+        return NULL;
+    return (void*)((uintptr_t)(p + alignment - 1) & ~(alignment - 1));
+#endif
 }

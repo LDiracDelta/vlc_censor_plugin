@@ -33,6 +33,7 @@
 #include <vlc_common.h>
 #include <vlc_plugin.h>
 #include <vlc_filter.h>
+#include "filter_picture.h"
 
 /*****************************************************************************
  * Module descriptor
@@ -93,55 +94,11 @@ static void BlendRGBAR16( filter_t *, picture_t *, const picture_t *,
 static void BlendRGBAR24( filter_t *, picture_t *, const picture_t *,
                           int, int, int, int, int );
 
-/*****************************************************************************
- * OpenFilter: probe the filter and return score
- *****************************************************************************/
-static int OpenFilter( vlc_object_t *p_this )
+struct filter_sys_t
 {
-    filter_t *p_filter = (filter_t*)p_this;
+    int i_blendcfg;
+};
 
-    /* Check if we can handle that format.
-     * We could try to use a chroma filter if we can't. */
-    int in_chroma = p_filter->fmt_in.video.i_chroma;
-    int out_chroma = p_filter->fmt_out.video.i_chroma;
-    if( ( in_chroma  != VLC_CODEC_YUVA && in_chroma  != VLC_CODEC_I420 &&
-          in_chroma  != VLC_CODEC_YV12 && in_chroma  != VLC_CODEC_YUVP &&
-          in_chroma  != VLC_CODEC_RGBA ) ||
-        ( out_chroma != VLC_CODEC_I420 && out_chroma != VLC_CODEC_J420 &&
-          out_chroma != VLC_CODEC_YV12 &&
-          out_chroma != VLC_CODEC_YUYV && out_chroma != VLC_CODEC_YVYU &&
-          out_chroma != VLC_CODEC_UYVY && out_chroma != VLC_CODEC_VYUY &&
-          out_chroma != VLC_CODEC_RGB15 &&
-          out_chroma != VLC_CODEC_RGB16 &&
-          out_chroma != VLC_CODEC_RGB24 &&
-          out_chroma != VLC_CODEC_RGB32 ) )
-    {
-        return VLC_EGENERIC;
-    }
-
-    /* Misc init */
-    p_filter->pf_video_blend = Blend;
-
-    msg_Dbg( p_filter, "chroma: %4.4s -> %4.4s",
-             (char *)&p_filter->fmt_in.video.i_chroma,
-             (char *)&p_filter->fmt_out.video.i_chroma );
-
-    return VLC_SUCCESS;
-}
-
-/*****************************************************************************
- * CloseFilter: clean up the filter
- *****************************************************************************/
-static void CloseFilter( vlc_object_t *p_this )
-{
-    (void)p_this;
-}
-
-/****************************************************************************
- * Blend: the whole thing
- ****************************************************************************
- * This function is called just after the thread is launched.
- ****************************************************************************/
 typedef void (*BlendFunction)( filter_t *,
                        picture_t *, const picture_t *,
                        int , int , int , int , int );
@@ -177,6 +134,84 @@ static const struct
     { 0, {0,}, NULL }
 };
 
+/*****************************************************************************
+ * OpenFilter: probe the filter and return score
+ *****************************************************************************/
+static int OpenFilter( vlc_object_t *p_this )
+{
+    filter_t *p_filter = (filter_t*)p_this;
+    filter_sys_t *p_sys = (filter_sys_t *)malloc( sizeof( filter_sys_t ) );
+    if( !p_sys )
+        return VLC_ENOMEM;
+    p_filter->p_sys = p_sys;
+    p_filter->p_sys->i_blendcfg = -1;
+
+    /* Check if we can handle that format.
+     * We could try to use a chroma filter if we can't. */
+    int in_chroma = p_filter->fmt_in.video.i_chroma;
+    int out_chroma = p_filter->fmt_out.video.i_chroma;
+
+    if( ( in_chroma  != VLC_CODEC_YUVA && in_chroma  != VLC_CODEC_I420 &&
+          in_chroma  != VLC_CODEC_YV12 && in_chroma  != VLC_CODEC_YUVP &&
+          in_chroma  != VLC_CODEC_RGBA ) ||
+        ( out_chroma != VLC_CODEC_I420 && out_chroma != VLC_CODEC_J420 &&
+          out_chroma != VLC_CODEC_YV12 &&
+          out_chroma != VLC_CODEC_YUYV && out_chroma != VLC_CODEC_YVYU &&
+          out_chroma != VLC_CODEC_UYVY && out_chroma != VLC_CODEC_VYUY &&
+          out_chroma != VLC_CODEC_RGB15 &&
+          out_chroma != VLC_CODEC_RGB16 &&
+          out_chroma != VLC_CODEC_RGB24 &&
+          out_chroma != VLC_CODEC_RGB32 ) )
+    {
+        return VLC_EGENERIC;
+    }
+    for( int i = 0; p_blend_cfg[i].src != 0; i++ )
+    {
+        if( p_blend_cfg[i].src != p_filter->fmt_in.video.i_chroma )
+            continue;
+        for( int j = 0; p_blend_cfg[i].p_dst[j] != 0; j++ )
+        {
+            if( p_blend_cfg[i].p_dst[j] != p_filter->fmt_out.video.i_chroma )
+                continue;
+            p_sys->i_blendcfg = i;
+        }
+    }
+
+    if( p_sys->i_blendcfg == -1 )
+    {
+       msg_Dbg( p_filter, "no matching alpha blending routine "
+             "(chroma: %4.4s -> %4.4s)",
+             (char *)&p_filter->fmt_in.video.i_chroma,
+             (char *)&p_filter->fmt_out.video.i_chroma );
+      free( p_sys );
+      return VLC_EGENERIC;
+   }
+
+    /* Misc init */
+    p_filter->pf_video_blend = Blend;
+
+    msg_Dbg( p_filter, "chroma: %4.4s -> %4.4s",
+             (char *)&p_filter->fmt_in.video.i_chroma,
+             (char *)&p_filter->fmt_out.video.i_chroma );
+
+    return VLC_SUCCESS;
+}
+
+/*****************************************************************************
+ * CloseFilter: clean up the filter
+ *****************************************************************************/
+static void CloseFilter( vlc_object_t *p_this )
+{
+    filter_t *p_filter = (filter_t*)p_this;
+    free( p_filter->p_sys );
+}
+
+/****************************************************************************
+ * Blend: the whole thing
+ ****************************************************************************
+ * This function is called just after the thread is launched.
+ ****************************************************************************/
+
 static void Blend( filter_t *p_filter,
                    picture_t *p_dst, const picture_t *p_src,
                    int i_x_offset, int i_y_offset, int i_alpha )
@@ -199,45 +234,21 @@ static void Blend( filter_t *p_filter,
     video_format_FixRgb( &p_filter->fmt_in.video );
 
 #if 0
-    msg_Dbg( p_filter, "chroma: %4.4s -> %4.4s\n",
+    msg_Dbg( p_filter, "chroma: %4.4s -> %4.4s",
              (char *)&p_filter->fmt_in.video.i_chroma,
              (char *)&p_filter->fmt_out.video.i_chroma );
 #endif
 
-    for( int i = 0; p_blend_cfg[i].src != 0; i++ )
-    {
-        if( p_blend_cfg[i].src != p_filter->fmt_in.video.i_chroma )
-            continue;
-        for( int j = 0; p_blend_cfg[i].p_dst[j] != 0; j++ )
-        {
-            if( p_blend_cfg[i].p_dst[j] != p_filter->fmt_out.video.i_chroma )
-                continue;
 
-            p_blend_cfg[i].pf_blend( p_filter, p_dst, p_src,
-                                     i_x_offset, i_y_offset,
-                                     i_width, i_height, i_alpha );
-            return;
-        }
-    }
+    p_blend_cfg[p_filter->p_sys->i_blendcfg].pf_blend( p_filter, p_dst, p_src,
+                            i_x_offset, i_y_offset,
+                            i_width, i_height, i_alpha );
 
-    msg_Dbg( p_filter, "no matching alpha blending routine "
-             "(chroma: %4.4s -> %4.4s)",
-             (char *)&p_filter->fmt_in.video.i_chroma,
-             (char *)&p_filter->fmt_out.video.i_chroma );
 }
 
 /***********************************************************************
  * Utils
  ***********************************************************************/
-static inline uint8_t vlc_uint8( int v )
-{
-    if( v > 255 )
-        return 255;
-    else if( v < 0 )
-        return 0;
-    return v;
-}
-
 #define MAX_TRANS 255
 #define TRANS_BITS  8
 
@@ -256,39 +267,6 @@ static inline int vlc_alpha( int t, int a )
     if( a == 255 )
         return t;
     return (t * a) / 255;
-}
-
-static inline void yuv_to_rgb( int *r, int *g, int *b,
-                               uint8_t y1, uint8_t u1, uint8_t v1 )
-{
-    /* macros used for YUV pixel conversions */
-#   define SCALEBITS 10
-#   define ONE_HALF  (1 << (SCALEBITS - 1))
-#   define FIX(x)    ((int) ((x) * (1<<SCALEBITS) + 0.5))
-
-    int y, cb, cr, r_add, g_add, b_add;
-
-    cb = u1 - 128;
-    cr = v1 - 128;
-    r_add = FIX(1.40200*255.0/224.0) * cr + ONE_HALF;
-    g_add = - FIX(0.34414*255.0/224.0) * cb
-            - FIX(0.71414*255.0/224.0) * cr + ONE_HALF;
-    b_add = FIX(1.77200*255.0/224.0) * cb + ONE_HALF;
-    y = (y1 - 16) * FIX(255.0/219.0);
-    *r = vlc_uint8( (y + r_add) >> SCALEBITS );
-    *g = vlc_uint8( (y + g_add) >> SCALEBITS );
-    *b = vlc_uint8( (y + b_add) >> SCALEBITS );
-#undef FIX
-#undef ONE_HALF
-#undef SCALEBITS
-}
-
-static inline void rgb_to_yuv( uint8_t *y, uint8_t *u, uint8_t *v,
-                               int r, int g, int b )
-{
-    *y = ( ( (  66 * r + 129 * g +  25 * b + 128 ) >> 8 ) + 16 );
-    *u =   ( ( -38 * r -  74 * g + 112 * b + 128 ) >> 8 ) + 128 ;
-    *v =   ( ( 112 * r -  94 * g -  18 * b + 128 ) >> 8 ) + 128 ;
 }
 
 static uint8_t *vlc_plane_start( int *pi_pitch,
@@ -395,11 +373,13 @@ static void BlendYUVAI420( filter_t *p_filter,
     int i_x, i_y, i_trans = 0;
     bool b_even_scanline = i_y_offset % 2;
 
+    bool b_swap_up = vlc_fourcc_AreUVPlanesSwapped( p_filter->fmt_out.video.i_chroma,
+                                                    VLC_CODEC_I420 );
     p_dst_y = vlc_plane_start( &i_dst_pitch, p_dst, Y_PLANE,
                                i_x_offset, i_y_offset, &p_filter->fmt_out.video, 1 );
-    p_dst_u = vlc_plane_start( NULL, p_dst, U_PLANE,
+    p_dst_u = vlc_plane_start( NULL, p_dst, b_swap_up ? V_PLANE : U_PLANE,
                                i_x_offset, i_y_offset, &p_filter->fmt_out.video, 2 );
-    p_dst_v = vlc_plane_start( NULL, p_dst, V_PLANE,
+    p_dst_v = vlc_plane_start( NULL, p_dst, b_swap_up ? U_PLANE : V_PLANE,
                                i_x_offset, i_y_offset, &p_filter->fmt_out.video, 2 );
 
     p_src_y = vlc_plane_start( &i_src_pitch, p_src, Y_PLANE,
@@ -583,12 +563,6 @@ static void BlendYUVARV24( filter_t *p_filter,
     else
     {
         int i_rindex, i_gindex, i_bindex;
-        uint32_t i_rmask, i_gmask, i_bmask;
-
-        i_rmask = p_filter->fmt_out.video.i_rmask;
-        i_gmask = p_filter->fmt_out.video.i_gmask;
-        i_bmask = p_filter->fmt_out.video.i_bmask;
-
         vlc_rgb_index( &i_rindex, &i_gindex, &i_bindex, &p_filter->fmt_out.video );
 
         /* Draw until we reach the bottom of the subtitle */
@@ -714,20 +688,23 @@ static void BlendI420I420( filter_t *p_filter,
         return;
     }
 
-
+    bool b_swap_up = vlc_fourcc_AreUVPlanesSwapped( p_filter->fmt_out.video.i_chroma,
+                                                    VLC_CODEC_I420 );
     i_dst_pitch = p_dst->p[Y_PLANE].i_pitch;
     p_dst_y = p_dst->p[Y_PLANE].p_pixels + i_x_offset +
               p_filter->fmt_out.video.i_x_offset +
               p_dst->p[Y_PLANE].i_pitch *
               ( i_y_offset + p_filter->fmt_out.video.i_y_offset );
-    p_dst_u = p_dst->p[U_PLANE].p_pixels + i_x_offset/2 +
+    const int i_u_plane = b_swap_up ? V_PLANE : U_PLANE;
+    p_dst_u = p_dst->p[i_u_plane].p_pixels + i_x_offset/2 +
               p_filter->fmt_out.video.i_x_offset/2 +
               ( i_y_offset + p_filter->fmt_out.video.i_y_offset ) / 2 *
-              p_dst->p[U_PLANE].i_pitch;
-    p_dst_v = p_dst->p[V_PLANE].p_pixels + i_x_offset/2 +
+              p_dst->p[i_u_plane].i_pitch;
+    const int i_v_plane = b_swap_up ? U_PLANE : V_PLANE;
+    p_dst_v = p_dst->p[i_v_plane].p_pixels + i_x_offset/2 +
               p_filter->fmt_out.video.i_x_offset/2 +
               ( i_y_offset + p_filter->fmt_out.video.i_y_offset ) / 2 *
-              p_dst->p[V_PLANE].i_pitch;
+              p_dst->p[i_v_plane].i_pitch;
 
     p_src_y = vlc_plane_start( &i_src_pitch, p_src, Y_PLANE,
                                0, 0, &p_filter->fmt_in.video, 1 );
@@ -782,19 +759,23 @@ static void BlendI420I420_no_alpha( filter_t *p_filter,
     int i_y;
     bool b_even_scanline = i_y_offset % 2;
 
+    bool b_swap_up = vlc_fourcc_AreUVPlanesSwapped( p_filter->fmt_out.video.i_chroma,
+                                                    VLC_CODEC_I420 );
     i_dst_pitch = p_dst->p[Y_PLANE].i_pitch;
     p_dst_y = p_dst->p[Y_PLANE].p_pixels + i_x_offset +
               p_filter->fmt_out.video.i_x_offset +
               p_dst->p[Y_PLANE].i_pitch *
               ( i_y_offset + p_filter->fmt_out.video.i_y_offset );
-    p_dst_u = p_dst->p[U_PLANE].p_pixels + i_x_offset/2 +
+    const int i_u_plane = b_swap_up ? V_PLANE : U_PLANE;
+    p_dst_u = p_dst->p[i_u_plane].p_pixels + i_x_offset/2 +
               p_filter->fmt_out.video.i_x_offset/2 +
               ( i_y_offset + p_filter->fmt_out.video.i_y_offset ) / 2 *
-              p_dst->p[U_PLANE].i_pitch;
-    p_dst_v = p_dst->p[V_PLANE].p_pixels + i_x_offset/2 +
+              p_dst->p[i_u_plane].i_pitch;
+    const int i_v_plane = b_swap_up ? U_PLANE : V_PLANE;
+    p_dst_v = p_dst->p[i_v_plane].p_pixels + i_x_offset/2 +
               p_filter->fmt_out.video.i_x_offset/2 +
               ( i_y_offset + p_filter->fmt_out.video.i_y_offset ) / 2 *
-              p_dst->p[V_PLANE].i_pitch;
+              p_dst->p[i_v_plane].i_pitch;
 
     p_src_y = vlc_plane_start( &i_src_pitch, p_src, Y_PLANE,
                                0, 0, &p_filter->fmt_in.video, 1 );
@@ -1004,19 +985,23 @@ static void BlendPalI420( filter_t *p_filter,
     int i_x, i_y, i_trans;
     bool b_even_scanline = i_y_offset % 2;
 
+    bool b_swap_up = vlc_fourcc_AreUVPlanesSwapped( p_filter->fmt_out.video.i_chroma,
+                                                    VLC_CODEC_I420 );
     i_dst_pitch = p_dst->p[Y_PLANE].i_pitch;
     p_dst_y = p_dst->p[Y_PLANE].p_pixels + i_x_offset +
               p_filter->fmt_out.video.i_x_offset +
               p_dst->p[Y_PLANE].i_pitch *
               ( i_y_offset + p_filter->fmt_out.video.i_y_offset );
-    p_dst_u = p_dst->p[U_PLANE].p_pixels + i_x_offset/2 +
+    const int i_u_plane = b_swap_up ? V_PLANE : U_PLANE;
+    p_dst_u = p_dst->p[i_u_plane].p_pixels + i_x_offset/2 +
               p_filter->fmt_out.video.i_x_offset/2 +
               ( i_y_offset + p_filter->fmt_out.video.i_y_offset ) / 2 *
-              p_dst->p[U_PLANE].i_pitch;
-    p_dst_v = p_dst->p[V_PLANE].p_pixels + i_x_offset/2 +
+              p_dst->p[i_u_plane].i_pitch;
+    const int i_v_plane = b_swap_up ? U_PLANE : V_PLANE;
+    p_dst_v = p_dst->p[i_v_plane].p_pixels + i_x_offset/2 +
               p_filter->fmt_out.video.i_x_offset/2 +
               ( i_y_offset + p_filter->fmt_out.video.i_y_offset ) / 2 *
-              p_dst->p[V_PLANE].i_pitch;
+              p_dst->p[i_v_plane].i_pitch;
 
     i_src_pitch = p_src_pic->p->i_pitch;
     p_src = p_src_pic->p->p_pixels + p_filter->fmt_in.video.i_x_offset +
@@ -1207,20 +1192,23 @@ static void BlendRGBAI420( filter_t *p_filter,
     uint8_t y, u, v;
 
     bool b_even_scanline = i_y_offset % 2;
-
+    bool b_swap_up = vlc_fourcc_AreUVPlanesSwapped( p_filter->fmt_out.video.i_chroma,
+                                                    VLC_CODEC_I420 );
     i_dst_pitch = p_dst->p[Y_PLANE].i_pitch;
     p_dst_y = p_dst->p[Y_PLANE].p_pixels + i_x_offset +
               p_filter->fmt_out.video.i_x_offset +
               p_dst->p[Y_PLANE].i_pitch *
               ( i_y_offset + p_filter->fmt_out.video.i_y_offset );
-    p_dst_u = p_dst->p[U_PLANE].p_pixels + i_x_offset/2 +
+    const int i_u_plane = b_swap_up ? V_PLANE : U_PLANE;
+    p_dst_u = p_dst->p[i_u_plane].p_pixels + i_x_offset/2 +
               p_filter->fmt_out.video.i_x_offset/2 +
               ( i_y_offset + p_filter->fmt_out.video.i_y_offset ) / 2 *
-              p_dst->p[U_PLANE].i_pitch;
-    p_dst_v = p_dst->p[V_PLANE].p_pixels + i_x_offset/2 +
+              p_dst->p[i_u_plane].i_pitch;
+    const int i_v_plane = b_swap_up ? U_PLANE : V_PLANE;
+    p_dst_v = p_dst->p[i_v_plane].p_pixels + i_x_offset/2 +
               p_filter->fmt_out.video.i_x_offset/2 +
               ( i_y_offset + p_filter->fmt_out.video.i_y_offset ) / 2 *
-              p_dst->p[V_PLANE].i_pitch;
+              p_dst->p[i_v_plane].i_pitch;
 
     i_src_pix_pitch = p_src_pic->p->i_pixel_pitch;
     i_src_pitch = p_src_pic->p->i_pitch;

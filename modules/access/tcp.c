@@ -52,7 +52,7 @@ vlc_module_begin ()
     set_category( CAT_INPUT )
     set_subcategory( SUBCAT_INPUT_ACCESS )
 
-    add_integer( "tcp-caching", DEFAULT_PTS_DELAY / 1000, NULL, CACHING_TEXT,
+    add_integer( "tcp-caching", DEFAULT_PTS_DELAY / 1000, CACHING_TEXT,
                  CACHING_LONGTEXT, true )
         change_safe()
 
@@ -81,7 +81,7 @@ static int Open( vlc_object_t *p_this )
     access_t     *p_access = (access_t *)p_this;
     access_sys_t *p_sys;
 
-    char         *psz_dup = strdup(p_access->psz_path);
+    char         *psz_dup = strdup(p_access->psz_location);
     char         *psz_parser = psz_dup;
 
     /* Parse server:port */
@@ -187,7 +187,7 @@ static int Control( access_t *p_access, int i_query, va_list args )
 
         case ACCESS_GET_PTS_DELAY:
             pi_64 = (int64_t*)va_arg( args, int64_t * );
-            *pi_64 = (int64_t)var_GetInteger( p_access, "tcp-caching" ) * INT64_C(1000);
+            *pi_64 = var_GetInteger( p_access, "tcp-caching" ) * INT64_C(1000);
             break;
 
         /* */

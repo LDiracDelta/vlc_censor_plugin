@@ -129,7 +129,7 @@ static int Create( vlc_object_t *p_this )
 
     /* */
     p_filter->pf_video_filter = Filter;
-    p_filter->pf_mouse = Mouse;
+    p_filter->pf_video_mouse = Mouse;
     return VLC_SUCCESS;
 }
 
@@ -185,7 +185,7 @@ static picture_t *Filter( filter_t *p_filter, picture_t *p_pic )
             const int o_yp = o_y * p_outpic->p[i_plane].i_lines / p_outpic->p[Y_PLANE].i_lines;
             const int o_xp = o_x * p_outpic->p[i_plane].i_pitch / p_outpic->p[Y_PLANE].i_pitch;
 
-            crop.p[i_plane].p_pixels += o_yp * p_outpic->p[i_plane].i_pitch + o_xp;
+            crop.p[i_plane].p_pixels += o_yp * p_pic->p[i_plane].i_pitch + o_xp;
         }
 
         /* */

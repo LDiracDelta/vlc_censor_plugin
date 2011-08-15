@@ -32,6 +32,7 @@
 #include <vlc_input.h>
 #include <vlc_interface.h>
 #include <vlc_playlist.h>
+#include <vlc_rand.h>
 #include "stream_output/stream_output.h"
 #include "playlist_internal.h"
 
@@ -57,23 +58,13 @@ void playlist_Activate( playlist_t *p_playlist )
     /* */
     playlist_private_t *p_sys = pl_priv(p_playlist);
 
-    /* Fetcher */
-    p_sys->p_fetcher = playlist_fetcher_New( p_playlist );
-    if( !p_sys->p_fetcher )
-        msg_Err( p_playlist, "cannot create playlist fetcher" );
-
-    /* Preparse */
-    p_sys->p_preparser = playlist_preparser_New( p_playlist, p_sys->p_fetcher );
-    if( !p_sys->p_preparser )
-        msg_Err( p_playlist, "cannot create playlist preparser" );
-
     /* Start the playlist thread */
     if( vlc_clone( &p_sys->thread, Thread, p_playlist,
                    VLC_THREAD_PRIORITY_LOW ) )
     {
         msg_Err( p_playlist, "cannot spawn playlist thread" );
     }
-    msg_Dbg( p_playlist, "Activated" );
+    msg_Dbg( p_playlist, "playlist threads correctly activated" );
 }
 
 void playlist_Deactivate( playlist_t *p_playlist )
@@ -81,36 +72,26 @@ void playlist_Deactivate( playlist_t *p_playlist )
     /* */
     playlist_private_t *p_sys = pl_priv(p_playlist);
 
-    msg_Dbg( p_playlist, "Deactivate" );
+    msg_Dbg( p_playlist, "deactivating the playlist" );
 
-    vlc_object_kill( p_playlist );
     PL_LOCK;
+    vlc_object_kill( p_playlist );
     vlc_cond_signal( &p_sys->signal );
     PL_UNLOCK;
 
     vlc_join( p_sys->thread, NULL );
     assert( !p_sys->p_input );
 
-    PL_LOCK;
-    playlist_preparser_t *p_preparser = p_sys->p_preparser;
-    playlist_fetcher_t *p_fetcher = p_sys->p_fetcher;
-
-    p_sys->p_preparser = NULL;
-    p_sys->p_fetcher = NULL;
-    PL_UNLOCK;
-
-    if( p_preparser )
-        playlist_preparser_Delete( p_preparser );
-    if( p_fetcher )
-        playlist_fetcher_Delete( p_fetcher );
-
     /* release input resources */
     if( p_sys->p_input_resource )
-        input_resource_Delete( p_sys->p_input_resource );
+    {
+        input_resource_Terminate( p_sys->p_input_resource );
+        input_resource_Release( p_sys->p_input_resource );
+    }
     p_sys->p_input_resource = NULL;
 
-    /* */
-    playlist_MLDump( p_playlist );
+    if( var_InheritBool( p_playlist, "media-library" ) )
+        playlist_MLDump( p_playlist );
 
     PL_LOCK;
 
@@ -122,7 +103,7 @@ void playlist_Deactivate( playlist_t *p_playlist )
 
     PL_UNLOCK;
 
-    msg_Dbg( p_playlist, "Deactivated" );
+    msg_Dbg( p_playlist, "playlist correctly deactivated" );
 }
 
 /* */
@@ -209,13 +190,12 @@ static void ResetCurrentlyPlaying( playlist_t *p_playlist,
     PL_DEBUG("rebuild done - %i items, index %i", p_playlist->current.i_size,
                                                   p_playlist->i_current_index);
 
-    if( var_GetBool( p_playlist, "random" ) )
+    if( var_GetBool( p_playlist, "random" ) && ( p_playlist->current.i_size > 0 ) )
     {
         /* Shuffle the array */
-        srand( (unsigned int)mdate() );
-        for( int j = p_playlist->current.i_size - 1; j > 0; j-- )
+        for( unsigned j = p_playlist->current.i_size - 1; j > 0; j-- )
         {
-            int i = rand() % (j+1); /* between 0 and j */
+            unsigned i = vlc_lrand48() % (j+1); /* between 0 and j */
             playlist_item_t *p_tmp;
             /* swap the two items */
             p_tmp = ARRAY_VAL(p_playlist->current, i);
@@ -253,6 +233,8 @@ static int PlayItem( playlist_t *p_playlist, playlist_item_t *p_item )
 
     assert( p_sys->p_input == NULL );
 
+    if( !p_sys->p_input_resource )
+        p_sys->p_input_resource = input_resource_New( VLC_OBJECT( p_playlist ) );
     input_thread_t *p_input_thread = input_Create( p_playlist, p_input, NULL, p_sys->p_input_resource );
     if( p_input_thread )
     {
@@ -267,8 +249,6 @@ static int PlayItem( playlist_t *p_playlist, playlist_item_t *p_item )
             p_sys->p_input = p_input_thread = NULL;
         }
     }
-
-    p_sys->p_input_resource = NULL;
 
     char *psz_uri = input_item_GetURI( p_item->p_input );
     if( psz_uri && ( !strncmp( psz_uri, "directory:", 10 ) ||
@@ -294,12 +274,12 @@ static int PlayItem( playlist_t *p_playlist, playlist_item_t *p_item )
         if( !b_has_art || strncmp( psz_arturl, "attachment://", 13 ) )
         {
             PL_DEBUG( "requesting art for %s", psz_name );
-            playlist_AskForArtEnqueue( p_playlist, p_input, pl_Locked );
+            playlist_AskForArtEnqueue( p_playlist, p_input );
         }
         free( psz_arturl );
         free( psz_name );
     }
-
+    /* FIXME: this is not safe !!*/
     PL_UNLOCK;
     var_SetAddress( p_playlist, "item-current", p_input );
     PL_LOCK;
@@ -332,7 +312,7 @@ static playlist_item_t *NextItem( playlist_t *p_playlist )
     {
         p_new = p_sys->request.p_item;
         int i_skip = p_sys->request.i_skip;
-        PL_DEBUG( "processing request item %s node %s skip %i",
+        PL_DEBUG( "processing request item: %s, node: %s, skip: %i",
                         PLI_NAME( p_sys->request.p_item ),
                         PLI_NAME( p_sys->request.p_node ), i_skip );
 
@@ -488,10 +468,6 @@ static int LoopInput( playlist_t *p_playlist )
     {
         PL_DEBUG( "dead input" );
 
-        assert( p_sys->p_input_resource == NULL );
-
-        p_sys->p_input_resource = input_DetachResource( p_input );
-
         PL_UNLOCK;
         /* We can unlock as we return VLC_EGENERIC (no event will be lost) */
 
@@ -505,8 +481,7 @@ static int LoopInput( playlist_t *p_playlist )
         PL_LOCK;
 
         p_sys->p_input = NULL;
-        vlc_thread_join( p_input );
-        vlc_object_release( p_input );
+        input_Close( p_input );
 
         UpdateActivity( p_playlist, -DEFAULT_INPUT_ACTIVITY );
 
@@ -567,7 +542,7 @@ static void LoopRequest( playlist_t *p_playlist )
     playlist_item_t *p_item = NextItem( p_playlist );
     if( p_item )
     {
-        msg_Dbg( p_playlist, "starting new item" );
+        msg_Dbg( p_playlist, "starting playback of the new playlist item" );
         PlayItem( p_playlist, p_item );
         return;
     }

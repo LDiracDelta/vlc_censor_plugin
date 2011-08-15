@@ -27,7 +27,10 @@
 
 #include <vlc_common.h>
 #include <vlc_stream.h>
+#include <vlc_modules.h>
 #include <libvlc.h>
+
+#include <assert.h>
 
 #include "stream.h"
 
@@ -37,6 +40,7 @@ stream_t *stream_FilterNew( stream_t *p_source,
                             const char *psz_stream_filter )
 {
     stream_t *s;
+    assert( p_source != NULL );
 
     s = stream_CommonNew( VLC_OBJECT( p_source ) );
     if( s == NULL )
@@ -45,6 +49,7 @@ stream_t *stream_FilterNew( stream_t *p_source,
     s->p_input = p_source->p_input;
 
     /* */
+    s->psz_access = strdup( p_source->psz_access );
     s->psz_path = strdup( p_source->psz_path );
     if( !s->psz_path )
     {
@@ -54,8 +59,6 @@ stream_t *stream_FilterNew( stream_t *p_source,
     s->p_source = p_source;
 
     /* */
-    vlc_object_attach( s, p_source );
-
     s->p_module = module_need( s, "stream_filter", psz_stream_filter, true );
 
     if( !s->p_module )
@@ -105,7 +108,7 @@ stream_t *stream_FilterChainNew( stream_t *p_source,
     }
     free( psz_tmp );
 
-    /* Add record filter if usefull */
+    /* Add record filter if useful */
     if( b_record )
     {
         stream_t *p_filter = stream_FilterNew( p_source,
@@ -125,4 +128,3 @@ static void StreamDelete( stream_t *s )
 
     stream_CommonDelete( s );
 }
-

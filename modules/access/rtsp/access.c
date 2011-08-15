@@ -53,14 +53,12 @@ vlc_module_begin ()
     set_shortname( N_("Real RTSP") )
     set_category( CAT_INPUT )
     set_subcategory( SUBCAT_INPUT_ACCESS )
-    add_integer( "realrtsp-caching", 3000, NULL,
+    add_integer( "realrtsp-caching", 3000,
                  CACHING_TEXT, CACHING_LONGTEXT, true )
         change_safe()
     set_capability( "access", 10 )
     set_callbacks( Open, Close )
-    add_shortcut( "realrtsp" )
-    add_shortcut( "rtsp" )
-    add_shortcut( "pnm" )
+    add_shortcut( "realrtsp", "rtsp", "pnm" )
 vlc_module_end ()
 
 
@@ -68,7 +66,7 @@ vlc_module_end ()
  * Exported prototypes
  *****************************************************************************/
 static block_t *BlockRead( access_t * );
-static int     Seek( access_t *, int64_t );
+static int     Seek( access_t *, uint64_t );
 static int     Control( access_t *, int, va_list );
 
 struct access_sys_t
@@ -142,7 +140,7 @@ static int RtspWrite( void *p_userdata, uint8_t *p_buffer, int i_buffer )
 
     //fprintf(stderr, "Write: %s", p_buffer);
 
-    net_Printf( VLC_OBJECT(p_access), p_sys->fd, 0, "%s", p_buffer );
+    net_Printf( p_access, p_sys->fd, 0, "%s", p_buffer );
 
     return 0;
 }
@@ -193,10 +191,10 @@ static int Open( vlc_object_t *p_this )
     p_sys->p_rtsp->pf_read_line = RtspReadLine;
     p_sys->p_rtsp->pf_write = RtspWrite;
 
-    i_result = rtsp_connect( p_sys->p_rtsp, p_access->psz_path, 0 );
+    i_result = rtsp_connect( p_sys->p_rtsp, p_access->psz_location, 0 );
     if( i_result )
     {
-        msg_Dbg( p_access, "could not connect to: %s", p_access->psz_path );
+        msg_Dbg( p_access, "could not connect to: %s", p_access->psz_location );
         free( p_sys->p_rtsp );
         p_sys->p_rtsp = NULL;
         goto error;
@@ -307,7 +305,7 @@ static block_t *BlockRead( access_t *p_access )
 /*****************************************************************************
  * Seek: seek to a specific location in a file
  *****************************************************************************/
-static int Seek( access_t *p_access, int64_t i_pos )
+static int Seek( access_t *p_access, uint64_t i_pos )
 {
     VLC_UNUSED(p_access);
     VLC_UNUSED(i_pos);
@@ -334,7 +332,7 @@ static int Control( access_t *p_access, int i_query, va_list args )
 
         case ACCESS_GET_PTS_DELAY:
             *va_arg( args, int64_t * ) =
-                    (int64_t)var_GetInteger(p_access,"realrtsp-caching")*1000;
+                    var_GetInteger(p_access,"realrtsp-caching")*1000;
             break;
 
         /* */

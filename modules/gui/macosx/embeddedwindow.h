@@ -27,7 +27,11 @@
 
 #import "misc.h"
 
-@interface VLCEmbeddedWindow : NSWindow
+#ifndef MAC_OS_X_VERSION_10_6
+@protocol NSAnimationDelegate <NSObject> @end
+#endif
+
+@interface VLCEmbeddedWindow : NSWindow <NSWindowDelegate, NSAnimationDelegate>
 {
     IBOutlet id o_btn_backward;
     IBOutlet id o_btn_forward;
@@ -41,6 +45,8 @@
     IBOutlet id o_btn_volume_down;
     IBOutlet id o_volumeslider;
     IBOutlet id o_btn_volume_up;
+    IBOutlet id o_backgroundimg_right;
+    IBOutlet id o_backgroundimg_middle;
     IBOutlet id o_timeslider;
     IBOutlet id o_main_pgbar;
     IBOutlet id o_time;
@@ -48,7 +54,6 @@
     IBOutlet id o_horizontal_split;
     IBOutlet id o_vertical_split;
     IBOutlet id o_videosubview;
-    IBOutlet id o_sidebar_list;
     IBOutlet id o_view;
     IBOutlet id o_background_view;
 	IBOutlet id o_searchfield;
@@ -57,6 +62,7 @@
 	IBOutlet id o_playlist_view;
 	IBOutlet id o_playlist_table;
 	IBOutlet id o_vlc_main;
+    IBOutlet id o_video_view;
 
     NSImage * o_img_play;
     NSImage * o_img_play_pressed;
@@ -79,6 +85,8 @@
 }
 
 - (void)controlTintChanged;
+
+- (id)videoView;
 
 - (void)setTime: (NSString *)o_arg_ime position: (float)f_position;
 - (id)getPgbar;
@@ -106,7 +114,7 @@
 
 - (void)enterFullscreen;
 - (void)leaveFullscreen;
-/* Allows to leave fullscreen by simply fading out the display */
+/* Allows leaving fullscreen by simply fading out the display */
 - (void)leaveFullscreenAndFadeOut: (BOOL)fadeout;
 
 /* private */

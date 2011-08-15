@@ -119,47 +119,47 @@ static void libvlc_vlm_release_internal( libvlc_instance_t *p_instance )
     p_instance->libvlc_vlm.p_vlm = NULL;
 }
 
-static int libvlc_vlm_init( libvlc_instance_t *p_instance,
-                            libvlc_exception_t *p_exception )
+static int libvlc_vlm_init( libvlc_instance_t *p_instance )
 {
     if( !p_instance->libvlc_vlm.p_event_manager )
     {
         p_instance->libvlc_vlm.p_event_manager =
-            libvlc_event_manager_new( p_instance->libvlc_vlm.p_vlm,
-                                      p_instance, p_exception );
+            libvlc_event_manager_new( p_instance->libvlc_vlm.p_vlm, p_instance );
+        if( unlikely(p_instance->libvlc_vlm.p_event_manager == NULL) )
+            return VLC_ENOMEM;
         libvlc_event_manager_register_event_type(
             p_instance->libvlc_vlm.p_event_manager,
-            libvlc_VlmMediaAdded, NULL );
+            libvlc_VlmMediaAdded );
         libvlc_event_manager_register_event_type(
             p_instance->libvlc_vlm.p_event_manager,
-            libvlc_VlmMediaRemoved, NULL );
+            libvlc_VlmMediaRemoved );
         libvlc_event_manager_register_event_type(
             p_instance->libvlc_vlm.p_event_manager,
-            libvlc_VlmMediaChanged, NULL );
+            libvlc_VlmMediaChanged );
         libvlc_event_manager_register_event_type(
             p_instance->libvlc_vlm.p_event_manager,
-            libvlc_VlmMediaInstanceStarted, NULL );
+            libvlc_VlmMediaInstanceStarted );
         libvlc_event_manager_register_event_type(
             p_instance->libvlc_vlm.p_event_manager,
-            libvlc_VlmMediaInstanceStopped, NULL );
+            libvlc_VlmMediaInstanceStopped );
         libvlc_event_manager_register_event_type(
             p_instance->libvlc_vlm.p_event_manager,
-            libvlc_VlmMediaInstanceStatusInit, NULL );
+            libvlc_VlmMediaInstanceStatusInit );
         libvlc_event_manager_register_event_type(
             p_instance->libvlc_vlm.p_event_manager,
-            libvlc_VlmMediaInstanceStatusOpening, NULL );
+            libvlc_VlmMediaInstanceStatusOpening );
         libvlc_event_manager_register_event_type(
             p_instance->libvlc_vlm.p_event_manager,
-            libvlc_VlmMediaInstanceStatusPlaying, NULL );
+            libvlc_VlmMediaInstanceStatusPlaying );
         libvlc_event_manager_register_event_type(
             p_instance->libvlc_vlm.p_event_manager,
-            libvlc_VlmMediaInstanceStatusPause, NULL );
+            libvlc_VlmMediaInstanceStatusPause );
         libvlc_event_manager_register_event_type(
             p_instance->libvlc_vlm.p_event_manager,
-            libvlc_VlmMediaInstanceStatusEnd, NULL );
+            libvlc_VlmMediaInstanceStatusEnd );
         libvlc_event_manager_register_event_type(
             p_instance->libvlc_vlm.p_event_manager,
-            libvlc_VlmMediaInstanceStatusError, NULL );
+            libvlc_VlmMediaInstanceStatusError );
     }
 
     if( !p_instance->libvlc_vlm.p_vlm )
@@ -167,7 +167,6 @@ static int libvlc_vlm_init( libvlc_instance_t *p_instance,
         p_instance->libvlc_vlm.p_vlm = vlm_New( p_instance->p_libvlc_int );
         if( !p_instance->libvlc_vlm.p_vlm )
         {
-            libvlc_exception_raise( p_exception );
             libvlc_printerr( "VLM not supported or out of memory" );
             return VLC_EGENERIC;
         }
@@ -180,23 +179,20 @@ static int libvlc_vlm_init( libvlc_instance_t *p_instance,
     return VLC_SUCCESS;
 }
 
-void libvlc_vlm_release( libvlc_instance_t *p_instance,
-                         libvlc_exception_t *p_exception)
+void libvlc_vlm_release( libvlc_instance_t *p_instance )
 {
-    VLC_UNUSED(p_exception);
     libvlc_vlm_release_internal( p_instance );
 }
 
-#define VLM_RET(p,ret) do {                                     \
-    if( libvlc_vlm_init( p_instance, p_exception ) ) return ret;\
-    (p) = p_instance->libvlc_vlm.p_vlm;                                    \
+#define VLM_RET(p,ret) do { \
+    if( libvlc_vlm_init( p_instance ) ) \
+        return (ret); \
+    (p) = p_instance->libvlc_vlm.p_vlm; \
   } while(0)
-#define VLM(p) VLM_RET(p,)
 
 static vlm_media_instance_t *
 libvlc_vlm_get_media_instance( libvlc_instance_t *p_instance,
-                               const char *psz_name, int i_minstance_idx,
-                               libvlc_exception_t *p_exception )
+                               const char *psz_name, int i_minstance_idx )
 {
     vlm_t *p_vlm;
     vlm_media_instance_t **pp_minstance;
@@ -210,7 +206,6 @@ libvlc_vlm_get_media_instance( libvlc_instance_t *p_instance,
         vlm_Control( p_vlm, VLM_GET_MEDIA_INSTANCES, id, &pp_minstance,
                      &i_minstance ) )
     {
-        libvlc_exception_raise( p_exception );
         libvlc_printerr( "%s: media instances not found", psz_name );
         return NULL;
     }
@@ -232,105 +227,113 @@ static char* recurse_answer( vlm_message_t *p_answer, const char* psz_delim,
     char* psz_childdelim = NULL;
     char* psz_nametag = NULL;
     char* psz_response = strdup( "" );
+    char *psz_tmp;
     int i_success = 0;
     int i;
     vlm_message_t *aw_child, **paw_child;
 
     i_success = asprintf( &psz_childdelim, "%s\t", psz_delim);
+    if( i_success == -1 )
+        return psz_response;
 
-    /* starting with the children of root node */
-    if( i_success != -1 && p_answer->i_child )
+    paw_child = p_answer->child;
+    aw_child = *( paw_child );
+    /* Iterate over children */
+    for( i = 0; i < p_answer->i_child; i++ )
     {
-        paw_child = p_answer->child;
-        aw_child = *( paw_child );
-        /* Iterate over children */
-        for( i = 0; i < p_answer->i_child; i++ )
-        {
-            /* Spare comma if it is the last element */
-            char c_comma = ',';
-            if( i == (p_answer->i_child - 1) )
-                c_comma = ' ';
+        /* Spare comma if it is the last element */
+        char c_comma = ',';
+        if( i == (p_answer->i_child - 1) )
+            c_comma = ' ';
 
-            /* Append name of child node, if not in a list */
-            if( !i_list )
+        /* Append name of child node, if not in a list */
+        if( !i_list )
+        {
+            i_success = asprintf( &psz_tmp, "%s\"%s\": ",
+                          psz_response, aw_child->psz_name );
+            if( i_success == -1 ) break;
+            free( psz_response );
+            psz_response = psz_tmp;
+        }
+
+        /* If child node has children, */
+        if( aw_child->i_child )
+        {
+            /* If the parent node is a list (hence the child node is
+             * inside a list), create a property of its name as if it
+             * had a name value node
+             */
+            if( i_list )
             {
-                i_success = asprintf( &psz_response, "%s\"%s\": ",
-                              psz_response, aw_child->psz_name );
+                i_success = asprintf( &psz_nametag, "\"name\": \"%s\",%s",
+                              aw_child->psz_name, psz_childdelim );
                 if( i_success == -1 ) break;
             }
-
-            /* If child node has children, */
-            if( aw_child->i_child )
+            else
             {
-                /* If the parent node is a list (hence the child node is
-                 * inside a list), create a property of its name as if it
-                 * had a name value node
-                 */
-                if( i_list )
-                {
-                    i_success = asprintf( &psz_nametag, "\"name\": \"%s\",%s",
-                                  aw_child->psz_name, psz_childdelim );
-                    if( i_success == -1 ) break;
-                }
-                else
-                {
-                    psz_nametag = strdup( "" );
-                }
-                /* If the child is a list itself, format it accordingly and
-                 * recurse through the child's children, telling them that
-                 * they are inside a list.
-                 */
-                if( strcmp( aw_child->psz_name, "media" ) == 0 ||
-                    strcmp( aw_child->psz_name, "inputs" ) == 0 ||
-                    strcmp( aw_child->psz_name, "options" ) == 0 )
-                {
-                    i_success = asprintf( &psz_response, "%s[%s%s%s]%c%s",
-                                          psz_response, psz_childdelim,
-                                          recurse_answer( aw_child,
-                                                          psz_childdelim, 1 ),
-                                          psz_delim, c_comma, psz_delim );
-                    if( i_success == -1 ) break;
-                }
-                /* Not a list, so format the child as a JSON object and
-                 * recurse through the child's children
-                 */
-                else
-                {
-                    i_success = asprintf( &psz_response, "%s{%s%s%s%s}%c%s",
-                                          psz_response, psz_childdelim, psz_nametag,
-                                          recurse_answer( aw_child,
-                                                          psz_childdelim, 0 ),
-                                          psz_delim, c_comma, psz_delim );
-                    if( i_success == -1 ) break;
-                }
+                psz_nametag = strdup( "" );
             }
-            /* Otherwise - when no children are present - the node is a
-             * value node. So print the value string
+            /* If the child is a list itself, format it accordingly and
+             * recurse through the child's children, telling them that
+             * they are inside a list.
+             */
+            if( strcmp( aw_child->psz_name, "media" ) == 0 ||
+                strcmp( aw_child->psz_name, "inputs" ) == 0 ||
+                strcmp( aw_child->psz_name, "options" ) == 0 )
+            {
+                char *psz_recurse = recurse_answer( aw_child, psz_childdelim, 1 ),
+                i_success = asprintf( &psz_tmp, "%s[%s%s%s]%c%s",
+                                      psz_response, psz_childdelim, psz_recurse,
+                                      psz_delim, c_comma, psz_delim );
+                free( psz_recurse );
+                if( i_success == -1 ) break;
+                free( psz_response );
+                psz_response = psz_tmp;
+            }
+            /* Not a list, so format the child as a JSON object and
+             * recurse through the child's children
              */
             else
             {
-                /* If value is equivalent to NULL, print it as null */
-                if( aw_child->psz_value == NULL
-                    || strcmp( aw_child->psz_value, "(null)" ) == 0 )
-                {
-                    i_success = asprintf( &psz_response, "%snull%c%s",
-                                          psz_response, c_comma, psz_delim );
-                    if( i_success == -1 )
-                        break;
-                }
-                /* Otherwise print the value in quotation marks */
-                else
-                {
-                    i_success = asprintf( &psz_response, "%s\"%s\"%c%s",
-                                          psz_response, aw_child->psz_value,
-                                          c_comma, psz_delim );
-                    if( i_success == -1 ) break;
-                }
+                char *psz_recurse = recurse_answer( aw_child, psz_childdelim, 0 ),
+                i_success = asprintf( &psz_tmp, "%s{%s%s%s%s}%c%s",
+                                      psz_response, psz_childdelim, psz_nametag,
+                                      psz_recurse, psz_delim, c_comma, psz_delim );
+                free( psz_recurse );
+                if( i_success == -1 ) break;
+                free( psz_response );
+                psz_response = psz_tmp;
             }
-            /* getting next child */
-            paw_child++;
-            aw_child = *( paw_child );
         }
+        /* Otherwise - when no children are present - the node is a
+         * value node. So print the value string
+         */
+        else
+        {
+            /* If value is equivalent to NULL, print it as null */
+            if( aw_child->psz_value == NULL
+                || strcmp( aw_child->psz_value, "(null)" ) == 0 )
+            {
+                i_success = asprintf( &psz_tmp, "%snull%c%s",
+                                      psz_response, c_comma, psz_delim );
+                if( i_success == -1 ) break;
+                free( psz_response );
+                psz_response = psz_tmp;
+            }
+            /* Otherwise print the value in quotation marks */
+            else
+            {
+                i_success = asprintf( &psz_tmp, "%s\"%s\"%c%s",
+                                      psz_response, aw_child->psz_value,
+                                      c_comma, psz_delim );
+                if( i_success == -1 ) break;
+                free( psz_response );
+                psz_response = psz_tmp;
+            }
+        }
+        /* getting next child */
+        paw_child++;
+        aw_child = *( paw_child );
     }
     free( psz_nametag );
     free( psz_childdelim );
@@ -343,8 +346,7 @@ static char* recurse_answer( vlm_message_t *p_answer, const char* psz_delim,
 }
 
 const char* libvlc_vlm_show_media( libvlc_instance_t *p_instance,
-                                   const char *psz_name,
-                                   libvlc_exception_t *p_exception )
+                                   const char *psz_name )
 {
     char *psz_message = NULL;
     vlm_message_t *answer = NULL;
@@ -359,16 +361,11 @@ const char* libvlc_vlm_show_media( libvlc_instance_t *p_instance,
     assert( psz_name );
 
     if( asprintf( &psz_message, "show %s", psz_name ) == -1 )
-    {
-        libvlc_exception_raise( p_exception );
-        libvlc_printerr( "Not enough memory" );
         return NULL;
-    }
 
     vlm_ExecuteCommand( p_vlm, psz_message, &answer );
     if( answer->psz_value )
     {
-        libvlc_exception_raise( p_exception );
         libvlc_printerr( "Unable to call show %s: %s",
                          psz_name, answer->psz_value );
     }
@@ -386,31 +383,31 @@ const char* libvlc_vlm_show_media( libvlc_instance_t *p_instance,
             psz_delimiter = "\n";
             i_list = 1;
         }
-        if( asprintf( &psz_response, psz_fmt,
-                      recurse_answer( answer, psz_delimiter, i_list ) ) == -1 )
+        char *psz_tmp = recurse_answer( answer, psz_delimiter, i_list );
+        if( asprintf( &psz_response, psz_fmt, psz_tmp ) == -1 )
         {
-            libvlc_exception_raise( p_exception );
             libvlc_printerr( "Out of memory" );
+            psz_response = NULL;
         }
+        free( psz_tmp );
     }
     free( psz_message );
     return( psz_response );
 }
 
 
-void libvlc_vlm_add_broadcast( libvlc_instance_t *p_instance,
-                               const char *psz_name,
-                               const char *psz_input,
-                               const char *psz_output, int i_options,
-                               const char * const *ppsz_options,
-                               int b_enabled, int b_loop,
-                               libvlc_exception_t *p_exception )
+int libvlc_vlm_add_broadcast( libvlc_instance_t *p_instance,
+                              const char *psz_name,
+                              const char *psz_input,
+                              const char *psz_output, int i_options,
+                              const char * const *ppsz_options,
+                              int b_enabled, int b_loop )
 {
     vlm_t *p_vlm;
     vlm_media_t m;
     int n;
 
-    VLM(p_vlm);
+    VLM_RET(p_vlm, -1);
 
     vlm_media_Init( &m );
     m.psz_name = strdup( psz_name );
@@ -428,21 +425,22 @@ void libvlc_vlm_add_broadcast( libvlc_instance_t *p_instance,
     vlm_media_Clean( &m );
     if( n )
     {
-        libvlc_exception_raise( p_exception );
         libvlc_printerr( "Media %s creation failed", psz_name );
+        return -1;
     }
+    return 0;
 }
 
-void libvlc_vlm_add_vod( libvlc_instance_t *p_instance, const char *psz_name,
-                         const char *psz_input, int i_options,
-                         const char * const *ppsz_options, int b_enabled,
-                         const char *psz_mux, libvlc_exception_t *p_exception )
+int libvlc_vlm_add_vod( libvlc_instance_t *p_instance, const char *psz_name,
+                        const char *psz_input, int i_options,
+                        const char * const *ppsz_options, int b_enabled,
+                        const char *psz_mux )
 {
     vlm_t *p_vlm;
     vlm_media_t m;
     int n;
 
-    VLM(p_vlm);
+    VLM_RET(p_vlm, -1);
 
     vlm_media_Init( &m );
     m.psz_name = strdup( psz_name );
@@ -458,72 +456,76 @@ void libvlc_vlm_add_vod( libvlc_instance_t *p_instance, const char *psz_name,
     vlm_media_Clean( &m );
     if( n )
     {
-        libvlc_exception_raise( p_exception );
         libvlc_printerr( "Media %s creation failed", psz_name );
+        return -1;
     }
+    return 0;
 }
 
-void libvlc_vlm_del_media( libvlc_instance_t *p_instance, const char *psz_name,
-                           libvlc_exception_t *p_exception )
+int libvlc_vlm_del_media( libvlc_instance_t *p_instance, const char *psz_name )
 {
     vlm_t *p_vlm;
     int64_t id;
 
-    VLM(p_vlm);
+    VLM_RET(p_vlm, -1);
 
     if( vlm_Control( p_vlm, VLM_GET_MEDIA_ID, psz_name, &id ) ||
         vlm_Control( p_vlm, VLM_DEL_MEDIA, id ) )
     {
-        libvlc_exception_raise( p_exception );
         libvlc_printerr( "Unable to delete %s", psz_name );
+        return -1;
     }
+    return 0;
+}
+
+static vlm_media_t *get_media( libvlc_instance_t *p_instance,
+                               vlm_t **restrict pp_vlm, const char *name )
+{
+    vlm_media_t *p_media;
+    vlm_t *p_vlm;
+    int64_t id;
+
+    VLM_RET(p_vlm, NULL);
+    if( vlm_Control( p_vlm, VLM_GET_MEDIA_ID, name, &id ) ||
+        vlm_Control( p_vlm, VLM_GET_MEDIA, id, &p_media ) )
+        return NULL;
+    *pp_vlm = p_vlm;
+    return p_media;
 }
 
 #define VLM_CHANGE(psz_error, code ) do {   \
-    vlm_media_t *p_media;   \
     vlm_t *p_vlm;           \
-    int64_t id;             \
-    VLM(p_vlm);             \
-    if( vlm_Control( p_vlm, VLM_GET_MEDIA_ID, psz_name, &id ) ||    \
-        vlm_Control( p_vlm, VLM_GET_MEDIA, id, &p_media ) ) {       \
-        libvlc_exception_raise( p_exception );                      \
-        libvlc_printerr( psz_error, psz_name );                     \
-        return;             \
-    }                       \
-    if( !p_media ) goto error;                                      \
-                            \
-    code;                   \
-                            \
-    if( vlm_Control( p_vlm, VLM_CHANGE_MEDIA, p_media ) ) {         \
+    vlm_media_t *p_media = get_media( p_instance, &p_vlm, psz_name ); \
+    if( p_media != NULL ) { \
+        code;               \
+        if( vlm_Control( p_vlm, VLM_CHANGE_MEDIA, p_media ) )       \
+            p_vlm = NULL;                                           \
         vlm_media_Delete( p_media );                                \
-        goto error;         \
+        if( p_vlm != NULL ) \
+            return 0;       \
     }                       \
-    vlm_media_Delete( p_media );                                    \
-    return;                 \
-  error:                    \
-    libvlc_exception_raise( p_exception );                          \
     libvlc_printerr( psz_error, psz_name );                         \
+    return -1;              \
   } while(0)
 
-void libvlc_vlm_set_enabled( libvlc_instance_t *p_instance,
-                             const char *psz_name, int b_enabled,
-                             libvlc_exception_t *p_exception )
+int libvlc_vlm_set_enabled( libvlc_instance_t *p_instance,
+                            const char *psz_name, int b_enabled )
 {
 #define VLM_CHANGE_CODE { p_media->b_enabled = b_enabled; }
     VLM_CHANGE( "Unable to delete %s", VLM_CHANGE_CODE );
 #undef VLM_CHANGE_CODE
 }
 
-void libvlc_vlm_set_loop( libvlc_instance_t *p_instance, const char *psz_name,
-                          int b_loop, libvlc_exception_t *p_exception )
+int libvlc_vlm_set_loop( libvlc_instance_t *p_instance, const char *psz_name,
+                         int b_loop )
 {
 #define VLM_CHANGE_CODE { p_media->broadcast.b_loop = b_loop; }
     VLM_CHANGE( "Unable to change %s loop property", VLM_CHANGE_CODE );
 #undef VLM_CHANGE_CODE
 }
 
-void libvlc_vlm_set_mux( libvlc_instance_t *p_instance, const char *psz_name,
-                         const char *psz_mux, libvlc_exception_t *p_exception )
+int libvlc_vlm_set_mux( libvlc_instance_t *p_instance, const char *psz_name,
+                        const char *psz_mux )
 {
 #define VLM_CHANGE_CODE { if( p_media->b_vod ) { \
                             free( p_media->vod.psz_mux ); \
@@ -534,9 +536,8 @@ void libvlc_vlm_set_mux( libvlc_instance_t *p_instance, const char *psz_name,
 #undef VLM_CHANGE_CODE
 }
 
-void libvlc_vlm_set_output( libvlc_instance_t *p_instance,
-                            const char *psz_name, const char *psz_output,
-                            libvlc_exception_t *p_exception )
+int libvlc_vlm_set_output( libvlc_instance_t *p_instance,
+                           const char *psz_name, const char *psz_output )
 {
 #define VLM_CHANGE_CODE { free( p_media->psz_output ); \
                           p_media->psz_output = strdup( psz_output ); }
@@ -544,9 +545,8 @@ void libvlc_vlm_set_output( libvlc_instance_t *p_instance,
 #undef VLM_CHANGE_CODE
 }
 
-void libvlc_vlm_set_input( libvlc_instance_t *p_instance,
-                           const char *psz_name, const char *psz_input,
-                           libvlc_exception_t *p_exception )
+int libvlc_vlm_set_input( libvlc_instance_t *p_instance,
+                          const char *psz_name, const char *psz_input )
 {
 #define VLM_CHANGE_CODE { while( p_media->i_input > 0 ) \
                             free( p_media->ppsz_input[--p_media->i_input] );\
@@ -556,9 +556,8 @@ void libvlc_vlm_set_input( libvlc_instance_t *p_instance,
 #undef VLM_CHANGE_CODE
 }
 
-void libvlc_vlm_add_input( libvlc_instance_t *p_instance,
-                           const char *psz_name, const char *psz_input,
-                           libvlc_exception_t *p_exception )
+int libvlc_vlm_add_input( libvlc_instance_t *p_instance,
+                          const char *psz_name, const char *psz_input )
 {
 #define VLM_CHANGE_CODE { TAB_APPEND( p_media->i_input, p_media->ppsz_input, \
                           strdup(psz_input) ); }
@@ -566,11 +565,11 @@ void libvlc_vlm_add_input( libvlc_instance_t *p_instance,
 #undef VLM_CHANGE_CODE
 }
 
-void libvlc_vlm_change_media( libvlc_instance_t *p_instance,
-                              const char *psz_name, const char *psz_input,
-                              const char *psz_output, int i_options,
-                              const char * const *ppsz_options, int b_enabled,
-                              int b_loop, libvlc_exception_t *p_exception )
+int libvlc_vlm_change_media( libvlc_instance_t *p_instance,
+                             const char *psz_name, const char *psz_input,
+                             const char *psz_output, int i_options,
+                             const char * const *ppsz_options, int b_enabled,
+                             int b_loop )
 {
 #define VLM_CHANGE_CODE { int n;        \
     p_media->b_enabled = b_enabled;     \
@@ -591,85 +590,83 @@ void libvlc_vlm_change_media( libvlc_instance_t *p_instance,
 #undef VLM_CHANGE_CODE
 }
 
-void libvlc_vlm_play_media( libvlc_instance_t *p_instance,
-                            const char *psz_name,
-                            libvlc_exception_t *p_exception )
+int libvlc_vlm_play_media( libvlc_instance_t *p_instance,
+                           const char *psz_name )
 {
     vlm_t *p_vlm;
     int64_t id;
 
-    VLM(p_vlm);
+    VLM_RET(p_vlm, -1);
 
     if( vlm_Control( p_vlm, VLM_GET_MEDIA_ID, psz_name, &id ) ||
         vlm_Control( p_vlm, VLM_START_MEDIA_BROADCAST_INSTANCE, id, NULL, 0 ) )
     {
-        libvlc_exception_raise( p_exception );
         libvlc_printerr( "Unable to play %s", psz_name );
+        return -1;
     }
+    return 0;
 }
 
-void libvlc_vlm_stop_media( libvlc_instance_t *p_instance,
-                            const char *psz_name,
-                            libvlc_exception_t *p_exception )
+int libvlc_vlm_stop_media( libvlc_instance_t *p_instance,
+                           const char *psz_name )
 {
     vlm_t *p_vlm;
     int64_t id;
 
-    VLM(p_vlm);
+    VLM_RET(p_vlm, -1);
 
     if( vlm_Control( p_vlm, VLM_GET_MEDIA_ID, psz_name, &id ) ||
         vlm_Control( p_vlm, VLM_STOP_MEDIA_INSTANCE, id, NULL ) )
     {
-        libvlc_exception_raise( p_exception );
         libvlc_printerr( "Unable to stop %s", psz_name );
+        return -1;
     }
+    return 0;
 }
 
-void libvlc_vlm_pause_media( libvlc_instance_t *p_instance,
-                             const char *psz_name,
-                             libvlc_exception_t *p_exception )
+int libvlc_vlm_pause_media( libvlc_instance_t *p_instance,
+                            const char *psz_name )
 {
     vlm_t *p_vlm;
     int64_t id;
 
-    VLM(p_vlm);
+    VLM_RET(p_vlm, -1);
 
     if( vlm_Control( p_vlm, VLM_GET_MEDIA_ID, psz_name, &id ) ||
         vlm_Control( p_vlm, VLM_PAUSE_MEDIA_INSTANCE, id, NULL ) )
     {
-        libvlc_exception_raise( p_exception );
         libvlc_printerr( "Unable to pause %s", psz_name );
+        return -1;
     }
+    return 0;
 }
 
-void libvlc_vlm_seek_media( libvlc_instance_t *p_instance,
-                            const char *psz_name, float f_percentage,
-                            libvlc_exception_t *p_exception )
+int libvlc_vlm_seek_media( libvlc_instance_t *p_instance,
+                           const char *psz_name, float f_percentage )
 {
     vlm_t *p_vlm;
     int64_t id;
 
-    VLM(p_vlm);
+    VLM_RET(p_vlm, -1);
 
     if( vlm_Control( p_vlm, VLM_GET_MEDIA_ID, psz_name, &id ) ||
         vlm_Control( p_vlm, VLM_SET_MEDIA_INSTANCE_POSITION, id, NULL,
                      f_percentage ) )
     {
-        libvlc_exception_raise( p_exception );
         libvlc_printerr( "Unable to seek %s to %f%%", psz_name, f_percentage );
+        return -1;
     }
+    return 0;
 }
 
 float libvlc_vlm_get_media_instance_position( libvlc_instance_t *p_instance,
                                               const char *psz_name,
-                                              int i_instance,
-                                              libvlc_exception_t *p_exception )
+                                              int i_instance )
 {
     vlm_media_instance_t *p_mi;
     float result = -1.;
 
-    p_mi = libvlc_vlm_get_media_instance( p_instance, psz_name,
-                                          i_instance, p_exception );
+    p_mi = libvlc_vlm_get_media_instance( p_instance, psz_name, i_instance );
     if( p_mi )
     {
         result = p_mi->d_position;
@@ -679,14 +676,12 @@ float libvlc_vlm_get_media_instance_position( libvlc_instance_t *p_instance,
 }
 
 int libvlc_vlm_get_media_instance_time( libvlc_instance_t *p_instance,
-                                        const char *psz_name, int i_instance,
-                                        libvlc_exception_t *p_exception )
+                                        const char *psz_name, int i_instance )
 {
     vlm_media_instance_t *p_mi;
     int result = -1;
 
-    p_mi = libvlc_vlm_get_media_instance( p_instance, psz_name,
-                                        i_instance, p_exception );
+    p_mi = libvlc_vlm_get_media_instance( p_instance, psz_name, i_instance );
     if( p_mi )
     {
         result = p_mi->i_time;
@@ -697,14 +692,12 @@ int libvlc_vlm_get_media_instance_time( libvlc_instance_t *p_instance,
 
 int libvlc_vlm_get_media_instance_length( libvlc_instance_t *p_instance,
                                           const char *psz_name,
-                                          int i_instance,
-                                          libvlc_exception_t *p_exception )
+                                          int i_instance )
 {
     vlm_media_instance_t *p_mi;
     int result = -1;
 
-    p_mi = libvlc_vlm_get_media_instance( p_instance, psz_name,
-                                          i_instance, p_exception );
+    p_mi = libvlc_vlm_get_media_instance( p_instance, psz_name, i_instance );
     if( p_mi )
     {
         result = p_mi->i_length;
@@ -714,14 +707,12 @@ int libvlc_vlm_get_media_instance_length( libvlc_instance_t *p_instance,
 }
 
 int libvlc_vlm_get_media_instance_rate( libvlc_instance_t *p_instance,
-                                        const char *psz_name, int i_instance,
-                                        libvlc_exception_t *p_exception )
+                                        const char *psz_name, int i_instance )
 {
     vlm_media_instance_t *p_mi;
     int result = -1;
 
-    p_mi = libvlc_vlm_get_media_instance( p_instance, psz_name,
-                                          i_instance, p_exception );
+    p_mi = libvlc_vlm_get_media_instance( p_instance, psz_name, i_instance );
     if( p_mi )
     {
         result = p_mi->i_rate;
@@ -730,14 +721,13 @@ int libvlc_vlm_get_media_instance_rate( libvlc_instance_t *p_instance,
     return result;
 }
 
+#if 0
 int libvlc_vlm_get_media_instance_title( libvlc_instance_t *p_instance,
-                                         const char *psz_name, int i_instance,
-                                         libvlc_exception_t *p_exception )
+                                         const char *psz_name, int i_instance )
 {
     vlm_media_instance_t *p_mi;
 
-    p_mi = libvlc_vlm_get_media_instance( p_instance, psz_name,
-                                          i_instance, p_exception );
+    p_mi = libvlc_vlm_get_media_instance( p_instance, psz_name, i_instance );
     if( p_mi )
         vlm_media_instance_Delete( p_mi );
     return p_mi ? 0 : -1;
@@ -745,13 +735,12 @@ int libvlc_vlm_get_media_instance_title( libvlc_instance_t *p_instance,
 
 int libvlc_vlm_get_media_instance_chapter( libvlc_instance_t *p_instance,
                                            const char *psz_name,
-                                           int i_instance,
-                                           libvlc_exception_t *p_exception )
+                                           int i_instance )
 {
     vlm_media_instance_t *p_mi;
 
     p_mi = libvlc_vlm_get_media_instance( p_instance, psz_name,
-                                          i_instance, p_exception );
+                                          i_instance );
     if( p_mi )
         vlm_media_instance_Delete( p_mi );
     return p_mi ? 0 : -1;
@@ -759,20 +748,19 @@ int libvlc_vlm_get_media_instance_chapter( libvlc_instance_t *p_instance,
 
 int libvlc_vlm_get_media_instance_seekable( libvlc_instance_t *p_instance,
                                             const char *psz_name,
-                                            int i_instance,
-                                            libvlc_exception_t *p_exception )
+                                            int i_instance )
 {
     vlm_media_instance_t *p_mi;
 
-    p_mi = libvlc_vlm_get_media_instance( p_instance, psz_name,
-                                          i_instance, p_exception );
+    p_mi = libvlc_vlm_get_media_instance( p_instance, psz_name, i_instance );
     if( p_mi )
         vlm_media_instance_Delete( p_mi );
     return p_mi ? 0 : -1;
 }
+#endif
 
-libvlc_event_manager_t * libvlc_vlm_get_event_manager( libvlc_instance_t *p_instance,
-                                                       libvlc_exception_t *p_exception )
+libvlc_event_manager_t *
+libvlc_vlm_get_event_manager( libvlc_instance_t *p_instance )
 {
     vlm_t *p_vlm;
     VLM_RET( p_vlm, NULL);

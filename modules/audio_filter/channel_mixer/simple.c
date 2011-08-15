@@ -1,7 +1,7 @@
 /*****************************************************************************
  * simple.c : simple channel mixer plug-in
  *****************************************************************************
- * Copyright (C) 2002, 2006 the VideoLAN team
+ * Copyright (C) 2002, 2004, 2006-2009 the VideoLAN team
  * $Id$
  *
  * Authors: Gildas Bazin <gbazin@videolan.org>
@@ -44,7 +44,7 @@ vlc_module_begin ()
     set_description( N_("Audio filter for simple channel mixing") )
     set_category( CAT_AUDIO )
     set_subcategory( SUBCAT_AUDIO_MISC )
-    set_capability( "audio filter2", 10 )
+    set_capability( "audio filter", 10 )
     set_callbacks( OpenFilter, NULL )
 vlc_module_end ()
 

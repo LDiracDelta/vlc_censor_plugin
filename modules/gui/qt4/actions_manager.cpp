@@ -27,7 +27,7 @@
 #endif
 
 #include <vlc_vout.h>
-#include <vlc_aout.h>
+#include <vlc_aout_intf.h>
 #include <vlc_keys.h>
 
 #include "actions_manager.hpp"
@@ -80,15 +80,19 @@ void ActionsManager::doAction( int id_action )
         case REVERSE_ACTION:
             THEMIM->getIM()->reverse(); break;
         case SKIP_BACK_ACTION:
-            var_SetInteger( p_intf->p_libvlc, "key-action",
-                    ACTIONID_JUMP_BACKWARD_SHORT );
+            skipBackward();
             break;
         case SKIP_FW_ACTION:
-            var_SetInteger( p_intf->p_libvlc, "key-action",
-                    ACTIONID_JUMP_FORWARD_SHORT );
+            skipForward();
             break;
         case QUIT_ACTION:
             THEDP->quit();  break;
+        case RANDOM_ACTION:
+            THEMIM->toggleRandom(); break;
+        case INFO_ACTION:
+            THEDP->mediaInfoDialog(); break;
+        case OPEN_SUB_ACTION:
+            THEDP->loadSubtitlesFile(); break;
         default:
             msg_Dbg( p_intf, "Action: %i", id_action );
             break;
@@ -114,10 +118,11 @@ void ActionsManager::play()
  */
 void ActionsManager::fullscreen()
 {
+    bool fs = var_ToggleBool( THEPL, "fullscreen" );
     vout_thread_t *p_vout = THEMIM->getVout();
     if( p_vout)
     {
-        var_ToggleBool( p_vout, "fullscreen" );
+        var_SetBool( p_vout, "fullscreen", fs );
         vlc_object_release( p_vout );
     }
 }
@@ -154,7 +159,7 @@ void ActionsManager::record()
 
             char *psz = input_item_GetURI( p_item );
             if( psz )
-                THEDP->streamingDialog( NULL, psz, true );
+                THEDP->streamingDialog( NULL, qfu(psz), true );
         }
 #endif
     }
@@ -180,5 +185,15 @@ void ActionsManager::AudioUp()
 void ActionsManager::AudioDown()
 {
     aout_VolumeDown( THEPL, 1, NULL );
+}
+
+void ActionsManager::skipForward()
+{
+    THEMIM->getIM()->jumpFwd();
+}
+
+void ActionsManager::skipBackward()
+{
+    THEMIM->getIM()->jumpBwd();
 }
 

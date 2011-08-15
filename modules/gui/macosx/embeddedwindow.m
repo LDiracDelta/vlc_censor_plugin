@@ -1,7 +1,7 @@
 /*****************************************************************************
  * embeddedwindow.m: MacOS X interface module
  *****************************************************************************
- * Copyright (C) 2005-2008 the VideoLAN team
+ * Copyright (C) 2005-2011 the VideoLAN team
  * $Id$
  *
  * Authors: Benjamin Pracht <bigben at videolan dot org>
@@ -31,21 +31,14 @@
 #import "vout.h"
 #import "embeddedwindow.h"
 #import "fspanel.h"
+#import "CoreInteraction.h"
 #import "playlist.h"
+#import <vlc_url.h>
 
 /* SetSystemUIMode, ... */
 #import <Carbon/Carbon.h>
 
-/*****************************************************************************
- * extension to NSWindow's interface to fix compilation warnings
- * and let us access this functions properly
- * this uses a private Apple-API, but works fine on all current OSX releases
- * keep checking for compatiblity with future releases though
- *****************************************************************************/
-
-@interface NSWindow (UndocumentedWindowProperties)
-- (void)setBottomCornerRounded: (BOOL)value;
-@end
+#if 0
 
 /*****************************************************************************
  * VLCEmbeddedWindow Implementation
@@ -53,10 +46,25 @@
 
 @implementation VLCEmbeddedWindow
 
+- (id)initWithContentRect:(NSRect)contentRect styleMask: (NSUInteger)windowStyle backing:(NSBackingStoreType)bufferingType defer:(BOOL)deferCreation
+{
+    BOOL b_useTextured = YES;
+    if( [[NSWindow class] instancesRespondToSelector:@selector(setContentBorderThickness:forEdge:)] )
+    {
+        b_useTextured = NO;
+        windowStyle ^= NSTexturedBackgroundWindowMask;
+    }
+    self = [super initWithContentRect:contentRect styleMask:windowStyle backing:bufferingType defer:deferCreation];
+    if(! b_useTextured )
+    {
+        [self setContentBorderThickness:28.0 forEdge:NSMinYEdge];
+    }
+    return self;
+}
+
 - (void)awakeFromNib
 {
     [self setDelegate: self];
-    [self setBottomCornerRounded:NO];
 
     /* button strings */
     [o_btn_backward setToolTip: _NS("Rewind")];
@@ -71,23 +79,8 @@
     [o_btn_playlist setToolTip: _NS("Playlist")];
     [self setTitle: _NS("VLC media player")];
 
-    o_img_play = [NSImage imageNamed: @"play_big"];
-    o_img_pause = [NSImage imageNamed: @"pause_big"];
-
-    [self controlTintChanged];
-    [[NSNotificationCenter defaultCenter] addObserver: self
-                                             selector: @selector( controlTintChanged )
-                                                 name: NSControlTintDidChangeNotification
-                                               object: nil];
-
-    /* Set color of sidebar to Leopard's "Sidebar Blue" */
-    [o_sidebar_list setBackgroundColor: [NSColor colorWithCalibratedRed:0.820
-                                                                  green:0.843
-                                                                   blue:0.886
-                                                                  alpha:1.0]];
-    
-    [self setMinSize:NSMakeSize([o_sidebar_list convertRect:[o_sidebar_list bounds]
-                                                     toView: nil].size.width + 551., 114.)];
+    o_img_play = [NSImage imageNamed: @"play_embedded"];
+    o_img_pause = [NSImage imageNamed: @"pause_embedded"];
 
     /* Useful to save o_view frame in fullscreen mode */
     o_temp_view = [[NSView alloc] init];
@@ -100,10 +93,47 @@
     [o_btn_fullscreen setState: NO];
     b_fullscreen = NO;
 
+    [self setMovableByWindowBackground:YES];
+
+    [self setDelegate:self];
+
     /* Make sure setVisible: returns NO */
     [self orderOut:self];
-    //b_window_is_invisible = YES;
+    b_window_is_invisible = YES;
     videoRatio = NSMakeSize( 0., 0. );
+
+    /* enlarge the time slider and move items around in case we have no window resize control */
+    if ([self showsResizeIndicator] == NO) {
+        NSRect view_rect;
+        view_rect = [o_backgroundimg_right frame];
+        
+        [o_backgroundimg_right setFrame: NSMakeRect( view_rect.origin.x+15,
+                                                    view_rect.origin.y,
+                                                    view_rect.size.width,
+                                                    view_rect.size.height )];
+        
+        view_rect = [o_backgroundimg_middle frame];
+        [o_backgroundimg_middle setFrame: NSMakeRect( view_rect.origin.x,
+                                                     view_rect.origin.y,
+                                                     view_rect.size.width+15,
+                                                     view_rect.size.height )];
+        
+        view_rect = [o_timeslider frame];
+        [o_timeslider setFrame: NSMakeRect( view_rect.origin.x,
+                                           view_rect.origin.y,
+                                           view_rect.size.width+15,
+                                           view_rect.size.height )];
+        
+        view_rect = [o_time frame];
+        [o_time setFrame: NSMakeRect( view_rect.origin.x+15,
+                                     view_rect.origin.y,
+                                     view_rect.size.width,
+                                     view_rect.size.height )];
+    }
+
+    /* we don't want this window to be restored on relaunch */
+    if ([self respondsToSelector:@selector(setRestorable:)])
+        [self setRestorable:NO];
 }
 
 - (void)controlTintChanged
@@ -111,10 +141,22 @@
     BOOL b_playing = NO;
     if( [o_btn_play alternateImage] == o_img_play_pressed )
         b_playing = YES;
-    
-    o_img_play_pressed = [NSImage imageNamed: @"play_big_down"];
-    o_img_pause_pressed = [NSImage imageNamed: @"pause_big_down"];
-    
+
+    if( [NSColor currentControlTint] == NSGraphiteControlTint )
+    {
+        o_img_play_pressed = [NSImage imageNamed: @"play_embedded_graphite"];
+        o_img_pause_pressed = [NSImage imageNamed: @"pause_embedded_graphite"];
+        [o_btn_backward setAlternateImage: [NSImage imageNamed: @"skip_previous_embedded_graphite"]];
+        [o_btn_forward setAlternateImage: [NSImage imageNamed: @"skip_forward_embedded_graphite"]];
+        [o_btn_fullscreen setAlternateImage: [NSImage imageNamed: @"fullscreen_graphite"]];
+    } else {
+        o_img_play_pressed = [NSImage imageNamed: @"play_embedded_blue"];
+        o_img_pause_pressed = [NSImage imageNamed: @"pause_embedded_blue"];
+        [o_btn_backward setAlternateImage: [NSImage imageNamed: @"skip_previous_embedded_blue"]];
+        [o_btn_forward setAlternateImage: [NSImage imageNamed: @"skip_forward_embedded_blue"]];
+        [o_btn_fullscreen setAlternateImage: [NSImage imageNamed: @"fullscreen_blue"]];
+    }
+
     if( b_playing )
         [o_btn_play setAlternateImage: o_img_play_pressed];
     else
@@ -128,8 +170,13 @@
     [o_img_play_pressed release];
     [o_img_pause release];
     [o_img_pause_pressed release];
-    
+
     [super dealloc];
+}
+
+- (id)videoView
+{
+    return o_video_view;
 }
 
 - (void)setTime:(NSString *)o_arg_time position:(float)f_position
@@ -170,7 +217,7 @@
 {
     if( o_main_pgbar )
         return o_main_pgbar;
-    
+
     return nil;
 }
 
@@ -207,12 +254,9 @@
 
 - (BOOL)windowShouldClose:(id)sender
 {
-    playlist_t * p_playlist = pl_Hold( VLCIntf );
+    playlist_t * p_playlist = pl_Get( VLCIntf );
+    playlist_Stop( p_playlist );
 
-    /* Only want to stop playback if video is playing */
-    if( videoRatio.height != 0. && videoRatio.width != 0. )
-        playlist_Stop( p_playlist );
-    pl_Release( VLCIntf );
     return YES;
 }
 
@@ -231,42 +275,29 @@
 
 - (NSSize)windowWillResize:(NSWindow *)window toSize:(NSSize)proposedFrameSize
 {
-	NSView *playlist_area = [[o_vertical_split subviews] objectAtIndex:1];
-	NSRect newList = [playlist_area frame];
-	if( newList.size.height < 50 && newList.size.height > 0 ) {
-		[self togglePlaylist:self];
-	}
-    
-    /* With no video open or with the playlist open the behavior is odd */    
-    if( newList.size.height > 50 )
-        return proposedFrameSize;
-	
     if( videoRatio.height == 0. || videoRatio.width == 0. )
         return proposedFrameSize;
 
-    NSRect viewRect = [o_view convertRect:[o_view bounds] toView: nil];
-    NSRect contentRect = [self contentRectForFrameRect:[self frame]];
-    float marginy = viewRect.origin.y + [self frame].size.height - contentRect.size.height;
-    float marginx = contentRect.size.width - viewRect.size.width;
-
-    proposedFrameSize.height = (proposedFrameSize.width - marginx) * videoRatio.height / videoRatio.width + marginy;
+    if( [[VLCCoreInteraction sharedInstance] aspectRatioIsLocked] )
+    {
+        NSRect viewRect = [o_view convertRect:[o_view bounds] toView: nil];
+        NSRect contentRect = [self contentRectForFrameRect:[self frame]];
+        float marginy = viewRect.origin.y + [self frame].size.height - contentRect.size.height;
+        float marginx = contentRect.size.width - viewRect.size.width;
+        proposedFrameSize.height = (proposedFrameSize.width - marginx) * videoRatio.height / videoRatio.width + marginy;
+    }
 
     return proposedFrameSize;
 }
 
 - (void)becomeMainWindow
 {
-    [o_sidebar_list setBackgroundColor: [NSColor colorWithCalibratedRed:0.820
-                                                                  green:0.843
-                                                                   blue:0.886
-                                                                  alpha:1.0]];
 	[o_status becomeMainWindow];
     [super becomeMainWindow];
 }
 
 - (void)resignMainWindow
 {
-    [o_sidebar_list setBackgroundColor: [NSColor colorWithCalibratedWhite:0.91 alpha:1.0]];
 	[o_status resignMainWindow];
     [super resignMainWindow];
 }
@@ -275,6 +306,8 @@
 {
 	if([splitView isVertical])
 		return proposedPosition;
+	else if ( splitView == o_vertical_split )
+		return proposedPosition ;
 	else {
 		float bottom = [splitView frame].size.height - [splitView dividerThickness];
 		if(proposedPosition > bottom - 50) {
@@ -391,30 +424,32 @@
     vout_thread_t *p_vout = getVout();
     BOOL blackout_other_displays = config_GetInt( VLCIntf, "macosx-black" );
 
-    screen = [NSScreen screenWithDisplayID:(CGDirectDisplayID)var_GetInteger( p_vout, "video-device" )]; 
- 
+    if( p_vout )
+        screen = [NSScreen screenWithDisplayID:(CGDirectDisplayID)var_GetInteger( p_vout, "video-device" )];
+
     [self lockFullscreenAnimation];
 
     if (!screen)
     {
-        msg_Dbg( p_vout, "chosen screen isn't present, using current screen for fullscreen mode" );
+        msg_Dbg( VLCIntf, "chosen screen isn't present, using current screen for fullscreen mode" );
         screen = [self screen];
     }
     if (!screen)
     {
-        msg_Dbg( p_vout, "Using deepest screen" );
+        msg_Dbg( VLCIntf, "Using deepest screen" );
         screen = [NSScreen deepestScreen];
     }
 
-    vlc_object_release( p_vout );
+    if( p_vout )
+        vlc_object_release( p_vout );
 
     screen_rect = [screen frame];
 
     [o_btn_fullscreen setState: YES];
 
     [NSCursor setHiddenUntilMouseMoves: YES];
- 
-    if( blackout_other_displays )        
+
+    if( blackout_other_displays )
         [screen blackoutOtherScreens];
 
     /* Make sure we don't see the window flashes in float-on-top mode */
@@ -424,7 +459,7 @@
     /* Only create the o_fullscreen_window if we are not in the middle of the zooming animation */
     if (!o_fullscreen_window)
     {
-        /* We can't change the styleMask of an already created NSWindow, so we create an other window, and do eye catching stuff */
+        /* We can't change the styleMask of an already created NSWindow, so we create another window, and do eye catching stuff */
 
         rect = [[o_view superview] convertRect: [o_view frame] toView: nil]; /* Convert to Window base coord */
         rect.origin.x += [self frame].origin.x;
@@ -438,36 +473,40 @@
             /* We don't animate if we are not visible, instead we
              * simply fade the display */
             CGDisplayFadeReservationToken token;
- 
-            CGAcquireDisplayFadeReservation(kCGMaxDisplayReservationInterval, &token);
-            CGDisplayFade( token, 0.5, kCGDisplayBlendNormal, kCGDisplayBlendSolidColor, 0, 0, 0, YES );
- 
+
+            if( blackout_other_displays )
+            {
+                CGAcquireDisplayFadeReservation( kCGMaxDisplayReservationInterval, &token );
+                CGDisplayFade( token, 0.5, kCGDisplayBlendNormal, kCGDisplayBlendSolidColor, 0, 0, 0, YES );
+            }
+
             if ([screen isMainScreen])
                 SetSystemUIMode( kUIModeAllHidden, kUIOptionAutoShowMenuBar);
- 
-            [[self contentView] replaceSubview:o_view with:o_temp_view];
+
+            [[o_view superview] replaceSubview:o_view with:o_temp_view];
             [o_temp_view setFrame:[o_view frame]];
             [o_fullscreen_window setContentView:o_view];
-
-            [o_fullscreen_window makeKeyAndOrderFront:self];
 
             [o_fullscreen_window makeKeyAndOrderFront:self];
             [o_fullscreen_window orderFront:self animate:YES];
 
             [o_fullscreen_window setFrame:screen_rect display:YES];
 
-            CGDisplayFade( token, 0.3, kCGDisplayBlendSolidColor, kCGDisplayBlendNormal, 0, 0, 0, NO );
-            CGReleaseDisplayFadeReservation( token);
+            if( blackout_other_displays )
+            {
+                CGDisplayFade( token, 0.3, kCGDisplayBlendSolidColor, kCGDisplayBlendNormal, 0, 0, 0, NO );
+                CGReleaseDisplayFadeReservation( token );
+            }
 
             /* Will release the lock */
             [self hasBecomeFullscreen];
 
             return;
         }
- 
+
         /* Make sure we don't see the o_view disappearing of the screen during this operation */
         NSDisableScreenUpdates();
-        [[self contentView] replaceSubview:o_view with:o_temp_view];
+        [[o_view superview] replaceSubview:o_view with:o_temp_view];
         [o_temp_view setFrame:[o_view frame]];
         [o_fullscreen_window setContentView:o_view];
         [o_fullscreen_window makeKeyAndOrderFront:self];
@@ -493,7 +532,7 @@
         [o_fullscreen_anim2 stopAnimation];
         [o_fullscreen_anim2 release];
     }
- 
+
     if ([screen isMainScreen])
         SetSystemUIMode( kUIModeAllHidden, kUIOptionAutoShowMenuBar);
 
@@ -559,6 +598,7 @@
 {
     NSMutableDictionary *dict1, *dict2;
     NSRect frame;
+    BOOL blackout_other_displays = config_GetInt( VLCIntf, "macosx-black" );
 
     [self lockFullscreenAnimation];
 
@@ -581,8 +621,11 @@
         * simply fade the display */
         CGDisplayFadeReservationToken token;
 
-        CGAcquireDisplayFadeReservation(kCGMaxDisplayReservationInterval, &token);
-        CGDisplayFade( token, 0.3, kCGDisplayBlendNormal, kCGDisplayBlendSolidColor, 0, 0, 0, YES );
+        if( blackout_other_displays )
+        {
+            CGAcquireDisplayFadeReservation( kCGMaxDisplayReservationInterval, &token );
+            CGDisplayFade( token, 0.3, kCGDisplayBlendNormal, kCGDisplayBlendSolidColor, 0, 0, 0, YES );
+        }
 
         [[[[VLCMain sharedInstance] controls] fspanel] setNonActive: nil];
         SetSystemUIMode( kUIModeNormal, kUIOptionAutoShowMenuBar);
@@ -594,8 +637,12 @@
          * here */
         b_window_is_invisible = YES;
 
-        CGDisplayFade( token, 0.5, kCGDisplayBlendSolidColor, kCGDisplayBlendNormal, 0, 0, 0, NO );
-        CGReleaseDisplayFadeReservation( token);
+        if( blackout_other_displays )
+        {
+            CGDisplayFade( token, 0.5, kCGDisplayBlendSolidColor, kCGDisplayBlendNormal, 0, 0, 0, NO );
+            CGReleaseDisplayFadeReservation( token );
+        }
+
         return;
     }
 
@@ -661,7 +708,7 @@
     NSDisableScreenUpdates();
     [o_view retain];
     [o_view removeFromSuperviewWithoutNeedingDisplay];
-    [[self contentView] replaceSubview:o_temp_view with:o_view];
+    [[o_temp_view superview] replaceSubview:o_temp_view with:o_view];
     [o_view release];
     [o_view setFrame:[o_temp_view frame]];
     [self makeFirstResponder: o_view];
@@ -853,7 +900,7 @@
     NSString *o_desired_type = [o_paste availableTypeFromArray:o_types];
     NSData *o_carried_data = [o_paste dataForType:o_desired_type];
     BOOL b_autoplay = config_GetInt( VLCIntf, "macosx-autoplay" );
-    
+
     if( o_carried_data )
     {
         if ([o_desired_type isEqualToString:NSFilenamesPboardType])
@@ -862,11 +909,17 @@
             NSArray *o_array = [NSArray array];
             NSArray *o_values = [[o_paste propertyListForType: NSFilenamesPboardType]
                                  sortedArrayUsingSelector:@selector(caseInsensitiveCompare:)];
-            
+
             for( i = 0; i < (int)[o_values count]; i++)
             {
                 NSDictionary *o_dic;
-                o_dic = [NSDictionary dictionaryWithObject:[o_values objectAtIndex:i] forKey:@"ITEM_URL"];
+                char *psz_uri = make_URI([[o_values objectAtIndex:i] UTF8String], NULL);
+                if( !psz_uri )
+                    continue;
+
+                o_dic = [NSDictionary dictionaryWithObject:[NSString stringWithCString:psz_uri encoding:NSUTF8StringEncoding] forKey:@"ITEM_URL"];
+                free( psz_uri );
+
                 o_array = [o_array arrayByAddingObject: o_dic];
             }
             if( b_autoplay )
@@ -955,3 +1008,5 @@
 	NSRectFill(divider);*/
 }
 @end
+
+#endif

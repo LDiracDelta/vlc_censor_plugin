@@ -21,30 +21,46 @@
  * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston MA 02110-1301, USA.
  *****************************************************************************/
 
+#ifdef HAVE_CONFIG_H
+# include "config.h"
+#endif
+
 #include <hildon/hildon-program.h>
 #include <hildon/hildon-seekbar.h>
-#include <hildon/hildon-file-chooser-dialog.h>
 #include <hildon/hildon-banner.h>
 
+#include <vlc_interface.h>
 #include <vlc_playlist.h>
 #include <vlc_input.h>
 #include <vlc_vout.h>
 
 struct intf_sys_t
 {
+    vlc_thread_t thread;
+
     playlist_t *p_playlist;
     input_thread_t *p_input;
+    vlc_sem_t ready;
 
     HildonWindow  *p_main_window;
     HildonSeekbar *p_seekbar;
-    GtkWidget     *p_tabs;
     GtkWidget     *p_play_button;
 
-    GtkWidget *p_playlist_store;
+    GtkListStore  *p_playlist_store;
+    GtkWidget     *p_playlist_window;
 
     int i_event;
     vlc_spinlock_t event_lock;
 
     GtkWidget *p_video_window;
-    vout_thread_t *p_vout;
+    uint32_t xid; /* X11 windows ID */
+    bool b_fullscreen;
+
+    GtkWidget *p_control_window;
+
+    GtkMenuItem *menu_input;
+    GtkMenuItem *menu_audio;
+    GtkMenuItem *menu_video;
 };
+
+GtkWidget *create_menu( intf_thread_t *p_intf );

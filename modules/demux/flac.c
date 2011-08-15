@@ -1,7 +1,7 @@
 /*****************************************************************************
  * flac.c : FLAC demux module for vlc
  *****************************************************************************
- * Copyright (C) 2001-2007 the VideoLAN team
+ * Copyright (C) 2001-2008 the VideoLAN team
  * $Id$
  *
  * Authors: Gildas Bazin <gbazin@netcourrier.com>
@@ -32,12 +32,13 @@
 #include <vlc_common.h>
 #include <vlc_plugin.h>
 #include <vlc_demux.h>
-#include <vlc_meta.h>
-#include <vlc_input.h>
-#include <vlc_codec.h>
+#include <vlc_meta.h>                 /* vlc_meta_* */
+#include <vlc_input.h>                /* vlc_input_attachment, vlc_seekpoint */
+#include <vlc_codec.h>                /* decoder_t */
+#include <vlc_charset.h>              /* EnsureUTF8 */
+
 #include <assert.h>
-#include <vlc_charset.h>
-#include "vorbis.h"
+#include "vorbis.h"                   /* vorbis comments */
 
 /*****************************************************************************
  * Module descriptor
@@ -118,9 +119,13 @@ static int Open( vlc_object_t * p_this )
                  "continuing anyway" );
     }
 
+    p_sys = malloc( sizeof( demux_sys_t ) );
+    if( unlikely(p_sys == NULL) )
+        return VLC_ENOMEM;
+
     p_demux->pf_demux   = Demux;
     p_demux->pf_control = Control;
-    p_demux->p_sys      = p_sys = malloc( sizeof( demux_sys_t ) );
+    p_demux->p_sys      = p_sys;
     p_sys->b_start = true;
     p_sys->p_meta = NULL;
     memset( &p_sys->replay_gain, 0, sizeof(p_sys->replay_gain) );
@@ -204,7 +209,7 @@ static int Demux( demux_t *p_demux )
     if( !( p_block_in = stream_Block( p_demux->s, FLAC_PACKET_SIZE ) ) )
         return 0;
 
-    p_block_in->i_pts = p_block_in->i_dts = p_sys->b_start ? 1 : 0;
+    p_block_in->i_pts = p_block_in->i_dts = p_sys->b_start ? VLC_TS_0 : VLC_TS_INVALID;
     p_sys->b_start = false;
 
     while( (p_block_out = p_sys->p_packetizer->pf_packetize(
@@ -223,7 +228,7 @@ static int Demux( demux_t *p_demux )
                 p_sys->p_es = es_out_Add( p_demux->out, &p_sys->p_packetizer->fmt_out);
             }
 
-            p_sys->i_pts = p_block_out->i_dts;
+            p_sys->i_pts = p_block_out->i_dts - VLC_TS_0;
 
             /* Correct timestamp */
             p_block_out->i_pts += p_sys->i_time_offset;
@@ -401,7 +406,7 @@ static int Control( demux_t *p_demux, int i_query, va_list args )
             return VLC_EGENERIC;
 
         *pi_int = p_sys->i_attachments;;
-        *ppp_attach = malloc( sizeof(input_attachment_t**) * p_sys->i_attachments );
+        *ppp_attach = xmalloc( sizeof(input_attachment_t**) * p_sys->i_attachments );
         for( i = 0; i < p_sys->i_attachments; i++ )
             (*ppp_attach)[i] = vlc_input_attachment_Duplicate( p_sys->attachments[i] );
         return VLC_SUCCESS;
@@ -621,7 +626,7 @@ static void ParsePicture( demux_t *p_demux, const uint8_t *p_data, int i_data )
     if( i_len < 0 || i_len > i_data )
         goto error;
 
-    msg_Dbg( p_demux, "FLAC: Picture type=%d mime=%s description='%s' file length=%d",
+    msg_Dbg( p_demux, "Picture type=%d mime=%s description='%s' file length=%d",
              i_type, psz_mime, psz_description, i_len );
 
     snprintf( psz_name, sizeof(psz_name), "picture%d", p_sys->i_attachments );

@@ -22,7 +22,6 @@
  * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston MA 02110-1301, USA.
  *****************************************************************************/
 
-#import <Cocoa/Cocoa.h>
 #import <VLCKit/VLCStreamOutput.h>
 #import <VLCKit/VLCMediaPlayer.h>
 #import <VLCKit/VLCMedia.h>
@@ -31,7 +30,7 @@
 @interface VLCStreamSession : VLCMediaPlayer {
     VLCStreamOutput * streamOutput;
     VLCMedia * originalMedia;
-    int reattemptedConnections;
+    NSUInteger reattemptedConnections;
     BOOL isComplete;
 }
 
@@ -42,4 +41,5 @@
 @property (readonly) BOOL isComplete;
 
 - (void)startStreaming;
+- (void)stopStreaming;
 @end

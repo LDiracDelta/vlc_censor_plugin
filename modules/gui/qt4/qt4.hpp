@@ -33,21 +33,18 @@
 #include <vlc_interface.h> /* intf_thread_t */
 #include <vlc_playlist.h>  /* playlist_t */
 
-#include <QEvent>
+#define QT_NO_CAST_TO_ASCII
 #include <QString>
 
 #if ( QT_VERSION < 0x040400 )
-# error Update your Qt version
+# error Update your Qt version to at least 4.4.0
 #endif
 #if QT_VERSION == 0x040500
-# warning Please update Qt version to 4.5.1. This warning will become an error.
+# error Please update Qt version to 4.5.1. 4.5.0 is too buggy
 #endif
 
-enum {
-    QT_NORMAL_MODE = 0,
-    QT_ALWAYS_VIDEO_MODE,
-    QT_MINIMAL_MODE
-};
+#define HAS_QT45 ( QT_VERSION >= 0x040500 )
+#define HAS_QT47 ( QT_VERSION >= 0x040700 )
 
 enum {
     DialogEventType = 0,
@@ -74,25 +71,29 @@ struct intf_sys_t
 
     int  i_screenHeight;     /* Detection of Small screens */
 
-    playlist_t *p_playlist;  /* Core Playlist discussion */
-
     QString filepath;        /* Last path used in dialogs */
 
-    QMenu * p_popup_menu;    /* The right click menu */
+#ifdef WIN32
+    bool disable_volume_keys;
+#endif
 };
 
-#define THEPL p_intf->p_sys->p_playlist
+#define THEPL pl_Get(p_intf)
 #define QPL_LOCK playlist_Lock( THEPL );
 #define QPL_UNLOCK playlist_Unlock( THEPL );
 
 #define THEDP DialogsProvider::getInstance()
 #define THEMIM MainInputManager::getInstance( p_intf )
+#define THEAM ActionsManager::getInstance( p_intf )
 
 #define qfu( i ) QString::fromUtf8( i )
 #define qtr( i ) QString::fromUtf8( vlc_gettext(i) )
 #define qtu( i ) ((i).toUtf8().constData())
 
-#define CONNECT( a, b, c, d ) connect( a, SIGNAL( b ), c, SLOT(d) )
+#define CONNECT( a, b, c, d ) \
+        connect( a, SIGNAL( b ), c, SLOT(d) )
+#define DCONNECT( a, b, c, d ) \
+        connect( a, SIGNAL( b ), c, SLOT(d), Qt::DirectConnection )
 #define BUTTONACT( b, a ) connect( b, SIGNAL( clicked() ), this, SLOT(a) )
 
 #define BUTTON_SET( button, text, tooltip )  \
@@ -116,18 +117,25 @@ struct intf_sys_t
 #define TOGGLEV( x ) { if( x->isVisible() ) x->hide();          \
             else  x->show(); }
 
-#define setLayoutMargins( a, b, c, d, e) setContentsMargins( a, b, c, d )
-
 #define getSettings() p_intf->p_sys->mainSettings
+
+#define QT_VOLUME_DEFAULT AOUT_VOLUME_DEFAULT
+#define QT_VOLUME_MAX (AOUT_VOLUME_DEFAULT * 2)
 
 static inline QString QVLCUserDir( vlc_userdir_t type )
 {
     char *dir = config_GetUserDir( type );
     if( !dir )
-        abort();
+        return "";
     QString res = qfu( dir );
     free( dir );
     return res;
 }
+
+/* After this day of the year, the usual VLC cone is replaced by another cone
+ * wearing a Father Xmas hat.
+ * Note this icon doesn't represent an endorsment of Coca-Cola company.
+ */
+#define QT_XMAS_JOKE_DAY 354
 
 #endif

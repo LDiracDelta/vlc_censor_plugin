@@ -21,15 +21,12 @@
  * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston MA 02110-1301, USA.
  *****************************************************************************/
 
-#if defined(__PLUGIN__) || defined(__BUILTIN__) || !defined(__LIBVLC__)
-# error This header file can only be included from LibVLC.
-#endif
-
-#ifndef _INPUT_ITEM_H
-#define _INPUT_ITEM_H 1
+#ifndef LIBVLC_INPUT_ITEM_H
+#define LIBVLC_INPUT_ITEM_H 1
 
 #include "input_interface.h"
 
 void input_item_SetErrorWhenReading( input_item_t *p_i, bool b_error );
+void input_item_UpdateTracksInfo( input_item_t *item, const es_format_t *fmt );
 
 #endif

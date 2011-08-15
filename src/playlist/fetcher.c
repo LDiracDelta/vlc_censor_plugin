@@ -32,11 +32,13 @@
 #include <vlc_stream.h>
 #include <limits.h>
 #include <vlc_art_finder.h>
+#include <vlc_memory.h>
+#include <vlc_demux.h>
+#include <vlc_modules.h>
 
 #include "art.h"
 #include "fetcher.h"
 #include "playlist_internal.h"
-
 
 /*****************************************************************************
  * Structures/definitions
@@ -89,16 +91,12 @@ void playlist_fetcher_Push( playlist_fetcher_t *p_fetcher,
                  p_fetcher->i_waiting, p_item );
     if( !p_fetcher->b_live )
     {
-        vlc_thread_t th;
-
-        if( vlc_clone( &th, Thread, p_fetcher, VLC_THREAD_PRIORITY_LOW ) )
+        if( vlc_clone_detach( NULL, Thread, p_fetcher,
+                              VLC_THREAD_PRIORITY_LOW ) )
             msg_Err( p_fetcher->p_playlist,
                      "cannot spawn secondary preparse thread" );
         else
-        {
-            vlc_detach( th );
             p_fetcher->b_live = true;
-        }
     }
     vlc_mutex_unlock( &p_fetcher->lock );
 }
@@ -184,7 +182,7 @@ static int FindArt( playlist_fetcher_t *p_fetcher, input_item_t *p_item )
     char *psz_arturl = input_item_GetArtURL( p_item );
     if( psz_arturl )
     {
-        /* We already have an URL */
+        /* We already have a URL */
         if( !strncmp( psz_arturl, "file://", strlen( "file://" ) ) )
         {
             free( psz_arturl );
@@ -220,20 +218,22 @@ static int FindArt( playlist_fetcher_t *p_fetcher, input_item_t *p_item )
 
     vlc_object_t *p_parent = VLC_OBJECT(p_fetcher->p_playlist);
     art_finder_t *p_finder =
-        vlc_custom_create( p_parent, sizeof( *p_finder ), VLC_OBJECT_GENERIC,
-                           "art finder" );
+        vlc_custom_create( p_parent, sizeof( *p_finder ), "art finder" );
     if( p_finder != NULL)
     {
         module_t *p_module;
 
-        vlc_object_attach( p_finder, p_parent );
         p_finder->p_item = p_item;
 
         p_module = module_need( p_finder, "art finder", NULL, false );
         if( p_module )
         {
             module_unneed( p_finder, p_module );
-            i_ret = 1;
+            /* Try immediately if found in cache by download URL */
+            if( !playlist_FindArtInCache( p_item ) )
+                i_ret = 0;
+            else
+                i_ret = 1;
         }
         vlc_object_release( p_finder );
     }
@@ -293,7 +293,7 @@ static int DownloadArt( playlist_fetcher_t *p_fetcher, input_item_t *p_item )
         if( i_data >= INT_MAX - i_read )
             break;
 
-        p_data = realloc( p_data, i_data + i_read );
+        p_data = realloc_or_free( p_data, i_data + i_read );
         if( !p_data )
             break;
 
@@ -324,6 +324,26 @@ error:
     return VLC_EGENERIC;
 }
 
+/**
+ * FetchMeta, run the "meta fetcher". They are going to do network
+ * connections, and gather information upon the playing media.
+ * (even artwork).
+ */
+static void FetchMeta( playlist_fetcher_t *p_fetcher, input_item_t *p_item )
+{
+    demux_meta_t *p_demux_meta = vlc_custom_create(p_fetcher->p_playlist,
+                                         sizeof(*p_demux_meta), "demux meta" );
+    if( !p_demux_meta )
+        return;
+
+    p_demux_meta->p_demux = NULL;
+    p_demux_meta->p_item = p_item;
+
+    module_t *p_meta_fetcher = module_need( p_demux_meta, "meta fetcher", NULL, false );
+    if( p_meta_fetcher )
+        module_unneed( p_demux_meta, p_meta_fetcher );
+    vlc_object_release( p_demux_meta );
+}
 
 static int InputEvent( vlc_object_t *p_this, char const *psz_cmd,
                        vlc_value_t oldval, vlc_value_t newval, void *p_data )
@@ -410,6 +430,12 @@ static void *Thread( void *p_data )
 
         /* Wait that the input item is preparsed if it is being played */
         WaitPreparsed( p_fetcher, p_item );
+
+        /* Triggers "meta fetcher", eventually fetch meta on the network.
+         * They are identical to "meta reader" expect that may actually
+         * takes time. That's why they are running here.
+         * The result of this fetch is not cached. */
+        FetchMeta( p_fetcher, p_item );
 
         /* Find art, and download it if needed */
         int i_ret = FindArt( p_fetcher, p_item );

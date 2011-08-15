@@ -34,6 +34,7 @@
 #include <QString>
 #include <QFileDialog>
 #include <QToolButton>
+#include <QSpinBox>
 #include <assert.h>
 
 SoutDialog::SoutDialog( QWidget *parent, intf_thread_t *_p_intf, const QString& inputMRL )
@@ -66,6 +67,7 @@ SoutDialog::SoutDialog( QWidget *parent, intf_thread_t *_p_intf, const QString& 
     closeTabButton->hide();
     closeTabButton->setAutoRaise( true );
     closeTabButton->setIcon( QIcon( ":/toolbar/clear" ) );
+    closeTabButton->setToolTip( qtr("Clear") );
     BUTTONACT( closeTabButton, closeTab() );
 #endif
     CONNECT( ui.destTab, currentChanged( int ), this, tabChanged( int ) );
@@ -73,9 +75,11 @@ SoutDialog::SoutDialog( QWidget *parent, intf_thread_t *_p_intf, const QString& 
 
     ui.destBox->addItem( qtr( "File" ) );
     ui.destBox->addItem( "HTTP" );
-    ui.destBox->addItem( "MMS" );
-    ui.destBox->addItem( "UDP" );
-    ui.destBox->addItem( "RTP" );
+    ui.destBox->addItem( "MS-WMSP (MMSH)" );
+    ui.destBox->addItem( "RTSP" );
+    ui.destBox->addItem( "RTP / MPEG Transport Stream" );
+    ui.destBox->addItem( "RTP Audio/Video Profile" );
+    ui.destBox->addItem( "UDP (legacy)" );
     ui.destBox->addItem( "IceCast" );
 
     BUTTONACT( ui.addButton, addDest() );
@@ -87,8 +91,8 @@ SoutDialog::SoutDialog( QWidget *parent, intf_thread_t *_p_intf, const QString& 
 #define CC( x ) CONNECT( ui.x, currentIndexChanged( int ), this, updateMRL() );
 
     /* Misc */
-    CB( soutAll ); CB( soutKeep );  CS( ttl ); CT( sapName ); CT( sapGroup );
-    CB( localOutput );
+    CB( soutAll );  CS( ttl ); CT( sapName ); CT( sapGroup );
+    CB( localOutput ); CB( transcodeBox );
     CONNECT( ui.profileSelect, optionsChanged(), this, updateMRL() );
 
     okButton = new QPushButton( qtr( "&Stream" ) );
@@ -140,55 +144,49 @@ void SoutDialog::closeTab()
 
 void SoutDialog::addDest( )
 {
-    int index;
+    VirtualDestBox *db;
+    QString caption;
+
     switch( ui.destBox->currentIndex() )
     {
         case 0:
-            {
-                FileDestBox *fdb = new FileDestBox( this );
-                index = ui.destTab->addTab( fdb, "File" );
-                CONNECT( fdb, mrlUpdated(), this, updateMRL() );
-            }
+            db = new FileDestBox( this );
+            caption = qtr( "File" );
             break;
         case 1:
-            {
-                HTTPDestBox *hdb = new HTTPDestBox( this );
-                index = ui.destTab->addTab( hdb, "HTTP" );
-                CONNECT( hdb, mrlUpdated(), this, updateMRL() );
-            }
+            db = new HTTPDestBox( this );
+            caption = qfu( "HTTP" );
             break;
         case 2:
-            {
-                MMSHDestBox *mdb = new MMSHDestBox( this );
-                index = ui.destTab->addTab( mdb, "MMSH" );
-                CONNECT( mdb, mrlUpdated(), this, updateMRL() );
-            }
+            db = new MMSHDestBox( this );
+            caption = qfu( "WMSP" );
             break;
         case 3:
-            {
-                UDPDestBox *udb = new UDPDestBox( this );
-                index = ui.destTab->addTab( udb, "UDP" );
-                CONNECT( udb, mrlUpdated(), this, updateMRL() );
-            }
+            db = new RTSPDestBox( this );
+            caption = qfu( "RTSP" );
             break;
         case 4:
-            {
-                RTPDestBox *rdb = new RTPDestBox( this );
-                index = ui.destTab->addTab( rdb, "RTP" );
-                CONNECT( rdb, mrlUpdated(), this, updateMRL() );
-            }
+            db = new RTPDestBox( this, "ts" );
+            caption = "RTP/TS";
             break;
         case 5:
-            {
-                ICEDestBox *idb = new ICEDestBox( this );
-                index = ui.destTab->addTab( idb, "Icecast" );
-                CONNECT( idb, mrlUpdated(), this, updateMRL() );
-            }
+            db = new RTPDestBox( this );
+            caption = "RTP/AVP";
+            break;
+        case 6:
+            db = new UDPDestBox( this );
+            caption = "UDP";
+            break;
+        case 7:
+            db = new ICEDestBox( this );
+            caption = "Icecast";
             break;
         default:
             assert(0);
     }
 
+    int index = ui.destTab->addTab( db, caption );
+    CONNECT( db, mrlUpdated(), this, updateMRL() );
     ui.destTab->setCurrentIndex( index );
     updateMRL();
 }
@@ -228,9 +226,12 @@ void SoutDialog::updateMRL()
     for( int i = 1; i < ui.destTab->count(); i++ )
     {
         VirtualDestBox *vdb = qobject_cast<VirtualDestBox *>(ui.destTab->widget( i ));
-        QString tempMRL = vdb->getMRL( qs_mux );
+        if( !vdb )
+            continue;
 
+        QString tempMRL = vdb->getMRL( qs_mux );
         if( tempMRL.isEmpty() ) continue;
+
         if( multi )
             smrl.option( "dst", tempMRL );
         else
@@ -254,14 +255,34 @@ void SoutDialog::updateMRL()
 
     mrl = smrl.getMrl();
 
-    /* FIXME, deal with SAP
-    sout.b_sap = ui.sap->isChecked();
-    sout.psz_group = strdup( qtu( ui.sapGroup->text() ) );
-    sout.psz_name = strdup( qtu( ui.sapName->text() ) ); */
+    if( ui.sap->isChecked() )
+    {
+        QString group = ui.sapGroup->text();
+        QString name = ui.sapName->text();
 
-    if( ui.soutAll->isChecked() )  mrl.append( " :sout-all" );
+        /* FIXME: This sucks. We should really return a QStringList instead of
+         * (mis)quoting, concatainating and split input item paramters. */
+        name = name.replace( " ", " " );
+        group = group.replace( " ", " " );
 
-    if( ui.soutKeep->isChecked() ) mrl.append( " :sout-keep" );
+        /* We need to add options for both standard and rtp targets */
+        /* This is inelegant but simple and functional */
+        mrl.append( qfu( " :sout-rtp-sap" ) );
+        mrl.append( qfu( " :sout-rtp-name=" ) + name );
+        mrl.append( qfu( " :sout-standard-sap" ) );
+        mrl.append( qfu( " :sout-standard-name=" ) + name );
+        mrl.append( qfu( " :sout-standard-group=" ) + group );
+    }
+    else
+    {
+        mrl.append( qfu( " :no-sout-rtp-sap" ) );
+        mrl.append( qfu( " :no-sout-standard-sap" ) );
+    }
+
+    if( ui.soutAll->isChecked() ) mrl.append( " :sout-all" );
+
+    mrl.append( qfu( " :ttl=" ) + QString::number( ui.ttl->value() ) );
+    mrl.append( " :sout-keep" );
 
     ui.mrlEdit->setPlainText( mrl );
 }

@@ -109,13 +109,13 @@
 #define DEMUX_HELP N_( "Demuxers are used to separate audio and video streams." )
 
 #define VDEC_TITLE  N_( "Video codecs" )
-#define VDEC_HELP N_( "Settings for the video-only decoders and encoders." )
+#define VDEC_HELP N_( "Settings for the video, images or video+audio decoders and encoders." )
 
 #define ADEC_TITLE  N_( "Audio codecs" )
 #define ADEC_HELP N_( "Settings for the audio-only decoders and encoders." )
 
-#define SDEC_TITLE N_( "Other codecs")
-#define SDEC_HELP N_( "Settings for audio+video and miscellaneous decoders and encoders." )
+#define SDEC_TITLE N_( "Subtitles codecs")
+#define SDEC_HELP N_( "Settings for subtitles, teletext and CC decoders and encoders." )
 
 #define ADVANCED_TITLE N_("General Input" )
 #define ADVANCED_HELP N_( "General input settings. Use with care..." )
@@ -280,10 +280,10 @@ static const struct config_category_t categories_array[] =
     { -1, NULL, NULL }
 };
 
-LIBVLC_USED
+VLC_USED
 static inline const char *config_CategoryNameGet( int i_value )
 {
-    int i = 0 ;
+    int i = 0;
     while( categories_array[i].psz_name != NULL )
     {
         if( categories_array[i].i_id == i_value )
@@ -295,10 +295,10 @@ static inline const char *config_CategoryNameGet( int i_value )
     return NULL;
 }
 
-LIBVLC_USED
+VLC_USED
 static inline const char *config_CategoryHelpGet( int i_value )
 {
-    int i = 0 ;
+    int i = 0;
     while( categories_array[i].psz_help != NULL )
     {
         if( categories_array[i].i_id == i_value )

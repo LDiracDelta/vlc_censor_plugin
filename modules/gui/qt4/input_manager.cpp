@@ -23,6 +23,9 @@
  * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston MA 02110-1301, USA.
  *****************************************************************************/
 
+#define __STDC_FORMAT_MACROS 1
+#define __STDC_CONSTANT_MACROS 1
+
 #ifdef HAVE_CONFIG_H
 # include "config.h"
 #endif
@@ -30,6 +33,8 @@
 #include "input_manager.hpp"
 #include <vlc_keys.h>
 #include <vlc_url.h>
+#include <vlc_strings.h>
+#include <vlc_aout.h>
 
 #include <QApplication>
 
@@ -37,10 +42,26 @@
 
 static int ItemChanged( vlc_object_t *, const char *,
                         vlc_value_t, vlc_value_t, void * );
+static int LeafToParent( vlc_object_t *, const char *,
+                        vlc_value_t, vlc_value_t, void * );
 static int PLItemChanged( vlc_object_t *, const char *,
+                        vlc_value_t, vlc_value_t, void * );
+static int PLItemAppended( vlc_object_t *, const char *,
+                        vlc_value_t, vlc_value_t, void * );
+static int PLItemRemoved( vlc_object_t *, const char *,
                         vlc_value_t, vlc_value_t, void * );
 static int VolumeChanged( vlc_object_t *, const char *,
                         vlc_value_t, vlc_value_t, void * );
+static int SoundMuteChanged( vlc_object_t *, const char *,
+                        vlc_value_t, vlc_value_t, void * );
+
+static int RandomChanged( vlc_object_t *, const char *,
+                        vlc_value_t, vlc_value_t, void * );
+static int LoopChanged( vlc_object_t *, const char *,
+                        vlc_value_t, vlc_value_t, void * );
+static int RepeatChanged( vlc_object_t *, const char *,
+                        vlc_value_t, vlc_value_t, void * );
+
 
 static int InputEvent( vlc_object_t *, const char *,
                        vlc_value_t, vlc_value_t, void * );
@@ -62,7 +83,8 @@ InputManager::InputManager( QObject *parent, intf_thread_t *_p_intf) :
     oldName      = "";
     artUrl       = "";
     p_input      = NULL;
-    i_rate       = 0;
+    p_input_vbi  = NULL;
+    f_rate       = 0.;
     p_item       = NULL;
     b_video      = false;
     timeA        = 0;
@@ -86,20 +108,23 @@ void InputManager::setInput( input_thread_t *_p_input )
     {
         msg_Dbg( p_intf, "IM: Setting an input" );
         vlc_object_hold( p_input );
-        emit statusChanged( PLAYING_S );
+        addCallbacks();
+        UpdateStatus();
         UpdateName();
         UpdateArt();
         UpdateTeletext();
         UpdateNavigation();
         UpdateVout();
-        addCallbacks();
+
         p_item = input_GetItem( p_input );
+        emit rateChanged( var_GetFloat( p_input, "rate" ) );
     }
     else
     {
         p_input = NULL;
         p_item = NULL;
-        emit rateChanged( INPUT_RATE_DEFAULT );
+        assert( !p_input_vbi );
+        emit rateChanged( var_InheritFloat( p_intf, "rate" ) );
     }
 }
 
@@ -119,16 +144,23 @@ void InputManager::delInput()
     b_video              = false;
     timeA                = 0;
     timeB                = 0;
+    f_rate               = 0. ;
+
+    if( p_input_vbi )
+    {
+        vlc_object_release( p_input_vbi );
+        p_input_vbi = NULL;
+    }
 
     vlc_object_release( p_input );
     p_input = NULL;
 
     emit positionUpdated( -1.0, 0 ,0 );
-    emit rateChanged( INPUT_RATE_DEFAULT ); /* TODO: Do we want this ? */
+    emit rateChanged( var_InheritFloat( p_intf, "rate" ) );
     emit nameChanged( "" );
     emit chapterChanged( 0 );
     emit titleChanged( 0 );
-    emit statusChanged( END_S );
+    emit playingStatusChanged( END_S );
 
     emit teletextPossible( false );
     emit AtoBchanged( false, false );
@@ -142,6 +174,8 @@ void InputManager::delInput()
 
     emit encryptionChanged( false );
     emit recordingStateChanged( false );
+
+    emit cachingChanged( 1 );
 }
 
 /* Convert the event from the callbacks in actions */
@@ -228,6 +262,9 @@ void InputManager::customEvent( QEvent *event )
     case ProgramChanged_Type:
         UpdateProgramEvent();
         break;
+    case EPGEvent_Type:
+        UpdateEPG();
+        break;
     default:
         msg_Warn( p_intf, "This shouldn't happen: %i", i_type );
         assert(0);
@@ -250,6 +287,8 @@ inline void InputManager::delCallbacks()
 static int ItemChanged( vlc_object_t *p_this, const char *psz_var,
                         vlc_value_t oldval, vlc_value_t newval, void *param )
 {
+    VLC_UNUSED( p_this ); VLC_UNUSED( psz_var ); VLC_UNUSED( oldval );
+
     InputManager *im = (InputManager*)param;
     input_item_t *p_item = static_cast<input_item_t *>(newval.p_address);
 
@@ -261,6 +300,8 @@ static int ItemChanged( vlc_object_t *p_this, const char *psz_var,
 static int InputEvent( vlc_object_t *p_this, const char *,
                        vlc_value_t, vlc_value_t newval, void *param )
 {
+    VLC_UNUSED( p_this );
+
     InputManager *im = (InputManager*)param;
     IMEvent *event;
 
@@ -332,6 +373,11 @@ static int InputEvent( vlc_object_t *p_this, const char *,
         event = new IMEvent( ProgramChanged_Type );
         break;
 
+    case INPUT_EVENT_ITEM_EPG:
+        /* EPG data changed */
+        event = new IMEvent( EPGEvent_Type );
+        break;
+
     case INPUT_EVENT_SIGNAL:
         /* This is for capture-card signals */
         /* event = new IMEvent( SignalChanged_Type );
@@ -359,10 +405,11 @@ static int VbiEvent( vlc_object_t *, const char *,
 void InputManager::UpdatePosition()
 {
     /* Update position */
-    int i_length, i_time; /* Int is enough, since we store seconds */
+    int i_length;
+    int64_t i_time;
     float f_pos;
-    i_length = var_GetTime(  p_input , "length" ) / 1000000;
-    i_time = var_GetTime(  p_input , "time") / 1000000;
+    i_length = var_GetTime(  p_input , "length" ) / CLOCK_FREQ;
+    i_time = var_GetTime(  p_input , "time");
     f_pos = var_GetFloat(  p_input , "position" );
     emit positionUpdated( f_pos, i_time, i_length );
 }
@@ -371,6 +418,7 @@ void InputManager::UpdateNavigation()
 {
     /* Update navigation status */
     vlc_value_t val; val.i_int = 0;
+    vlc_value_t val2; val2.i_int = 0;
 
     if( hasInput() )
         var_Change( p_input, "title", VLC_VAR_CHOICESCOUNT, &val, NULL );
@@ -378,12 +426,11 @@ void InputManager::UpdateNavigation()
     if( val.i_int > 0 )
     {
         emit titleChanged( true );
-        msg_Dbg( p_intf, "Title %i", val.i_int );
+        msg_Dbg( p_intf, "Title %"PRId64, val.i_int );
         /* p_input != NULL since val.i_int != 0 */
-        val.i_int = 0;
-        var_Change( p_input, "chapter", VLC_VAR_CHOICESCOUNT, &val, NULL );
-        emit chapterChanged( (val.i_int > 0) );
-        msg_Dbg( p_intf, "Chapter: %i", val.i_int );
+        var_Change( p_input, "chapter", VLC_VAR_CHOICESCOUNT, &val2, NULL );
+        emit chapterChanged( (val2.i_int > 1) || ( val2.i_int > 0 && val.i_int > 1 ) );
+        msg_Dbg( p_intf, "Chapter: %"PRId64, val2.i_int );
     }
     else
         emit titleChanged( false );
@@ -396,66 +443,61 @@ void InputManager::UpdateStatus()
     if( i_old_playing_status != state )
     {
         i_old_playing_status = state;
-        emit statusChanged( state );
+        emit playingStatusChanged( state );
     }
 }
 
 void InputManager::UpdateRate()
 {
     /* Update Rate */
-    int i_new_rate = var_GetInteger( p_input, "rate");
-    if( i_new_rate != i_rate )
+    float f_new_rate = var_GetFloat( p_input, "rate" );
+    if( f_new_rate != f_rate )
     {
-        i_rate = i_new_rate;
+        f_rate = f_new_rate;
         /* Update rate */
-        emit rateChanged( i_rate );
+        emit rateChanged( f_rate );
     }
 }
 
 void InputManager::UpdateName()
 {
     /* Update text, name and nowplaying */
-    QString text;
-
-    /* Try to get the Title, then the Name */
-    char *psz_name = input_item_GetTitleFbName( input_GetItem( p_input ) );
+    QString name;
 
     /* Try to get the nowplaying */
-    char *psz_nowplaying =
-        input_item_GetNowPlaying( input_GetItem( p_input ) );
-    if( !EMPTY_STR( psz_nowplaying ) )
-    {
-        text.sprintf( "%s - %s", psz_nowplaying, psz_name );
-    }
-    else  /* Do it ourself */
-    {
-        char *psz_artist = input_item_GetArtist( input_GetItem( p_input ) );
-
-        if( !EMPTY_STR( psz_artist ) )
-            text.sprintf( "%s - %s", psz_artist, psz_name );
-        else
-            text.sprintf( "%s", psz_name );
-
-        free( psz_artist );
-    }
-    /* Free everything */
-    free( psz_name );
-    free( psz_nowplaying );
+    char *format = var_InheritString( p_intf, "input-title-format" );
+    char *formated = str_format_meta( p_input, format );
+    free( format );
+    name = qfu(formated);
+    free( formated );
 
     /* If we have Nothing */
-    if( text.isEmpty() )
+    if( name.isEmpty() )
     {
-        psz_name = input_item_GetURI( input_GetItem( p_input ) );
-        text.sprintf( "%s", psz_name );
-        text = text.remove( 0, text.lastIndexOf( DIR_SEP ) + 1 );
-        free( psz_name );
+        char *uri = input_item_GetURI( input_GetItem( p_input ) );
+        char *file = uri ? strrchr( uri, '/' ) : NULL;
+        if( file != NULL )
+        {
+            decode_URI( ++file );
+            name = qfu(file);
+        }
+        else
+            name = qfu(uri);
+        free( uri );
     }
 
-    if( oldName != text )
+    name = name.trimmed();
+
+    if( oldName != name )
     {
-        emit nameChanged( text );
-        oldName = text;
+        emit nameChanged( name );
+        oldName = name;
     }
+}
+
+int InputManager::playingStatus()
+{
+    return i_old_playing_status;
 }
 
 bool InputManager::hasAudio()
@@ -467,6 +509,25 @@ bool InputManager::hasAudio()
         return val.i_int > 0;
     }
     return false;
+}
+
+bool InputManager::hasVisualisation()
+{
+    if( !p_input )
+        return false;
+
+    audio_output_t *aout = input_GetAout( p_input );
+    if( !aout )
+        return false;
+
+    char *visual = var_InheritString( aout, "visual" );
+    vlc_object_release( aout );
+
+    if( !visual )
+        return false;
+
+    free( visual );
+    return true;
 }
 
 void InputManager::UpdateTeletext()
@@ -486,21 +547,23 @@ void InputManager::UpdateTeletext()
             int i_page = 100;
             bool b_transparent = false;
 
-            vlc_object_t *p_vbi = (vlc_object_t *)
-                vlc_object_find_name( p_input, "zvbi", FIND_CHILD );
-
-            if( p_vbi )
+            if( p_input_vbi )
             {
-                /* We deleted it (if not here, it does not harm), because
-                 * var_AddCallback will silently add a duplicated one */
-                var_DelCallback( p_vbi, "vbi-page", VbiEvent, this );
+                var_DelCallback( p_input_vbi, "vbi-page", VbiEvent, this );
+                vlc_object_release( p_input_vbi );
+            }
+
+            if( input_GetEsObjects( p_input, i_teletext_es, &p_input_vbi, NULL, NULL ) )
+                p_input_vbi = NULL;
+
+            if( p_input_vbi )
+            {
                 /* This callback is not remove explicitly, but interfaces
                  * are guaranted to outlive input */
-                var_AddCallback( p_vbi, "vbi-page", VbiEvent, this );
+                var_AddCallback( p_input_vbi, "vbi-page", VbiEvent, this );
 
-                i_page = var_GetInteger( p_vbi, "vbi-page" );
-                b_transparent = !var_GetBool( p_vbi, "vbi-opaque" );
-                vlc_object_release( p_vbi );
+                i_page = var_GetInteger( p_input_vbi, "vbi-page" );
+                b_transparent = !var_GetBool( p_input_vbi, "vbi-opaque" );
             }
             emit newTelexPageSet( i_page );
             emit teletextTransparencyActivated( b_transparent );
@@ -515,12 +578,20 @@ void InputManager::UpdateTeletext()
     }
 }
 
+void InputManager::UpdateEPG()
+{
+    if( hasInput() )
+    {
+       emit epgChanged();
+    }
+}
+
 void InputManager::UpdateVout()
 {
     if( hasInput() )
     {
         /* Get current vout lists from input */
-        int i_vout;
+        size_t i_vout;
         vout_thread_t **pp_vout;
         if( input_Control( p_input, INPUT_GET_VOUTS, &pp_vout, &i_vout ) )
         {
@@ -538,7 +609,7 @@ void InputManager::UpdateVout()
             emit voutChanged( b_video );
 
         /* Release the vout list */
-        for( int i = 0; i < i_vout; i++ )
+        for( size_t i = 0; i < i_vout; i++ )
             vlc_object_release( (vlc_object_t*)pp_vout[i] );
         free( pp_vout );
     }
@@ -558,7 +629,7 @@ void InputManager::UpdateCaching()
     if( f_newCache != f_cache )
     {
         f_cache = f_newCache;
-        /* Update rate */
+        /* Update cache */
         emit cachingChanged( f_cache );
     }
 }
@@ -567,9 +638,7 @@ void InputManager::requestArtUpdate()
 {
     if( hasInput() )
     {
-        playlist_t *p_playlist = pl_Hold( p_intf );
-        playlist_AskForArtEnqueue( p_playlist, input_GetItem( p_input ), pl_Unlocked );
-        pl_Release( p_intf );
+        playlist_AskForArtEnqueue( pl_Get(p_intf), input_GetItem( p_input ) );
     }
     else
     {
@@ -579,29 +648,42 @@ void InputManager::requestArtUpdate()
     }
 }
 
+const QString InputManager::decodeArtURL( input_item_t *p_item )
+{
+    assert( p_item );
+
+    char *psz_art = input_item_GetArtURL( p_item );
+    if( psz_art )
+    {
+        char *psz = make_path( psz_art );
+        free( psz_art );
+        psz_art = psz;
+    }
+
+#if 0
+    /* Taglib seems to define a attachment://, It won't work yet */
+    url = url.replace( "attachment://", "" );
+#endif
+
+    QString path = qfu( psz_art ? psz_art : "" );
+    free( psz_art );
+    return path;
+}
+
 void InputManager::UpdateArt()
 {
     QString url;
 
     if( hasInput() )
-    {
-        char *psz_art = input_item_GetArtURL( input_GetItem( p_input ) );
-        if( psz_art && !strncmp( psz_art, "file://", 7 ) &&
-                decode_URI( psz_art + 7 ) )
-#ifdef WIN32
-            url = qfu( psz_art + 8 ); // Remove extra / starting on Win32.
-#else
-            url = qfu( psz_art + 7 );
-#endif
-        free( psz_art );
+        url = decodeArtURL( input_GetItem( p_input ) );
 
-        url = url.replace( "file://", "" );
-        /* Taglib seems to define a attachment://, It won't work yet */
-        url = url.replace( "attachment://", "" );
-    }
+    /* the art hasn't changed, no need to update */
+    if(artUrl == url)
+        return;
 
     /* Update Art meta */
-    emit artChanged( url );
+    artUrl = url;
+    emit artChanged( artUrl );
 }
 
 inline void InputManager::UpdateStats()
@@ -646,6 +728,7 @@ void InputManager::sliderUpdate( float new_pos )
 {
     if( hasInput() )
         var_SetFloat( p_input, "position", new_pos );
+    emit seekRequested( new_pos );
 }
 
 /* User togglePlayPause */
@@ -656,7 +739,6 @@ void InputManager::togglePlayPause()
         int state = var_GetInteger( p_input, "state" );
         state = ( state != PLAYING_S ) ? PLAYING_S : PAUSE_S;
         var_SetInteger( p_input, "state", state );
-        emit statusChanged( state );
     }
 }
 
@@ -709,20 +791,14 @@ void InputManager::sectionMenu()
 /* Set a new Teletext Page */
 void InputManager::telexSetPage( int page )
 {
-    if( hasInput() )
+    if( hasInput() && p_input_vbi )
     {
         const int i_teletext_es = var_GetInteger( p_input, "teletext-es" );
 
         if( i_teletext_es >= 0 )
         {
-            vlc_object_t *p_vbi = (vlc_object_t *) vlc_object_find_name( p_input,
-                        "zvbi", FIND_CHILD );
-            if( p_vbi )
-            {
-                var_SetInteger( p_vbi, "vbi-page", page );
-                vlc_object_release( p_vbi );
-                emit newTelexPageSet( page );
-            }
+            var_SetInteger( p_input_vbi, "vbi-page", page );
+            emit newTelexPageSet( page );
         }
     }
 }
@@ -730,16 +806,10 @@ void InputManager::telexSetPage( int page )
 /* Set the transparency on teletext */
 void InputManager::telexSetTransparency( bool b_transparentTelextext )
 {
-    if( hasInput() )
+    if( hasInput() && p_input_vbi )
     {
-        vlc_object_t *p_vbi = (vlc_object_t *) vlc_object_find_name( p_input,
-                    "zvbi", FIND_CHILD );
-        if( p_vbi )
-        {
-            var_SetBool( p_vbi, "vbi-opaque", !b_transparentTelextext );
-            vlc_object_release( p_vbi );
-            emit teletextTransparencyActivated( b_transparentTelextext );
-        }
+        var_SetBool( p_input_vbi, "vbi-opaque", !b_transparentTelextext );
+        emit teletextTransparencyActivated( b_transparentTelextext );
     }
 }
 
@@ -772,21 +842,19 @@ void InputManager::reverse()
 {
     if( hasInput() )
     {
-        int i_rate = var_GetInteger( p_input, "rate" );
-        var_SetInteger( p_input, "rate", -i_rate );
+        float f_rate = var_GetFloat( p_input, "rate" );
+        var_SetFloat( p_input, "rate", -f_rate );
     }
 }
 
 void InputManager::slower()
 {
-    if( hasInput() )
-        var_TriggerCallback( p_input, "rate-slower" );
+    var_TriggerCallback( THEPL, "rate-slower" );
 }
 
 void InputManager::faster()
 {
-    if( hasInput() )
-        var_TriggerCallback( p_input, "rate-faster" );
+    var_TriggerCallback( THEPL, "rate-faster" );
 }
 
 void InputManager::littlefaster()
@@ -801,32 +869,31 @@ void InputManager::littleslower()
 
 void InputManager::normalRate()
 {
-    if( hasInput() )
-        var_SetInteger( p_input, "rate", INPUT_RATE_DEFAULT );
+    var_SetFloat( THEPL, "rate", 1. );
 }
 
 void InputManager::setRate( int new_rate )
 {
-    if( hasInput() )
-        var_SetInteger( p_input, "rate", new_rate );
+    var_SetFloat( THEPL, "rate",
+                 (float)INPUT_RATE_DEFAULT / (float)new_rate );
 }
 
 void InputManager::jumpFwd()
 {
-    int i_interval = config_GetInt( p_input, "short-jump-size" );
+    int i_interval = var_InheritInteger( p_input, "short-jump-size" );
     if( i_interval > 0 )
     {
-        mtime_t val = (mtime_t)(i_interval) * 1000000L;
+        mtime_t val = CLOCK_FREQ * i_interval;
         var_SetTime( p_input, "time-offset", val );
     }
 }
 
 void InputManager::jumpBwd()
 {
-    int i_interval = config_GetInt( p_input, "short-jump-size" );
+    int i_interval = var_InheritInteger( p_input, "short-jump-size" );
     if( i_interval > 0 )
     {
-        mtime_t val = -1 *(mtime_t)(i_interval) * 1000000L;
+        mtime_t val = -CLOCK_FREQ * i_interval;
         var_SetTime( p_input, "time-offset", val );
     }
 }
@@ -841,26 +908,25 @@ void InputManager::setAtoB()
     {
         timeB = var_GetTime( THEMIM->getInput(), "time"  );
         var_SetTime( THEMIM->getInput(), "time" , timeA );
-        CONNECT( this, positionUpdated( float, int, int ),
-                 this, AtoBLoop( float, int, int ) );
+        CONNECT( this, positionUpdated( float, int64_t, int ),
+                 this, AtoBLoop( float, int64_t, int ) );
     }
     else
     {
         timeA = 0;
         timeB = 0;
-        disconnect( this, SIGNAL( positionUpdated( float, int, int ) ),
-                    this, SLOT( AtoBLoop( float, int, int ) ) );
+        disconnect( this, SIGNAL( positionUpdated( float, int64_t, int ) ),
+                    this, SLOT( AtoBLoop( float, int64_t, int ) ) );
     }
     emit AtoBchanged( (timeA != 0 ), (timeB != 0 ) );
 }
 
 /* Function called regularly when in an AtoB loop */
-void InputManager::AtoBLoop( float, int i_time, int )
+void InputManager::AtoBLoop( float, int64_t i_time, int )
 {
     if( timeB )
     {
-        if( ( i_time >= (int)( timeB/1000000 ) )
-            || ( i_time < (int)( timeA/1000000 ) ) )
+        if( i_time >= timeB || i_time < timeA )
             var_SetTime( THEMIM->getInput(), "time" , timeA );
     }
 }
@@ -870,7 +936,6 @@ void InputManager::AtoBLoop( float, int i_time, int )
  * take care of updating the main playlist input.
  * Used in the main playlist Dialog
  **********************************************************************/
-MainInputManager * MainInputManager::instance = NULL;
 
 MainInputManager::MainInputManager( intf_thread_t *_p_intf )
                  : QObject(NULL), p_intf( _p_intf )
@@ -881,26 +946,20 @@ MainInputManager::MainInputManager( intf_thread_t *_p_intf )
     var_AddCallback( THEPL, "item-change", ItemChanged, im );
     var_AddCallback( THEPL, "item-current", PLItemChanged, this );
     var_AddCallback( THEPL, "activity", PLItemChanged, this );
+    var_AddCallback( THEPL, "leaf-to-parent", LeafToParent, this );
+    var_AddCallback( THEPL, "playlist-item-append", PLItemAppended, this );
+    var_AddCallback( THEPL, "playlist-item-deleted", PLItemRemoved, this );
+    var_AddCallback( THEPL, "random", RandomChanged, this );
+    var_AddCallback( THEPL, "repeat", RepeatChanged, this );
+    var_AddCallback( THEPL, "loop", LoopChanged, this );
 
-    var_AddCallback( p_intf->p_libvlc, "volume-change", VolumeChanged, this );
+    var_AddCallback( THEPL, "volume", VolumeChanged, this );
+    var_AddCallback( THEPL, "mute", SoundMuteChanged, this );
 
     /* Warn our embedded IM about input changes */
-    CONNECT( this, inputChanged( input_thread_t * ),
-             im, setInput( input_thread_t * ) );
+    DCONNECT( this, inputChanged( input_thread_t * ),
+              im, setInput( input_thread_t * ) );
 
-    /* emit check if playlist has already started playing */
-    input_thread_t *p_input = playlist_CurrentInput( THEPL );
-    if( p_input )
-    {
-        input_item_t *p_item = input_GetItem( p_input );
-        if( p_item )
-        {
-            IMEvent *event = new IMEvent( ItemChanged_Type, p_item );
-            customEvent( event );
-            delete event;
-        }
-        vlc_object_release( p_input );
-    }
 }
 
 MainInputManager::~MainInputManager()
@@ -912,12 +971,20 @@ MainInputManager::~MainInputManager()
        vlc_object_release( p_input );
     }
 
-    var_DelCallback( p_intf->p_libvlc, "volume-change", VolumeChanged, this );
+    var_DelCallback( THEPL, "volume", VolumeChanged, this );
+    var_DelCallback( THEPL, "mute", SoundMuteChanged, this );
 
     var_DelCallback( THEPL, "activity", PLItemChanged, this );
     var_DelCallback( THEPL, "item-change", ItemChanged, im );
+    var_DelCallback( THEPL, "leaf-to-parent", LeafToParent, this );
 
     var_DelCallback( THEPL, "item-current", PLItemChanged, this );
+    var_DelCallback( THEPL, "playlist-item-append", PLItemAppended, this );
+    var_DelCallback( THEPL, "playlist-item-deleted", PLItemRemoved, this );
+    var_DelCallback( THEPL, "random", RandomChanged, this );
+    var_DelCallback( THEPL, "repeat", RepeatChanged, this );
+    var_DelCallback( THEPL, "loop", LoopChanged, this );
+
 }
 
 vout_thread_t* MainInputManager::getVout()
@@ -925,7 +992,7 @@ vout_thread_t* MainInputManager::getVout()
     return p_input ? input_GetVout( p_input ) : NULL;
 }
 
-aout_instance_t * MainInputManager::getAout()
+audio_output_t * MainInputManager::getAout()
 {
     return p_input ? input_GetAout( p_input ) : NULL;
 }
@@ -933,14 +1000,39 @@ aout_instance_t * MainInputManager::getAout()
 void MainInputManager::customEvent( QEvent *event )
 {
     int type = event->type();
-    if ( type != ItemChanged_Type && type != VolumeChanged_Type )
-        return;
+
+    PLEvent *plEv;
 
     // msg_Dbg( p_intf, "New MainIM Event of type: %i", type );
-    if( type == VolumeChanged_Type )
+    switch( type )
     {
+    case VolumeChanged_Type:
         emit volumeChanged();
         return;
+    case SoundMuteChanged_Type:
+        emit soundMuteChanged();
+        return;
+    case PLItemAppended_Type:
+        plEv = static_cast<PLEvent*>( event );
+        emit playlistItemAppended( plEv->i_item, plEv->i_parent );
+        return;
+    case PLItemRemoved_Type:
+        plEv = static_cast<PLEvent*>( event );
+        emit playlistItemRemoved( plEv->i_item );
+        return;
+    case RandomChanged_Type:
+        emit randomChanged( var_GetBool( THEPL, "random" ) );
+        return;
+    case LoopChanged_Type:
+    case RepeatChanged_Type:
+        notifyRepeatLoop();
+        return;
+    case LeafToParent_Type:
+        plEv = static_cast<PLEvent*>( event );
+        emit leafBecameParent( plEv->i_item );
+        return;
+    default:
+        if( type != ItemChanged_Type ) return;
     }
 
     /* Should be PLItemChanged Event */
@@ -974,13 +1066,11 @@ void MainInputManager::customEvent( QEvent *event )
             p_input = NULL;
         }
         /* we are working as a dialogs provider */
-        playlist_t *p_playlist = pl_Hold( p_intf );
-        p_input = playlist_CurrentInput( p_playlist );
+        p_input = playlist_CurrentInput( pl_Get(p_intf) );
         if( p_input )
         {
             emit inputChanged( p_input );
         }
-        pl_Release( p_intf );
     }
 }
 
@@ -1000,6 +1090,14 @@ void MainInputManager::prev()
    playlist_Prev( THEPL );
 }
 
+void MainInputManager::prevOrReset()
+{
+    if( !p_input || var_GetTime(  p_input , "time") < 10000 )
+        playlist_Prev( THEPL );
+    else
+        getIM()->sliderUpdate( 0.0 );
+}
+
 void MainInputManager::togglePlayPause()
 {
     /* No input, play */
@@ -1009,15 +1107,73 @@ void MainInputManager::togglePlayPause()
         getIM()->togglePlayPause();
 }
 
+void MainInputManager::play()
+{
+    /* No input, play */
+    if( !p_input )
+        playlist_Play( THEPL );
+    else
+    {
+        if( PLAYING_S != var_GetInteger( p_input, "state" ) )
+        {
+            getIM()->togglePlayPause();
+        }
+    }
+}
+
+void MainInputManager::pause()
+{
+    if(p_input && PLAYING_S == var_GetInteger( p_input, "state" ) )
+    {
+        getIM()->togglePlayPause();
+    }
+}
+
+void MainInputManager::toggleRandom()
+{
+    var_ToggleBool( THEPL, "random" );
+}
+
+void MainInputManager::notifyRepeatLoop()
+{
+    int i_value = var_GetBool( THEPL, "loop" ) * REPEAT_ALL
+              + var_GetBool( THEPL, "repeat" ) * REPEAT_ONE;
+
+    emit repeatLoopChanged( i_value );
+}
+
+void MainInputManager::loopRepeatLoopStatus()
+{
+    /* Toggle Normal -> Loop -> Repeat -> Normal ... */
+    if( var_GetBool( THEPL, "repeat" ) )
+        var_SetBool( THEPL, "repeat", false );
+    else if( var_GetBool( THEPL, "loop" ) )
+    {
+        var_SetBool( THEPL, "loop", false );
+        var_SetBool( THEPL, "repeat", true );
+    }
+    else
+        var_SetBool( THEPL, "loop", true );
+}
+
 void MainInputManager::activatePlayQuit( bool b_exit )
 {
     var_SetBool( THEPL, "play-and-exit", b_exit );
 }
 
-/* Static callbacks for MIM */
+bool MainInputManager::getPlayExitState()
+{
+    return var_GetBool( THEPL, "play-and-exit" );
+}
+
+/****************************
+ * Static callbacks for MIM *
+ ****************************/
 static int PLItemChanged( vlc_object_t *p_this, const char *psz_var,
                         vlc_value_t oldval, vlc_value_t, void *param )
 {
+    VLC_UNUSED( p_this ); VLC_UNUSED( psz_var ); VLC_UNUSED( oldval );
+
     MainInputManager *mim = (MainInputManager*)param;
 
     IMEvent *event = new IMEvent( ItemChanged_Type );
@@ -1025,9 +1181,23 @@ static int PLItemChanged( vlc_object_t *p_this, const char *psz_var,
     return VLC_SUCCESS;
 }
 
+static int LeafToParent( vlc_object_t *p_this, const char *psz_var,
+                        vlc_value_t oldval, vlc_value_t newval, void *param )
+{
+    VLC_UNUSED( p_this ); VLC_UNUSED( psz_var ); VLC_UNUSED( oldval );
+    MainInputManager *mim = (MainInputManager*)param;
+
+    PLEvent *event = new PLEvent( LeafToParent_Type, newval.i_int );
+
+    QApplication::postEvent( mim, event );
+    return VLC_SUCCESS;
+}
+
 static int VolumeChanged( vlc_object_t *p_this, const char *psz_var,
                         vlc_value_t oldval, vlc_value_t newval, void *param )
 {
+    VLC_UNUSED( p_this ); VLC_UNUSED( psz_var ); VLC_UNUSED( oldval ); VLC_UNUSED( newval );
+
     MainInputManager *mim = (MainInputManager*)param;
 
     IMEvent *event = new IMEvent( VolumeChanged_Type );
@@ -1035,3 +1205,75 @@ static int VolumeChanged( vlc_object_t *p_this, const char *psz_var,
     return VLC_SUCCESS;
 }
 
+static int SoundMuteChanged( vlc_object_t *p_this, const char *psz_var,
+                        vlc_value_t oldval, vlc_value_t newval, void *param )
+{
+    VLC_UNUSED( p_this ); VLC_UNUSED( psz_var ); VLC_UNUSED( oldval ); VLC_UNUSED( newval );
+
+    MainInputManager *mim = (MainInputManager*)param;
+
+    IMEvent *event = new IMEvent( SoundMuteChanged_Type );
+    QApplication::postEvent( mim, event );
+    return VLC_SUCCESS;
+}
+
+static int PLItemAppended
+( vlc_object_t * obj, const char *var, vlc_value_t old, vlc_value_t cur, void *data )
+{
+    VLC_UNUSED( obj ); VLC_UNUSED( var ); VLC_UNUSED( old );
+
+    MainInputManager *mim = static_cast<MainInputManager*>(data);
+    playlist_add_t *p_add = static_cast<playlist_add_t*>( cur.p_address );
+
+    PLEvent *event = new PLEvent( PLItemAppended_Type, p_add->i_item, p_add->i_node  );
+    QApplication::postEvent( mim, event );
+    return VLC_SUCCESS;
+}
+static int PLItemRemoved
+( vlc_object_t * obj, const char *var, vlc_value_t old, vlc_value_t cur, void *data )
+{
+    VLC_UNUSED( obj ); VLC_UNUSED( var ); VLC_UNUSED( old );
+
+    MainInputManager *mim = static_cast<MainInputManager*>(data);
+
+    PLEvent *event = new PLEvent( PLItemRemoved_Type, cur.i_int, 0  );
+    QApplication::postEvent( mim, event );
+    return VLC_SUCCESS;
+}
+
+static int RandomChanged
+( vlc_object_t * obj, const char *var, vlc_value_t old, vlc_value_t cur, void *data )
+{
+    VLC_UNUSED( obj ); VLC_UNUSED( var ); VLC_UNUSED( old ); VLC_UNUSED( cur );
+
+    MainInputManager *mim = static_cast<MainInputManager*>(data);
+
+    IMEvent *event = new IMEvent( RandomChanged_Type );
+    QApplication::postEvent( mim, event );
+    return VLC_SUCCESS;
+}
+
+/* Probably could be merged with next callback */
+static int LoopChanged
+( vlc_object_t * obj, const char *var, vlc_value_t old, vlc_value_t cur, void *data )
+{
+    VLC_UNUSED( obj ); VLC_UNUSED( var ); VLC_UNUSED( old ); VLC_UNUSED( cur );
+
+    MainInputManager *mim = static_cast<MainInputManager*>(data);
+
+    IMEvent *event = new IMEvent( LoopChanged_Type );
+    QApplication::postEvent( mim, event );
+    return VLC_SUCCESS;
+}
+
+static int RepeatChanged
+( vlc_object_t * obj, const char *var, vlc_value_t old, vlc_value_t cur, void *data )
+{
+    VLC_UNUSED( obj ); VLC_UNUSED( var ); VLC_UNUSED( old ); VLC_UNUSED( cur );
+
+    MainInputManager *mim = static_cast<MainInputManager*>(data);
+
+    IMEvent *event = new IMEvent( RepeatChanged_Type );
+    QApplication::postEvent( mim, event );
+    return VLC_SUCCESS;
+}

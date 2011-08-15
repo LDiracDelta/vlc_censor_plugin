@@ -33,10 +33,8 @@
 #include <ctype.h>
 #include <vlc_acl.h>
 
-#include <errno.h>
-
 #include <vlc_network.h>
-#include <vlc_charset.h>
+#include <vlc_fs.h>
 
 /* FIXME: rwlock on acl, but libvlc doesn't implement rwlock */
 typedef struct vlc_acl_entry_t
@@ -86,9 +84,7 @@ static int ACL_Resolve( vlc_object_t *p_this, uint8_t *p_bytes,
             break;
         }
 
-#if defined (HAVE_GETADDRINFO) || defined (WIN32)
-        /* unfortunately many people define AF_INET6
-           though they don't have struct sockaddr_in6 */
+#ifdef AF_INET6
         case AF_INET6:
         {
             struct sockaddr_in6 *addr;
@@ -101,11 +97,11 @@ static int ACL_Resolve( vlc_object_t *p_this, uint8_t *p_bytes,
 
         default:
             msg_Err( p_this, "unknown address family" );
-            vlc_freeaddrinfo( res );
+            freeaddrinfo( res );
             return -1;
     }
 
-    vlc_freeaddrinfo( res );
+    freeaddrinfo( res );
     return i_family;
 }
 
@@ -201,7 +197,7 @@ int ACL_AddNet( vlc_acl_t *p_acl, const char *psz_ip, int i_len,
     return 0;
 }
 
-
+#undef ACL_Create
 /**
  * Creates an empty ACL.
  *
@@ -210,7 +206,7 @@ int ACL_AddNet( vlc_acl_t *p_acl, const char *psz_ip, int i_len,
  *
  * @return an ACL object. NULL in case of error.
  */
-vlc_acl_t *__ACL_Create( vlc_object_t *p_this, bool b_allow )
+vlc_acl_t *ACL_Create( vlc_object_t *p_this, bool b_allow )
 {
     vlc_acl_t *p_acl;
 
@@ -227,7 +223,7 @@ vlc_acl_t *__ACL_Create( vlc_object_t *p_this, bool b_allow )
     return p_acl;
 }
 
-
+#undef ACL_Duplicate
 /**
  * Perform a deep copy of an existing ACL.
  *
@@ -236,7 +232,7 @@ vlc_acl_t *__ACL_Create( vlc_object_t *p_this, bool b_allow )
  *
  * @return a new ACL object, or NULL on error.
  */
-vlc_acl_t *__ACL_Duplicate( vlc_object_t *p_this, const vlc_acl_t *p_acl )
+vlc_acl_t *ACL_Duplicate( vlc_object_t *p_this, const vlc_acl_t *p_acl )
 {
     vlc_acl_t *p_dupacl;
 
@@ -302,7 +298,7 @@ int ACL_LoadFile( vlc_acl_t *p_acl, const char *psz_path )
     if( p_acl == NULL )
         return -1;
 
-    file = utf8_fopen( psz_path, "r" );
+    file = vlc_fopen( psz_path, "r" );
     if( file == NULL )
         return -1;
 

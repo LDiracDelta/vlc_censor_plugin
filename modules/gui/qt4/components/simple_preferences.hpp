@@ -93,7 +93,7 @@ class QTreeWidgetItem;
 
 class SPrefsCatList : public QWidget
 {
-    Q_OBJECT;
+    Q_OBJECT
 public:
     SPrefsCatList( intf_thread_t *, QWidget *, bool );
     virtual ~SPrefsCatList() {};
@@ -121,6 +121,7 @@ private:
 
     QList<QWidget *> optionWidgets;
     QStringList qs_filter;
+    QButtonGroup *radioGroup;
 
 #ifdef WIN32
     QList<QTreeWidgetItem *> listAsso;
@@ -132,10 +133,11 @@ private slots:
     void lastfm_Changed( int );
     void updateAudioOptions( int );
     void updateAudioVolume( int );
-#ifdef SYS_MINGW32
+#ifdef WIN32
     void assoDialog();
     void saveAsso();
 #endif
+    void configML();
     void changeStyle( QString );
 };
 

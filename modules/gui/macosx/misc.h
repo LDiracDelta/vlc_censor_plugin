@@ -1,10 +1,11 @@
 /*****************************************************************************
  * misc.h: code not specific to vlc
  *****************************************************************************
- * Copyright (C) 2003-2007 the VideoLAN team
+ * Copyright (C) 2003-2011 the VideoLAN team
  * $Id$
  *
  * Authors: Jon Lech Johansen <jon-vl@nanocrew.net>
+ *          Felix Paul Kühne <fkuehne at videolan dot org>
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -24,14 +25,9 @@
 #import <Cocoa/Cocoa.h>
 #import <ApplicationServices/ApplicationServices.h>
 
-/*****************************************************************************
- * NSImage (VLCAddition)
- *****************************************************************************/
-
-@interface NSImage (VLCAdditions)
-+ (id)imageWithWarningIcon;
-+ (id)imageWithErrorIcon;
-@end
+#ifndef MAC_OS_X_VERSION_10_6
+@protocol NSWindowDelegate <NSObject> @end
+#endif
 
 /*****************************************************************************
  * NSAnimation (VLCAddition)
@@ -64,7 +60,7 @@
  *  Missing extension to NSWindow
  *****************************************************************************/
 
-@interface VLCWindow : NSWindow
+@interface VLCWindow : NSWindow <NSWindowDelegate>
 {
     BOOL b_canBecomeKeyWindow;
     BOOL b_isset_canBecomeKeyWindow;
@@ -86,17 +82,6 @@
 - (void)closeAndAnimate: (BOOL)animate;
 @end
 
-
-/*****************************************************************************
- * VLCControllerWindow
- *****************************************************************************/
-
-
-@interface VLCControllerWindow : NSWindow
-{
-}
-
-@end
 
 /*****************************************************************************
  * VLCControllerView
@@ -131,6 +116,19 @@
 @end
 
 /*****************************************************************************
+ * TimeLineSlider
+ *****************************************************************************/
+
+@interface TimeLineSlider : NSSlider
+{
+}
+
+- (void)drawRect:(NSRect)rect;
+- (void)drawKnobInRect:(NSRect)knobRect;
+
+@end
+
+/*****************************************************************************
  * ITSlider
  *****************************************************************************/
 
@@ -138,18 +136,19 @@
 {
 }
 
+- (void)drawRect:(NSRect)rect;
+- (void)drawKnobInRect:(NSRect)knobRect;
+
 @end
 
 /*****************************************************************************
- * ITSliderCell
+ * VLCTimeField interface
+ *****************************************************************************
+ * we need the implementation to catch our click-event in the controller window
  *****************************************************************************/
 
-@interface ITSliderCell : NSSliderCell
+@interface VLCTimeField : NSTextField
 {
-    NSImage *_knobOff;
-    NSImage *_knobOn;
-    BOOL b_mouse_down;
 }
-- (void)controlTintChanged;
-
+- (BOOL)timeRemaining;
 @end

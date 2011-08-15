@@ -35,9 +35,11 @@
 #include <QMessageBox>
 #include <QProgressDialog>
 #include <QMutex>
+#include <QPushButton>
+#include <QTimer>
 
 DialogHandler::DialogHandler (intf_thread_t *intf, QObject *_parent)
-    : intf (intf), QObject( _parent ),
+    : QObject( _parent ), intf (intf),
       critical (VLC_OBJECT(intf), "dialog-critical"),
       login (VLC_OBJECT(intf), "dialog-login"),
       question (VLC_OBJECT(intf), "dialog-question"),
@@ -81,7 +83,7 @@ int DialogHandler::error (vlc_object_t *obj, const char *,
     const dialog_fatal_t *dialog = (const dialog_fatal_t *)value.p_address;
     DialogHandler *self = static_cast<DialogHandler *>(data);
 
-    if (config_GetInt (obj, "qt-error-dialogs"))
+    if (var_InheritBool (obj, "qt-error-dialogs"))
         emit self->error (qfu(dialog->title), qfu(dialog->message));
     return VLC_SUCCESS;
 }
@@ -127,11 +129,14 @@ void DialogHandler::requestLogin (vlc_object_t *, void *value)
     layout->addWidget (panel);
 
     /* OK, Cancel buttons */
-    QDialogButtonBox *buttonBox;
-    buttonBox = new QDialogButtonBox (QDialogButtonBox::Ok
-                                       | QDialogButtonBox::Cancel);
-    connect (buttonBox, SIGNAL(accepted()), dialog, SLOT(accept()));
-    connect (buttonBox, SIGNAL(rejected()), dialog, SLOT(reject()));
+    QDialogButtonBox *buttonBox = new QDialogButtonBox;
+    QPushButton *okButton = new QPushButton( "&Ok" );
+    QPushButton *cancelButton = new QPushButton( "&Cancel" );
+    buttonBox->addButton( okButton, QDialogButtonBox::AcceptRole );
+    buttonBox->addButton( cancelButton, QDialogButtonBox::RejectRole );
+
+    CONNECT( buttonBox, accepted(), dialog, accept() );
+    CONNECT( buttonBox, rejected(), dialog, reject() );
     layout->addWidget (buttonBox);
 
     /* Run the dialog */
@@ -179,15 +184,23 @@ void DialogHandler::requestAnswer (vlc_object_t *, void *value)
 
 QVLCProgressDialog::QVLCProgressDialog (DialogHandler *parent,
                                         struct dialog_progress_bar_t *data)
-    : QProgressDialog (qfu(data->message),
-                       data->cancel ? ("&" + qfu(data->cancel)) : 0, 0, 1000),
-      cancelled (false),
-      handler (parent)
+    : QProgressDialog ( ),
+      handler (parent),
+      cancelled (false)
 {
+    setLabelText( qfu(data->message) );
+    setRange( 0, 0 );
+    if ( data->cancel )
+        setWindowModality ( Qt::ApplicationModal );
+
+    if( data->cancel )
+        setCancelButton( new QPushButton( "&" + qfu(data->cancel) ) );
     if (data->title != NULL)
         setWindowTitle (qfu(data->title));
+
     setWindowRole ("vlc-progress");
-    setMinimumDuration (0);
+    setMinimumDuration (300);
+    setValue( 0 );
 
     connect (this, SIGNAL(progressed(int)), SLOT(setValue(int)));
     connect (this, SIGNAL(described(const QString&)),
@@ -200,14 +213,12 @@ QVLCProgressDialog::QVLCProgressDialog (DialogHandler *parent,
     data->p_sys = this;
 }
 
-QVLCProgressDialog::~QVLCProgressDialog (void)
-{
-}
 
 void QVLCProgressDialog::update (void *priv, const char *text, float value)
 {
     QVLCProgressDialog *self = static_cast<QVLCProgressDialog *>(priv);
-
+    if( value > 0 )
+        self->setRange( 0, 1000 );
     if (text != NULL)
         emit self->described (qfu(text));
     emit self->progressed ((int)(value * 1000.));
@@ -240,7 +251,8 @@ void DialogHandler::startProgressBar (vlc_object_t *, void *value)
     dialog_progress_bar_t *data = (dialog_progress_bar_t *)value;
     QWidget *dlg = new QVLCProgressDialog (this, data);
 
-    dlg->show ();
+    QTimer::singleShot( 300, dlg, SLOT( show() ) );
+//    dlg->show ();
 }
 
 void DialogHandler::stopProgressBar (QWidget *dlg)

@@ -1,7 +1,7 @@
 /*****************************************************************************
  * simple_preferences.cpp : "Simple preferences"
  ****************************************************************************
- * Copyright (C) 2006-2008 the VideoLAN team
+ * Copyright (C) 2006-2010 the VideoLAN team
  * $Id$
  *
  * Authors: Clément Stenac <zorglub@videolan.org>
@@ -29,9 +29,11 @@
 
 #include "components/simple_preferences.hpp"
 #include "components/preferences_widgets.hpp"
+#include "dialogs/ml_configuration.hpp"
 
 #include <vlc_config_cat.h>
 #include <vlc_configuration.h>
+#include <vlc_aout_intf.h>
 
 #include <QString>
 #include <QFont>
@@ -43,12 +45,14 @@
 #include <QStyleFactory>
 #include <QSettings>
 #include <QtAlgorithms>
+#include <QDir>
 
 #define ICON_HEIGHT 64
 
 #ifdef WIN32
 # include <vlc_windows_interfaces.h>
 #endif
+#include <vlc_modules.h>
 
 /*********************************************************************
  * The List of categories
@@ -67,8 +71,9 @@ SPrefsCatList::SPrefsCatList( intf_thread_t *_p_intf, QWidget *_parent, bool sma
 
 #define ADD_CATEGORY( button, label, icon, numb )                           \
     QToolButton * button = new QToolButton( this );                         \
-    button->setIcon( QIcon( ":/prefsmenu/" #icon ) );                   \
+    button->setIcon( QIcon( ":/prefsmenu/" #icon ) );                       \
     button->setText( label );                                               \
+    button->setToolTip( label + qtr("Preferences") );                       \
     button->setToolButtonStyle( Qt::ToolButtonTextUnderIcon );              \
     button->setIconSize( QSize( icon_height, icon_height ) );               \
     button->resize( icon_height + 6 , icon_height + 6 );                    \
@@ -124,15 +129,35 @@ SPrefsPanel::SPrefsPanel( intf_thread_t *_p_intf, QWidget *_parent,
                 control =  new type ## ConfigControl( VLC_OBJECT(p_intf), \
                            p_config, label, ui.qcontrol, false );         \
                 controls.append( control );                               \
+            }                                                             \
+            else {                                                        \
+                ui.qcontrol->setEnabled( false );                         \
+                if( label ) label->setEnabled( false );                   \
             }
 
-#define CONFIG_GENERIC2( option, type, label, qcontrol )                   \
+#define CONFIG_BOOL( option, qcontrol )                           \
+            p_config =  config_FindConfig( VLC_OBJECT(p_intf), option );  \
+            if( p_config )                                                \
+            {                                                             \
+                control =  new BoolConfigControl( VLC_OBJECT(p_intf),     \
+                           p_config, NULL, ui.qcontrol );          \
+                controls.append( control );                               \
+            }                                                             \
+            else { ui.qcontrol->setEnabled( false ); }
+
+
+#define CONFIG_GENERIC_NO_UI( option, type, label, qcontrol )             \
             p_config =  config_FindConfig( VLC_OBJECT(p_intf), option );  \
             if( p_config )                                                \
             {                                                             \
                 control =  new type ## ConfigControl( VLC_OBJECT(p_intf), \
-                           p_config, label, qcontrol, false );         \
+                           p_config, label, qcontrol, false );            \
                 controls.append( control );                               \
+            }                                                             \
+            else {                                                        \
+                QWidget *widget = label;                                  \
+                qcontrol->setVisible( false );                            \
+                if( widget ) widget->setEnabled( false );                 \
             }
 
 
@@ -145,14 +170,14 @@ SPrefsPanel::SPrefsPanel( intf_thread_t *_p_intf, QWidget *_parent,
                 controls.append( control );                               \
             }
 
-#define CONFIG_GENERIC_FILE( option, type, label, qcontrol, qbutton )         \
-                p_config =  config_FindConfig( VLC_OBJECT(p_intf), option );  \
-                if( p_config )                                                \
-                {                                                             \
-                    control =  new type ## ConfigControl( VLC_OBJECT(p_intf), \
-                               p_config, label, qcontrol, qbutton ); \
-                    controls.append( control );                               \
-                }
+#define CONFIG_GENERIC_FILE( option, type, label, qcontrol, qbutton )     \
+            p_config =  config_FindConfig( VLC_OBJECT(p_intf), option );  \
+            if( p_config )                                                \
+            {                                                             \
+                control =  new type ## ConfigControl( VLC_OBJECT(p_intf), \
+                           p_config, label, qcontrol, qbutton );          \
+                controls.append( control );                               \
+            }
 
 #define START_SPREFS_CAT( name , label )    \
         case SPrefs ## name:                \
@@ -171,9 +196,8 @@ SPrefsPanel::SPrefsPanel( intf_thread_t *_p_intf, QWidget *_parent,
 
     // Title Label
     QLabel *panel_label = new QLabel;
-    QFont labelFont = QApplication::font( static_cast<QWidget*>(0) );
+    QFont labelFont = QApplication::font();
     labelFont.setPointSize( labelFont.pointSize() + 6 );
-    labelFont.setFamily( "Verdana" );
     panel_label->setFont( labelFont );
 
     // Title <hr>
@@ -181,7 +205,7 @@ SPrefsPanel::SPrefsPanel( intf_thread_t *_p_intf, QWidget *_parent,
     title_line->setFrameShape(QFrame::HLine);
     title_line->setFrameShadow(QFrame::Sunken);
 
-    QFont italicFont = QApplication::font( static_cast<QWidget*>(0) );
+    QFont italicFont = QApplication::font();
     italicFont.setItalic( true );
 
     switch( number )
@@ -190,20 +214,19 @@ SPrefsPanel::SPrefsPanel( intf_thread_t *_p_intf, QWidget *_parent,
          * VIDEO Panel Implementation *
          ******************************/
         START_SPREFS_CAT( Video , qtr("Video Settings") );
-            CONFIG_GENERIC( "video", Bool, NULL, enableVideo );
+            CONFIG_BOOL( "video", enableVideo );
 
-            CONFIG_GENERIC( "fullscreen", Bool, NULL, fullscreen );
-            CONFIG_GENERIC( "overlay", Bool, NULL, overlay );
-            CONFIG_GENERIC( "video-on-top", Bool, NULL, alwaysOnTop );
-            CONFIG_GENERIC( "video-deco", Bool, NULL, windowDecorations );
-            CONFIG_GENERIC( "skip-frames" , Bool, NULL, skipFrames );
+            CONFIG_BOOL( "fullscreen", fullscreen );
+            CONFIG_BOOL( "overlay", overlay );
+            CONFIG_BOOL( "video-on-top", alwaysOnTop );
+            CONFIG_BOOL( "video-deco", windowDecorations );
             CONFIG_GENERIC( "vout", Module, ui.voutLabel, outputModule );
 
+            CONFIG_BOOL( "video-wallpaper", wallpaperMode );
 #ifdef WIN32
-            CONFIG_GENERIC( "directx-wallpaper" , Bool , NULL, wallpaperMode );
             CONFIG_GENERIC( "directx-device", StringList, ui.dxDeviceLabel,
                             dXdisplayDevice );
-            CONFIG_GENERIC( "directx-hw-yuv", Bool, NULL, hwYUVBox );
+            CONFIG_BOOL( "directx-hw-yuv", hwYUVBox );
 #else
             ui.directXBox->setVisible( false );
             ui.hwYUVBox->setVisible( false );
@@ -216,7 +239,7 @@ SPrefsPanel::SPrefsPanel( intf_thread_t *_p_intf, QWidget *_parent,
             CONFIG_GENERIC_FILE( "snapshot-path", Directory, ui.dirLabel,
                                  ui.snapshotsDirectory, ui.snapshotsDirectoryBrowse );
             CONFIG_GENERIC( "snapshot-prefix", String, ui.prefixLabel, snapshotsPrefix );
-            CONFIG_GENERIC( "snapshot-sequential", Bool, NULL,
+            CONFIG_BOOL( "snapshot-sequential",
                             snapshotsSequentialNumbering );
             CONFIG_GENERIC( "snapshot-format", StringList, ui.arLabel,
                             snapshotsFormat );
@@ -227,7 +250,7 @@ SPrefsPanel::SPrefsPanel( intf_thread_t *_p_intf, QWidget *_parent,
          ******************************/
         START_SPREFS_CAT( Audio, qtr("Audio Settings") );
 
-            CONFIG_GENERIC( "audio", Bool, NULL, enableAudio );
+            CONFIG_BOOL( "audio", enableAudio );
             ui.SPrefsAudio_zone->setEnabled( ui.enableAudio->isChecked() );
             CONNECT( ui.enableAudio, toggled( bool ),
                      ui.SPrefsAudio_zone, setEnabled( bool ) );
@@ -246,6 +269,7 @@ SPrefsPanel::SPrefsPanel( intf_thread_t *_p_intf, QWidget *_parent,
             QComboBox * name ## Device = new QComboBox( name ## Control ); \
             name ## Layout->addWidget( name ## Device ); \
             name ## Label->setBuddy( name ## Device ); \
+            name ## Device->setSizePolicy( QSizePolicy::Ignored, QSizePolicy::Preferred  );\
             outputAudioLayout->addWidget( name ## Control, outputAudioLayout->rowCount(), 0, 1, -1 );
 
 #define audioControl2( name) \
@@ -262,15 +286,14 @@ SPrefsPanel::SPrefsPanel( intf_thread_t *_p_intf, QWidget *_parent,
 #ifdef WIN32
             audioControl( DirectX );
             optionWidgets.append( DirectXControl );
-            CONFIG_GENERIC2( "directx-audio-device", IntegerList,
-                    NULL, DirectXDevice );
+            CONFIG_GENERIC_NO_UI( "directx-audio-device-name", StringList,
+                    DirectXLabel, DirectXDevice );
 #else
             if( module_exists( "alsa" ) )
             {
                 audioControl( alsa );
                 optionWidgets.append( alsaControl );
-
-                CONFIG_GENERIC2( "alsa-audio-device" , StringList, NULL,
+                CONFIG_GENERIC_NO_UI( "alsa-audio-device" , StringList, alsaLabel,
                                 alsaDevice );
             }
             else
@@ -291,12 +314,13 @@ SPrefsPanel::SPrefsPanel( intf_thread_t *_p_intf, QWidget *_parent,
 #undef audioCommon
 
             /* Audio Options */
-            CONFIG_GENERIC_NO_BOOL( "volume" , IntegerRangeSlider, NULL,
+            ui.volumeValue->setMaximum( QT_VOLUME_MAX / QT_VOLUME_DEFAULT * 100 );
+            CONFIG_GENERIC_NO_BOOL( "qt-startvolume" , IntegerRangeSlider, NULL,
                                      defaultVolume );
             CONNECT( ui.defaultVolume, valueChanged( int ),
                      this, updateAudioVolume( int ) );
 
-            CONFIG_GENERIC( "qt-autosave-volume", Bool, NULL, keepVolumeRadio );
+            CONFIG_BOOL( "qt-autosave-volume", keepVolumeRadio );
             ui.defaultVolume_zone->setEnabled( ui.resetVolumeRadio->isChecked() );
             CONNECT( ui.resetVolumeRadio, toggled( bool ),
                      ui.defaultVolume_zone, setEnabled( bool ) );
@@ -304,7 +328,7 @@ SPrefsPanel::SPrefsPanel( intf_thread_t *_p_intf, QWidget *_parent,
             CONFIG_GENERIC( "audio-language" , String , ui.langLabel,
                             preferredAudioLanguage );
 
-            CONFIG_GENERIC( "spdif", Bool, NULL, spdifBox );
+            CONFIG_BOOL( "spdif", spdifBox );
             CONFIG_GENERIC( "force-dolby-surround", IntegerList, ui.dolbyLabel,
                             detectionDolby );
 
@@ -314,6 +338,7 @@ SPrefsPanel::SPrefsPanel( intf_thread_t *_p_intf, QWidget *_parent,
                             replayCombo );
             CONFIG_GENERIC( "audio-visual" , Module , ui.visuLabel,
                             visualisation);
+            CONFIG_BOOL( "audio-time-stretch", autoscaleBox );
 
             /* Audio Output Specifics */
             CONFIG_GENERIC( "aout", Module, ui.outputLabel, outputModule );
@@ -386,7 +411,7 @@ SPrefsPanel::SPrefsPanel( intf_thread_t *_p_intf, QWidget *_parent,
 
             /* Disk Devices */
             {
-                ui.DVDDevice->setToolTip(
+                ui.DVDDeviceComboBox->setToolTip(
                     qtr( "If this property is blank, different values\n"
                          "for DVD, VCD, and CDDA are set.\n"
                          "You can define a unique one or configure them \n"
@@ -398,26 +423,33 @@ SPrefsPanel::SPrefsPanel( intf_thread_t *_p_intf, QWidget *_parent,
                 if( !strcmp( psz_cddadiscpath, psz_dvddiscpath ) &&
                     !strcmp( psz_dvddiscpath, psz_vcddiscpath ) )
                 {
-                    ui.DVDDevice->setText( qfu( psz_dvddiscpath ) );
+                    ui.DVDDeviceComboBox->setEditText( qfu( psz_dvddiscpath ) );
                 }
                 free( psz_cddadiscpath );
                 free( psz_dvddiscpath );
                 free( psz_vcddiscpath );
             }
-            CONFIG_GENERIC_FILE( "dvd", File, ui.DVDLabel,
-                                 ui.DVDDevice, ui.DVDBrowse );
+#ifndef WIN32
+            QStringList DVDDeviceComboBoxStringList = QStringList();
+            DVDDeviceComboBoxStringList
+                    << "dvd*" << "scd*" << "sr*" << "sg*" << "cd*";
+            ui.DVDDeviceComboBox->addItems( QDir( "/dev/" )
+                    .entryList( DVDDeviceComboBoxStringList, QDir::System )
+                    .replaceInStrings( QRegExp("^"), "/dev/" )
+            );
+#endif
+            CONFIG_GENERIC( "dvd", String, ui.DVDLabel,
+                            DVDDeviceComboBox->lineEdit() );
             CONFIG_GENERIC_FILE( "input-record-path", Directory, ui.recordLabel,
                                  ui.recordPath, ui.recordBrowse );
 
-            CONFIG_GENERIC_NO_BOOL( "server-port", Integer, ui.portLabel,
-                                    UDPPort );
             CONFIG_GENERIC( "http-proxy", String , ui.httpProxyLabel, proxy );
-            CONFIG_GENERIC_NO_BOOL( "ffmpeg-pp-q", Integer, ui.ppLabel,
+            CONFIG_GENERIC_NO_BOOL( "postproc-q", Integer, ui.ppLabel,
                                     PostProcLevel );
             CONFIG_GENERIC( "avi-index", IntegerList, ui.aviLabel, AviRepair );
 
             /* live555 module prefs */
-            CONFIG_GENERIC( "rtsp-tcp", Bool, NULL,
+            CONFIG_BOOL( "rtsp-tcp",
                                 live555TransportRTSP_TCPRadio );
             if ( !module_exists( "live555" ) )
             {
@@ -425,15 +457,24 @@ SPrefsPanel::SPrefsPanel( intf_thread_t *_p_intf, QWidget *_parent,
                 ui.live555TransportHTTPRadio->hide();
                 ui.live555TransportLabel->hide();
             }
+            CONFIG_BOOL( "ffmpeg-hw", hwAccelBox );
 #ifdef WIN32
-            CONFIG_GENERIC( "prefer-system-codecs", Bool, NULL, systemCodecBox );
+            CONFIG_BOOL( "prefer-system-codecs", systemCodecBox );
+            HINSTANCE hdxva2_dll = LoadLibrary(TEXT("DXVA2.DLL") );
+            if( !hdxva2_dll )
+                ui.hwAccelBox->setEnabled( false );
+            else
+                FreeLibrary( hdxva2_dll );
 #else
             ui.systemCodecBox->hide();
-            ui.systemCodecLabel->hide();
 #endif
-            optionWidgets.append( ui.DVDDevice );
+            optionWidgets.append( ui.DVDDeviceComboBox );
             optionWidgets.append( ui.cachingCombo );
             CONFIG_GENERIC( "ffmpeg-skiploopfilter", IntegerList, ui.filterLabel, loopFilterBox );
+            CONFIG_GENERIC( "sout-x264-tune", StringList, ui.x264Label, tuneBox );
+            CONFIG_GENERIC( "sout-x264-preset", StringList, ui.x264Label, presetBox );
+            CONFIG_GENERIC( "sout-x264-profile", StringList, ui.x264profileLabel, profileBox );
+            CONFIG_GENERIC( "sout-x264-level", String, ui.x264profileLabel, levelBox );
 
             /* Caching */
             /* Add the things to the ComboBox */
@@ -464,13 +505,11 @@ SPrefsPanel::SPrefsPanel( intf_thread_t *_p_intf, QWidget *_parent,
             if (module_exists ("dvdnav"))
                 TestCaC( "dvdnav-caching" );
             TestCaC( "tcp-caching" );
-            TestCaC( "fake-caching" ); TestCaC( "cdda-caching" );
+            TestCaC( "cdda-caching" );
             TestCaC( "screen-caching" ); TestCaC( "vcd-caching" );
             #ifdef WIN32
             TestCaC( "dshow-caching" );
             #else
-            if (module_exists ("v4l"))
-                TestCaC( "v4l-caching" );
             if (module_exists ("access_jack"))
                 TestCaC( "jack-input-caching" );
             if (module_exists ("v4l2"))
@@ -499,7 +538,8 @@ SPrefsPanel::SPrefsPanel( intf_thread_t *_p_intf, QWidget *_parent,
 //            ui.defaultLabel->setFont( italicFont );
             ui.skinsLabel->setText(
                     qtr( "This is VLC's skinnable interface. You can download other skins at" )
-                    + QString( " <a href=\"http://www.videolan.org/vlc/skins.php\">VLC skins website</a>." ) );
+                    + QString( " <a href=\"http://www.videolan.org/vlc/skins.php\">" )
+                    + qtr( "VLC skins website" )+ QString( "</a>." ) );
             ui.skinsLabel->setFont( italicFont );
 
 #if defined( WIN32 )
@@ -507,8 +547,13 @@ SPrefsPanel::SPrefsPanel( intf_thread_t *_p_intf, QWidget *_parent,
             BUTTONACT( ui.assoButton, assoDialog() );
 #else
             ui.languageBox->hide();
-            ui.assoBox->hide();
+            ui.assoButton->hide();
+            ui.assocLabel->hide();
 #endif
+#ifdef MEDIA_LIBRARY
+            BUTTONACT( ui.sqlMLbtn, configML() );
+#endif
+
             /* interface */
             char *psz_intf = config_GetPsz( p_intf, "intf" );
             if( psz_intf )
@@ -536,45 +581,54 @@ SPrefsPanel::SPrefsPanel( intf_thread_t *_p_intf, QWidget *_parent,
             ui.stylesCombo->hide();
             optionWidgets.append( NULL );
 #endif
+            radioGroup = new QButtonGroup(this);
+            radioGroup->addButton( ui.qt4, 0 );
+            radioGroup->addButton( ui.skins, 1 );
+            CONNECT( radioGroup, buttonClicked( int ),
+                     ui.styleStackedWidget, setCurrentIndex( int ) );
+            ui.styleStackedWidget->setCurrentIndex( radioGroup->checkedId() );
 
-            ui.skins_zone->setEnabled( ui.skins->isChecked() );
-            CONNECT( ui.skins, toggled( bool ), ui.skins_zone, setEnabled( bool ) );
+            CONNECT( ui.minimalviewBox, toggled( bool ),
+                     ui.mainPreview, setNormalPreview( bool ) );
+            CONFIG_BOOL( "qt-minimal-view", minimalviewBox );
+            ui.mainPreview->setNormalPreview( ui.minimalviewBox->isChecked() );
+            ui.skinsPreview->setPreview( InterfacePreviewWidget::SKINS );
 
-            ui.native_zone->setEnabled( ui.qt4->isChecked() );
-            CONNECT( ui.qt4, toggled( bool ), ui.native_zone, setEnabled( bool ) );
+            CONFIG_BOOL( "embedded-video", embedVideo );
+            CONFIG_BOOL( "qt-video-autoresize", resizingBox );
+            CONNECT( ui.embedVideo, toggled( bool ), ui.resizingBox, setEnabled( bool ) );
+            ui.resizingBox->setEnabled( ui.embedVideo->isChecked() );
 
-            CONNECT( ui.displayModeBox, currentIndexChanged( int ),
-                     ui.mainPreview, setPreview( int ) );
-            ui.skinsPreview->setPreview( 3 ); /* skins_preview resource index */
+            CONFIG_BOOL( "qt-fs-controller", fsController );
+            CONFIG_BOOL( "qt-system-tray", systrayBox );
+            CONFIG_BOOL( "qt-notification", sysPop );
+            CONNECT( ui.systrayBox, toggled( bool ), ui.sysPop, setEnabled( bool ) );
+            ui.sysPop->setEnabled( ui.systrayBox->isChecked() );
 
-            CONFIG_GENERIC( "qt-display-mode", IntegerList, ui.displayLabel,
-                            displayModeBox );
-            CONFIG_GENERIC( "embedded-video", Bool, NULL, embedVideo );
-            CONFIG_GENERIC( "qt-fs-controller", Bool, NULL, fsController );
-            CONFIG_GENERIC( "qt-system-tray", Bool, NULL, systrayBox );
+            CONFIG_BOOL( "qt-pause-minimized", pauseMinimizedBox );
+            CONFIG_BOOL( "playlist-tree", treePlaylist );
+            CONFIG_BOOL( "play-and-pause", playPauseBox );
             CONFIG_GENERIC_FILE( "skins2-last", File, ui.skinFileLabel,
                                  ui.fileSkin, ui.skinBrowse );
-            CONFIG_GENERIC( "qt-video-autoresize", Bool, NULL, resizingBox );
 
             CONFIG_GENERIC( "album-art", IntegerList, ui.artFetchLabel,
                                                       artFetcher );
 
             /* UPDATE options */
 #ifdef UPDATE_CHECK
-            CONFIG_GENERIC( "qt-updates-notif", Bool, NULL, updatesBox );
+            CONFIG_BOOL( "qt-updates-notif", updatesBox );
             CONFIG_GENERIC_NO_BOOL( "qt-updates-days", Integer, NULL,
                     updatesDays );
             ui.updatesDays->setEnabled( ui.updatesBox->isChecked() );
             CONNECT( ui.updatesBox, toggled( bool ),
                      ui.updatesDays, setEnabled( bool ) );
 #else
-            ui.updatesBox->hide();
-            ui.updatesDays->hide();
+            ui.updateNotifierZone->hide();
 #endif
             /* ONE INSTANCE options */
 #if defined( WIN32 ) || defined( HAVE_DBUS ) || defined(__APPLE__)
-            CONFIG_GENERIC( "one-instance", Bool, NULL, OneInterfaceMode );
-            CONFIG_GENERIC( "playlist-enqueue", Bool, NULL,
+            CONFIG_BOOL( "one-instance", OneInterfaceMode );
+            CONFIG_BOOL( "playlist-enqueue",
                     EnqueueOneInterfaceMode );
             ui.EnqueueOneInterfaceMode->setEnabled( ui.OneInterfaceMode->isChecked() );
             CONNECT( ui.OneInterfaceMode, toggled( bool ),
@@ -586,7 +640,7 @@ SPrefsPanel::SPrefsPanel( intf_thread_t *_p_intf, QWidget *_parent,
             CONNECT( ui.saveRecentlyPlayed, toggled( bool ),
                      ui.recentlyPlayedFilters, setEnabled( bool ) );
             ui.recentlyPlayedFilters->setEnabled( false );
-            CONFIG_GENERIC( "qt-recentplay", Bool, NULL, saveRecentlyPlayed );
+            CONFIG_BOOL( "qt-recentplay", saveRecentlyPlayed );
             CONFIG_GENERIC( "qt-recentplay-filter", String, ui.filterLabel,
                     recentlyPlayedFilters );
 
@@ -594,9 +648,10 @@ SPrefsPanel::SPrefsPanel( intf_thread_t *_p_intf, QWidget *_parent,
 
         START_SPREFS_CAT( Subtitles,
                             qtr("Subtitles & On Screen Display Settings") );
-            CONFIG_GENERIC( "osd", Bool, NULL, OSDBox);
-            CONFIG_GENERIC( "video-title-show", Bool, NULL, OSDTitleBox);
-
+            CONFIG_BOOL( "osd", OSDBox);
+            CONFIG_BOOL( "video-title-show", OSDTitleBox);
+            CONFIG_GENERIC( "video-title-position", IntegerList,
+                            ui.OSDTitlePosLabel, OSDTitlePos );
 
             CONFIG_GENERIC( "subsdec-encoding", StringList, ui.encodLabel,
                             encoding );
@@ -615,7 +670,7 @@ SPrefsPanel::SPrefsPanel( intf_thread_t *_p_intf, QWidget *_parent,
 
         case SPrefsHotkeys:
         {
-            p_config = config_FindConfig( VLC_OBJECT(p_intf), "key-fullscreen" );
+            p_config = config_FindConfig( VLC_OBJECT(p_intf), "key-play" );
 
             QGridLayout *gLayout = new QGridLayout;
             panel->setLayout( gLayout );
@@ -636,8 +691,16 @@ SPrefsPanel::SPrefsPanel( intf_thread_t *_p_intf, QWidget *_parent,
 
             p_config = config_FindConfig( VLC_OBJECT(p_intf), "hotkeys-mousewheel-mode" );
             control = new IntegerListConfigControl( VLC_OBJECT(p_intf),
-                    p_config, false, this, gLayout, line );
+                    p_config, this, false, gLayout, line );
             controls.append( control );
+
+#ifdef WIN32
+            line++;
+
+            p_config = config_FindConfig( VLC_OBJECT(p_intf), "qt-disable-volume-keys" );
+            control = new BoolConfigControl( VLC_OBJECT(p_intf), p_config, this, gLayout, line );
+            controls.append( control );
+#endif
 
             break;
         }
@@ -666,8 +729,9 @@ SPrefsPanel::SPrefsPanel( intf_thread_t *_p_intf, QWidget *_parent,
 #undef START_SPREFS_CAT
 #undef CONFIG_GENERIC_FILE
 #undef CONFIG_GENERIC_NO_BOOL
-#undef CONFIG_GENERIC2
+#undef CONFIG_GENERIC_NO_UI
 #undef CONFIG_GENERIC
+#undef CONFIG_BOOL
 }
 
 
@@ -676,7 +740,7 @@ void SPrefsPanel::updateAudioOptions( int number)
     QString value = qobject_cast<QComboBox *>(optionWidgets[audioOutCoB])
                                             ->itemData( number ).toString();
 #ifdef WIN32
-    optionWidgets[directxW]->setVisible( ( value == "directx" ) );
+    optionWidgets[directxW]->setVisible( ( value == "aout_directx" ) );
 #else
     /* optionWidgets[ossW] can be NULL */
     if( optionWidgets[ossW] )
@@ -686,8 +750,8 @@ void SPrefsPanel::updateAudioOptions( int number)
         optionWidgets[alsaW]->setVisible( ( value == "alsa" ) );
 #endif
     optionWidgets[fileW]->setVisible( ( value == "aout_file" ) );
-    optionWidgets[spdifChB]->setVisible( ( value != "aout_file"
-                                           && value != "dummy" ) );
+    optionWidgets[spdifChB]->setVisible( ( value == "alsa" || value == "oss" || value == "auhal" ||
+                                           value == "aout_directx" || value == "waveout" ) );
 }
 
 
@@ -699,7 +763,7 @@ SPrefsPanel::~SPrefsPanel()
 void SPrefsPanel::updateAudioVolume( int volume )
 {
     qobject_cast<QSpinBox *>(optionWidgets[volLW])
-        ->setValue( volume * 100 / 256 );
+        ->setValue( volume * 100 / QT_VOLUME_DEFAULT );
 }
 
 
@@ -708,10 +772,10 @@ void SPrefsPanel::apply()
 {
     /* Generic save for ever panel */
     QList<ConfigControl *>::Iterator i;
-    for( i = controls.begin() ; i != controls.end() ; i++ )
+    for( i = controls.begin() ; i != controls.end() ; ++i )
     {
         ConfigControl *c = qobject_cast<ConfigControl *>(*i);
-        c->doApply( p_intf );
+        c->doApply();
     }
 
     switch( number )
@@ -719,14 +783,13 @@ void SPrefsPanel::apply()
     case SPrefsInputAndCodecs:
     {
         /* Device default selection */
-        char *psz_devicepath =
-            strdup( qtu( qobject_cast<QLineEdit *>(optionWidgets[inputLE] )->text() ) );
-        if( !EMPTY_STR( psz_devicepath ) )
+        QByteArray devicepath =
+            qobject_cast<QComboBox *>(optionWidgets[inputLE])->currentText().toUtf8();
+        if( devicepath.size() > 0 )
         {
-            config_PutPsz( p_intf, "dvd", psz_devicepath );
-            config_PutPsz( p_intf, "vcd", psz_devicepath );
-            config_PutPsz( p_intf, "cd-audio", psz_devicepath );
-            free( psz_devicepath );
+            config_PutPsz( p_intf, "dvd", devicepath );
+            config_PutPsz( p_intf, "vcd", devicepath );
+            config_PutPsz( p_intf, "cd-audio", devicepath );
         }
 
 #define CaCi( name, int ) config_PutInt( p_intf, name, int * i_comboValue )
@@ -742,7 +805,7 @@ void SPrefsPanel::apply()
             if (module_exists ("dvdnav" ))
                 CaC( "dvdnav-caching" );
             CaC( "tcp-caching" ); CaC( "vcd-caching" );
-            CaC( "fake-caching" ); CaC( "cdda-caching" ); CaC( "file-caching" );
+            CaC( "cdda-caching" ); CaC( "file-caching" );
             CaC( "screen-caching" ); CaC( "bd-caching" );
             CaCi( "rtsp-caching", 2 ); CaCi( "ftp-caching", 2 );
             CaCi( "http-caching", 2 );
@@ -752,8 +815,6 @@ void SPrefsPanel::apply()
             #ifdef WIN32
             CaC( "dshow-caching" );
             #else
-            if (module_exists ( "v4l" ))
-                CaC( "v4l-caching" );
             if (module_exists ( "access_jack" ))
             CaC( "jack-input-caching" );
             if (module_exists ( "v4l2" ))
@@ -772,9 +833,10 @@ void SPrefsPanel::apply()
     case SPrefsInterface:
     {
         if( qobject_cast<QRadioButton *>(optionWidgets[skinRB])->isChecked() )
-            config_PutPsz( p_intf, "intf", "skins2" );
-        if( qobject_cast<QRadioButton *>(optionWidgets[qtRB])->isChecked() )
-            config_PutPsz( p_intf, "intf", "qt" );
+            config_PutPsz( p_intf, "intf", "skins2,any" );
+        else
+        //if( qobject_cast<QRadioButton *>(optionWidgets[qtRB])->isChecked() )
+            config_PutPsz( p_intf, "intf", "" );
         if( qobject_cast<QComboBox *>(optionWidgets[styleCB]) )
             getSettings()->setValue( "MainWindow/QtStyle",
                 qobject_cast<QComboBox *>(optionWidgets[styleCB])->currentText() );
@@ -825,13 +887,21 @@ void SPrefsPanel::changeStyle( QString s_style )
     QWidgetList::iterator it = widgets.begin();
     while( it != widgets.end() ) {
         (*it)->update();
-        it++;
+        ++it;
     };
+}
+
+void SPrefsPanel::configML()
+{
+#ifdef MEDIA_LIBRARY
+    MLConfDialog *mld = new MLConfDialog( this, p_intf );
+    mld->exec();
+    delete mld;
+#endif
 }
 
 #ifdef WIN32
 #include <QDialogButtonBox>
-#include <QHeaderView>
 #include "util/registry.hpp"
 #include <string>
 
@@ -842,7 +912,7 @@ bool SPrefsPanel::addType( const char * psz_ext, QTreeWidgetItem* current,
     const char* psz_VLC = "VLC";
     current = new QTreeWidgetItem( parent, QStringList( psz_ext ) );
 
-    if( strstr( qvReg->ReadRegistryString( psz_ext, "", ""  ), psz_VLC ) )
+    if( strstr( qvReg->ReadRegistryString( psz_ext, "", "" ), psz_VLC ) )
     {
         current->setCheckState( 0, Qt::Checked );
         b_temp = false;
@@ -858,28 +928,23 @@ bool SPrefsPanel::addType( const char * psz_ext, QTreeWidgetItem* current,
 
 void SPrefsPanel::assoDialog()
 {
-    OSVERSIONINFO winVer;
-    winVer.dwOSVersionInfoSize = sizeof(OSVERSIONINFO);
-    //Vista specific file associations
-    if( GetVersionEx(&winVer) && winVer.dwMajorVersion > 5 )
+    LPAPPASSOCREGUI p_appassoc;
+    CoInitialize( 0 );
+
+    if( S_OK == CoCreateInstance( &clsid_IApplication2,
+                NULL, CLSCTX_INPROC_SERVER,
+                &IID_IApplicationAssociationRegistrationUI,
+                (void **)&p_appassoc) )
     {
-            LPAPPASSOCREGUI p_appassoc;
-            CoInitialize( 0 );
-
-            if( S_OK == CoCreateInstance( &clsid_IApplication2,
-                        NULL, CLSCTX_INPROC_SERVER,
-                        &IID_IApplicationAssociationRegistrationUI,
-                        (void **)&p_appassoc) )
-            {
-                if(S_OK == p_appassoc->vt->LaunchAdvancedAssociationUI(p_appassoc, L"VLC" ) )
-                {
-                    CoUninitialize();
-                    return;
-                }
-            }
-
+        if(S_OK == p_appassoc->vt->LaunchAdvancedAssociationUI(p_appassoc, L"VLC" ) )
+        {
             CoUninitialize();
+            return;
+        }
     }
+
+    CoUninitialize();
+
     QDialog *d = new QDialog( this );
     QGridLayout *assoLayout = new QGridLayout( d );
 
@@ -901,7 +966,7 @@ void SPrefsPanel::assoDialog()
     videoType->setExpanded( true ); videoType->setCheckState( 0, Qt::Unchecked );
     otherType->setExpanded( true ); otherType->setCheckState( 0, Qt::Unchecked );
 
-    QTreeWidgetItem *currentItem;
+    QTreeWidgetItem *currentItem = NULL;
 
     int i_temp = 0;
 #define aTa( name ) i_temp += addType( name, currentItem, audioType, qvReg )
@@ -911,7 +976,7 @@ void SPrefsPanel::assoDialog()
     aTa( ".a52" ); aTa( ".aac" ); aTa( ".ac3" ); aTa( ".dts" ); aTa( ".flac" );
     aTa( ".m4a" ); aTa( ".m4p" ); aTa( ".mka" ); aTa( ".mod" ); aTa( ".mp1" );
     aTa( ".mp2" ); aTa( ".mp3" ); aTa( ".oma" ); aTa( ".oga" ); aTa( ".spx" );
-    aTa( ".wav" ); aTa( ".wma" ); aTa( ".xm" );
+    aTa( ".tta" ); aTa( ".wav" ); aTa( ".wma" ); aTa( ".xm" );
     audioType->setCheckState( 0, ( i_temp > 0 ) ?
                               ( ( i_temp == audioType->childCount() ) ?
                                Qt::Checked : Qt::PartiallyChecked )
@@ -922,17 +987,17 @@ void SPrefsPanel::assoDialog()
     aTv( ".gxf" ); aTv( ".m1v" ); aTv( ".m2v" ); aTv( ".m2ts" ); aTv( ".m4v" );
     aTv( ".mkv" ); aTv( ".mov" ); aTv( ".mp2" ); aTv( ".mp4" ); aTv( ".mpeg" );
     aTv( ".mpeg1" ); aTv( ".mpeg2" ); aTv( ".mpeg4" ); aTv( ".mpg" );
-    aTv( ".mts" ); aTv( ".mxf" );
+    aTv( ".mts" ); aTv( ".mtv" ); aTv( ".mxf" );
     aTv( ".ogg" ); aTv( ".ogm" ); aTv( ".ogx" ); aTv( ".ogv" );  aTv( ".ts" );
-    aTv( ".vob" ); aTv( ".wmv" );
+    aTv( ".vob" ); aTv( ".vro" ); aTv( ".wmv" );
     videoType->setCheckState( 0, ( i_temp > 0 ) ?
                               ( ( i_temp == audioType->childCount() ) ?
                                Qt::Checked : Qt::PartiallyChecked )
                             : Qt::Unchecked );
 
     i_temp = 0;
-    aTo( ".asx" ); aTo( ".b4s" ); aTo( ".ifo" ); aTo( ".m3u" ); aTo( ".pls" ); aTo( ".vlc" );
-    aTo( ".xspf" );
+    aTo( ".asx" ); aTo( ".b4s" ); aTo( ".ifo" ); aTo( ".m3u" ); aTo( ".pls" );
+    aTo( ".sdp" ); aTo( ".vlc" ); aTo( ".xspf" );
     otherType->setCheckState( 0, ( i_temp > 0 ) ?
                               ( ( i_temp == audioType->childCount() ) ?
                                Qt::Checked : Qt::PartiallyChecked )
@@ -967,7 +1032,7 @@ void addAsso( QVLCRegistry *qvReg, const char *psz_ext )
     /* Save a backup if already assigned */
     char *psz_value = qvReg->ReadRegistryString( psz_ext, "", ""  );
 
-    if( psz_value && strlen( psz_value ) > 0 )
+    if( !EMPTY_STR(psz_value) )
         qvReg->WriteRegistryString( psz_ext, "VLC.backup", psz_value );
     delete psz_value;
 
@@ -1001,7 +1066,7 @@ void addAsso( QVLCRegistry *qvReg, const char *psz_ext )
 void delAsso( QVLCRegistry *qvReg, const char *psz_ext )
 {
     char psz_VLC[] = "VLC";
-    char *psz_value = qvReg->ReadRegistryString( psz_ext, "", ""  );
+    char *psz_value = qvReg->ReadRegistryString( psz_ext, "", "" );
 
     if( psz_value && !strcmp( strcat( psz_VLC, psz_ext ), psz_value ) )
     {
@@ -1016,7 +1081,7 @@ void delAsso( QVLCRegistry *qvReg, const char *psz_ext )
 }
 void SPrefsPanel::saveAsso()
 {
-    QVLCRegistry * qvReg;
+    QVLCRegistry * qvReg = NULL;
     for( int i = 0; i < listAsso.size(); i ++ )
     {
         qvReg  = new QVLCRegistry( HKEY_CLASSES_ROOT );

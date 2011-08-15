@@ -26,8 +26,8 @@
  * Preamble
  *****************************************************************************/
 #import "intf.h"
-#import "controls.h"
-#import "vout.h"
+#import "CoreInteraction.h"
+#import "MainWindow.h"
 #import "misc.h"
 #import "fspanel.h"
 
@@ -84,10 +84,10 @@
          object: NSApp];
 }
 
-/* Windows created with NSBorderlessWindowMask normally can't be key, but we want ours to be */
+/* make sure that we don't become key, since we can't handle hotkeys */
 - (BOOL)canBecomeKeyWindow
 {
-    return YES;
+    return NO;
 }
 
 - (BOOL)mouseDownCanMoveWindow
@@ -178,14 +178,8 @@
 
 - (void)setActive:(id)noData
 {
-    if( [[[VLCMain sharedInstance] controls] voutView] != nil )
-    {
-        if( [[[[VLCMain sharedInstance] controls] voutView] isFullscreen] )
-        {
-            b_nonActive = NO;
-            [self fadeIn];
-        }
-    }
+    b_nonActive = NO;
+    [[VLCMain sharedInstance] showFullscreenController];
 }
 
 /* This routine is called repeatedly to fade in the window */
@@ -247,8 +241,13 @@
 - (void)mouseExited:(NSEvent *)theEvent
 {
     /* give up our focus, so the vout may show us again without letting the user clicking it */
-    if( [[[[VLCMain sharedInstance] controls] voutView] isFullscreen] )
-        [[[[[VLCMain sharedInstance] controls] voutView] window] makeKeyWindow];
+    vout_thread_t *p_vout = getVout();
+    if (p_vout)
+    {
+        if (var_GetBool( p_vout, "fullscreen" ))
+            [[[[VLCMainWindow sharedInstance] videoView] window] makeKeyWindow];
+        vlc_object_release( p_vout );
+    }
 }
 
 - (void)hideMouse
@@ -400,8 +399,8 @@
     [o_button setAction: @selector(action:)];                                                   \
     [self addSubview:o_button];
 
-#define addTextfield( o_text, align, font, color, size )                                    \
-    o_text = [[NSTextField alloc] initWithFrame: s_rc];                            \
+#define addTextfield( class, o_text, align, font, color, size )                                    \
+    o_text = [[class alloc] initWithFrame: s_rc];                            \
     [o_text setDrawsBackground: NO];                                                        \
     [o_text setBordered: NO];                                                               \
     [o_text setEditable: NO];                                                               \
@@ -422,7 +421,7 @@
     addButton( o_play, @"fs_play"          , @"fs_play_highlight"         , 267, 10, play );
     addButton( o_fwd, @"fs_forward"       , @"fs_forward_highlight"      , 313, 14, forward );
     addButton( o_next, @"fs_skip_next"     , @"fs_skip_next_highlight"    , 365, 15, next );
-    addButton( o_fullscreen, @"fs_exit_fullscreen", @"fs_exit_fullscreen_hightlight", 507, 13, windowAction );
+    addButton( o_fullscreen, @"fs_exit_fullscreen", @"fs_exit_fullscreen_hightlight", 507, 13, toggleFullscreen );
 /*
     addButton( o_button, @"image (off state)", @"image (on state)", 38, 51, something );
  */
@@ -463,11 +462,11 @@
     s_rc.origin.y = 64;
     s_rc.size.width = 352;
     s_rc.size.height = 14;
-    addTextfield( o_streamTitle_txt, NSCenterTextAlignment, systemFontOfSize, whiteColor, 0 );
-    s_rc.origin.x = 486;
+    addTextfield( NSTextField, o_streamTitle_txt, NSCenterTextAlignment, systemFontOfSize, whiteColor, 0 );
+    s_rc.origin.x = 481;
     s_rc.origin.y = 64;
-    s_rc.size.width = 50;
-    addTextfield( o_streamPosition_txt, NSRightTextAlignment, systemFontOfSize, whiteColor, 0 );
+    s_rc.size.width = 55;
+    addTextfield( VLCTimeField, o_streamPosition_txt, NSRightTextAlignment, systemFontOfSize, whiteColor, 0 );
 
     return view;
 }
@@ -524,42 +523,52 @@
 
 - (IBAction)play:(id)sender
 {
-    [[[VLCMain sharedInstance] controls] play: sender];
+    [[VLCCoreInteraction sharedInstance] play];
 }
 
 - (IBAction)forward:(id)sender
 {
-    [[[VLCMain sharedInstance] controls] forward: sender];
+    [[VLCCoreInteraction sharedInstance] forward];
 }
 
 - (IBAction)backward:(id)sender
 {
-    [[[VLCMain sharedInstance] controls] backward: sender];
+    [[VLCCoreInteraction sharedInstance] backward];
 }
 
 - (IBAction)prev:(id)sender
 {
-    [[[VLCMain sharedInstance] controls] prev: sender];
+    [[VLCCoreInteraction sharedInstance] previous];
 }
 
 - (IBAction)next:(id)sender
 {
-    [[[VLCMain sharedInstance] controls] next: sender];
+    [[VLCCoreInteraction sharedInstance] next];
 }
 
-- (IBAction)windowAction:(id)sender
+- (IBAction)toggleFullscreen:(id)sender
 {
-    [[[VLCMain sharedInstance] controls] windowAction: sender];
+    [[VLCCoreInteraction sharedInstance] toggleFullscreen];
 }
 
 - (IBAction)fsTimeSliderUpdate:(id)sender
 {
-    [[VLCMain sharedInstance] timesliderUpdate: sender];
+    input_thread_t * p_input;
+    p_input = pl_CurrentInput( VLCIntf );
+    if( p_input != NULL )
+    {
+        vlc_value_t pos;
+
+        pos.f_float = [o_fs_timeSlider floatValue] / 10000.;
+        var_Set( p_input, "position", pos );
+        vlc_object_release( p_input );
+    }
+    [[VLCMain sharedInstance] updatePlaybackPosition];
 }
 
 - (IBAction)fsVolumeSliderUpdate:(id)sender
 {
-    [[[VLCMain sharedInstance] controls] volumeSliderUpdated: sender];
+    [[VLCCoreInteraction sharedInstance] setVolume: [sender intValue]];
 }
 
 #define addImage(image, _x, _y, mode, _width)                                               \

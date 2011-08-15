@@ -1,5 +1,5 @@
 /*****************************************************************************
- * core.c: Core libvlc new API functions : initialization, exceptions handling
+ * core.c: Core libvlc new API functions : initialization
  *****************************************************************************
  * Copyright (C) 2005 the VideoLAN team
  * $Id$
@@ -26,6 +26,7 @@
 #endif
 
 #include "libvlc_internal.h"
+#include <vlc_modules.h>
 #include <vlc/libvlc.h>
 
 #include <vlc_interface.h>
@@ -37,90 +38,28 @@
 
 static const char nomemstr[] = "Insufficient memory";
 
-/*************************************************************************
- * Exceptions handling
- *************************************************************************/
-void libvlc_exception_init( libvlc_exception_t *p_exception )
+libvlc_instance_t * libvlc_new( int argc, const char *const *argv )
 {
-    p_exception->b_raised = 0;
-}
-
-void libvlc_exception_clear( libvlc_exception_t *p_exception )
-{
-    if( NULL == p_exception )
-        return;
-    p_exception->b_raised = 0;
-    libvlc_clearerr ();
-}
-
-int libvlc_exception_raised( const libvlc_exception_t *p_exception )
-{
-    return (NULL != p_exception) && p_exception->b_raised;
-}
-
-static void libvlc_exception_not_handled( const char *psz )
-{
-    fprintf( stderr, "*** LibVLC Exception not handled: %s\nSet a breakpoint in '%s' to debug.\n",
-             psz, __func__ );
-    abort();
-}
-
-void libvlc_exception_raise( libvlc_exception_t *p_exception )
-{
-    /* Does caller care about exceptions ? */
-    if( p_exception == NULL ) {
-        /* Print something, so that lazy third-parties can easily
-         * notice that something may have gone unnoticedly wrong */
-        libvlc_exception_not_handled( libvlc_errmsg() );
-        return;
-    }
-
-    p_exception->b_raised = 1;
-}
-
-libvlc_instance_t * libvlc_new( int argc, const char *const *argv,
-                                libvlc_exception_t *p_e )
-{
-    libvlc_instance_t *p_new;
-    int i_ret;
+    libvlc_instance_t *p_new = malloc (sizeof (*p_new));
+    if (unlikely(p_new == NULL))
+        return NULL;
 
     libvlc_init_threads ();
 
-    libvlc_int_t *p_libvlc_int = libvlc_InternalCreate();
-    if( !p_libvlc_int )
-    {
-        libvlc_deinit_threads ();
-        RAISENULL( "VLC initialization failed" );
-    }
-
-    p_new = malloc( sizeof( libvlc_instance_t ) );
-    if( !p_new )
-    {
-        libvlc_deinit_threads ();
-        RAISENULL( "Out of memory" );
-    }
-
     const char *my_argv[argc + 2];
-
     my_argv[0] = "libvlc"; /* dummy arg0, skipped by getopt() et al */
     for( int i = 0; i < argc; i++ )
          my_argv[i + 1] = argv[i];
     my_argv[argc + 1] = NULL; /* C calling conventions require a NULL */
 
-    /** \todo Look for interface settings. If we don't have any, add -I dummy */
-    /* Because we probably don't want a GUI by default */
+    libvlc_int_t *p_libvlc_int = libvlc_InternalCreate();
+    if (unlikely (p_libvlc_int == NULL))
+        goto error;
 
-    i_ret = libvlc_InternalInit( p_libvlc_int, argc + 1, my_argv );
-    if( i_ret )
+    if (libvlc_InternalInit( p_libvlc_int, argc + 1, my_argv ))
     {
         libvlc_InternalDestroy( p_libvlc_int );
-        free( p_new );
-        libvlc_deinit_threads ();
-
-        if( i_ret == VLC_EEXITSUCCESS )
-            return NULL;
-        else
-            RAISENULL( "VLC initialization failed" );
+        goto error;
     }
 
     p_new->p_libvlc_int = p_libvlc_int;
@@ -131,8 +70,14 @@ libvlc_instance_t * libvlc_new( int argc, const char *const *argv,
     p_new->verbosity = 1;
     p_new->p_callback_list = NULL;
     vlc_mutex_init(&p_new->instance_lock);
-
+    var_Create( p_libvlc_int, "http-user-agent",
+                VLC_VAR_STRING|VLC_VAR_DOINHERIT );
     return p_new;
+
+error:
+    libvlc_deinit_threads ();
+    free (p_new);
+    return NULL;
 }
 
 void libvlc_retain( libvlc_instance_t *p_instance )
@@ -167,16 +112,29 @@ void libvlc_release( libvlc_instance_t *p_instance )
     }
 }
 
-int libvlc_add_intf( libvlc_instance_t *p_i, const char *name,
-                      libvlc_exception_t *p_e )
+int libvlc_add_intf( libvlc_instance_t *p_i, const char *name )
 {
-    if( libvlc_InternalAddIntf( p_i->p_libvlc_int, name ) )
+    if( libvlc_InternalAddIntf( p_i->p_libvlc_int, name ))
     {
-        libvlc_printerr("Interface initialization failed");
-        libvlc_exception_raise( p_e );
+        if( name )
+        {
+            libvlc_printerr("interface \"%s\" initialization failed",
+                name );
+        }
+        else
+        {
+            libvlc_printerr("default interface initialization failed");
+        }
         return -1;
     }
     return 0;
+}
+
+void libvlc_set_exit_handler( libvlc_instance_t *p_i, void (*cb) (void *),
+                              void *data )
+{
+    libvlc_int_t *p_libvlc = p_i->p_libvlc_int;
+    libvlc_SetExitHandler( p_libvlc, cb, data );
 }
 
 void libvlc_wait( libvlc_instance_t *p_i )
@@ -185,9 +143,24 @@ void libvlc_wait( libvlc_instance_t *p_i )
     libvlc_InternalWait( p_libvlc );
 }
 
+void libvlc_set_user_agent (libvlc_instance_t *p_i,
+                            const char *name, const char *http)
+{
+    libvlc_int_t *p_libvlc = p_i->p_libvlc_int;
+    char *str;
+
+    var_SetString (p_libvlc, "user-agent", name);
+    if ((http != NULL)
+     && (asprintf (&str, "%s LibVLC/"PACKAGE_VERSION, http) != -1))
+    {
+        var_SetString (p_libvlc, "http-user-agent", str);
+        free (str);
+    }
+}
+
 const char * libvlc_get_version(void)
 {
-    return VLC_Version();
+    return VERSION_MESSAGE;
 }
 
 const char * libvlc_get_compiler(void)
@@ -201,14 +174,86 @@ const char * libvlc_get_changeset(void)
     return psz_vlc_changeset;
 }
 
-/* export internal libvlc_instance for ugly hacks with libvlccore */
-vlc_object_t *libvlc_get_vlc_instance( libvlc_instance_t* p_instance )
-{
-    vlc_object_hold( p_instance->p_libvlc_int ) ;
-    return (vlc_object_t*) p_instance->p_libvlc_int ;
-}
-
 void libvlc_free( void *ptr )
 {
     free( ptr );
+}
+
+static libvlc_module_description_t *module_description_list_get(
+                libvlc_instance_t *p_instance, const char *capability )
+{
+    VLC_UNUSED( p_instance );
+    libvlc_module_description_t *p_list = NULL,
+                          *p_actual = NULL,
+                          *p_previous = NULL;
+    module_t **module_list = module_list_get( NULL );
+
+    for (size_t i = 0; module_list[i]; i++)
+    {
+        module_t *p_module = module_list[i];
+
+        if ( !module_provides( p_module, capability ) )
+            continue;
+
+        p_actual = ( libvlc_module_description_t * ) malloc( sizeof( libvlc_module_description_t ) );
+        if ( p_actual == NULL )
+        {
+            libvlc_printerr( "Not enough memory" );
+            libvlc_module_description_list_release( p_list );
+            module_list_free( module_list );
+            return NULL;
+        }
+
+        if ( p_list == NULL )
+            p_list = p_actual;
+
+        const char* name = module_get_object( p_module );
+        const char* shortname = module_get_name( p_module, false );
+        const char* longname = module_get_name( p_module, true );
+        const char* help = module_get_help( p_module );
+        p_actual->psz_name = name ? strdup( name ) : NULL;
+        p_actual->psz_shortname = shortname ? strdup( shortname ) : NULL;
+        p_actual->psz_longname = longname ? strdup( longname ) : NULL;
+        p_actual->psz_help = help ? strdup( help ) : NULL;
+
+        p_actual->p_next = NULL;
+        if ( p_previous )
+            p_previous->p_next = p_actual;
+        p_previous = p_actual;
+    }
+
+    module_list_free( module_list );
+    return p_list;
+}
+
+void libvlc_module_description_list_release( libvlc_module_description_t *p_list )
+{
+    libvlc_module_description_t *p_actual, *p_before;
+    p_actual = p_list;
+
+    while ( p_actual )
+    {
+        free( p_actual->psz_name );
+        free( p_actual->psz_shortname );
+        free( p_actual->psz_longname );
+        free( p_actual->psz_help );
+        p_before = p_actual;
+        p_actual = p_before->p_next;
+        free( p_before );
+    }
+}
+
+libvlc_module_description_t *libvlc_audio_filter_list_get( libvlc_instance_t *p_instance )
+{
+    return module_description_list_get( p_instance, "audio filter" );
+}
+
+libvlc_module_description_t *libvlc_video_filter_list_get( libvlc_instance_t *p_instance )
+{
+    return module_description_list_get( p_instance, "video filter2" );
+}
+
+int64_t libvlc_clock(void)
+{
+    return mdate();
 }

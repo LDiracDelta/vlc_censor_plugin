@@ -30,50 +30,64 @@
 #define VOLUME_MIN                 0
 
 /* Notification Messages */
-NSString * VLCMediaPlayerVolumeChanged = @"VLCMediaPlayerVolumeChanged"; 
+NSString * VLCMediaPlayerVolumeChanged = @"VLCMediaPlayerVolumeChanged";
 
 /* libvlc event callback */
 // TODO: Callbacks
 
+
 @implementation VLCAudio
+/**
+ * Use this method instead of instance directly as this one is type checked.
+ */
+- (libvlc_media_player_t *)instance
+{
+    return instance;
+}
 
 - (id)init
 {
     return nil;
 }
 
-- (id)initWithLibrary:(VLCLibrary *)aLibrary
+- (id)initWithMediaPlayer:(VLCMediaPlayer *)mediaPlayer
 {
-    if (![library audio] && (self = [super init]))
-    {
-        library = aLibrary;
-        [library setAudio:self];
-    }
+    self = [super init];
+    if (!self)
+        return nil;
+    instance = [mediaPlayer libVLCMediaPlayer];
+    libvlc_media_player_retain([self instance]);
     return self;
+}
+
+- (void) dealloc
+{
+    libvlc_media_player_release([self instance]);
+    [super dealloc];
 }
 
 - (void)setMute:(BOOL)value
 {
-    libvlc_audio_set_mute([library instance], value);
+    libvlc_audio_set_mute([self instance], value);
 }
 
 - (BOOL)isMuted
 {
-    return libvlc_audio_get_mute([library instance]);
+    return libvlc_audio_get_mute([self instance]);
 }
 
-- (void)setVolume:(int)value
+- (void)setVolume:(NSUInteger)value
 {
     if (value < VOLUME_MIN)
         value = VOLUME_MIN;
     else if (value > VOLUME_MAX)
         value = VOLUME_MAX;
-    libvlc_audio_set_volume([library instance], value, NULL);
+    libvlc_audio_set_volume([self instance], value);
 }
 
 - (void)volumeUp
 {
-    int tempVolume = [self volume] + VOLUME_STEP;
+    NSUInteger tempVolume = [self volume] + VOLUME_STEP;
     if (tempVolume > VOLUME_MAX)
         tempVolume = VOLUME_MAX;
     else if (tempVolume < VOLUME_MIN)
@@ -83,7 +97,7 @@ NSString * VLCMediaPlayerVolumeChanged = @"VLCMediaPlayerVolumeChanged";
 
 - (void)volumeDown
 {
-    int tempVolume = [self volume] - VOLUME_STEP;
+    NSUInteger tempVolume = [self volume] - VOLUME_STEP;
     if (tempVolume > VOLUME_MAX)
         tempVolume = VOLUME_MAX;
     else if (tempVolume < VOLUME_MIN)
@@ -91,8 +105,8 @@ NSString * VLCMediaPlayerVolumeChanged = @"VLCMediaPlayerVolumeChanged";
     [self setVolume: tempVolume];
 }
 
-- (int)volume
+- (NSUInteger)volume
 {
-    return libvlc_audio_get_volume([library instance]);
+    return libvlc_audio_get_volume([self instance]);
 }
 @end

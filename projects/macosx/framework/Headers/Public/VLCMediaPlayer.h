@@ -1,11 +1,13 @@
 /*****************************************************************************
  * VLCMediaPlayer.h: VLCKit.framework VLCMediaPlayer header
  *****************************************************************************
- * Copyright (C) 2007 Pierre d'Herbemont
- * Copyright (C) 2007 the VideoLAN team
+ * Copyright (C) 2007-2009 Pierre d'Herbemont
+ * Copyright (C) 2007-2009 the VideoLAN team
+ * Partial Copyright (C) 2009 Felix Paul Kühne
  * $Id$
  *
  * Authors: Pierre d'Herbemont <pdherbemont # videolan.org>
+ *          Felix Paul Kühne <fkuehne # videolan.org>
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -22,12 +24,18 @@
  * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston MA 02110-1301, USA.
  *****************************************************************************/
 
-#import <Cocoa/Cocoa.h>
+#import <Foundation/Foundation.h>
+#if TARGET_OS_IPHONE
+# import <CoreGraphics/CoreGraphics.h>
+#endif
 #import "VLCMedia.h"
-#import "VLCVideoView.h"
-#import "VLCVideoLayer.h"
 #import "VLCTime.h"
 #import "VLCAudio.h"
+
+#if !TARGET_OS_IPHONE
+@class VLCVideoView;
+@class VLCVideoLayer;
+#endif
 
 /* Notification Messages */
 extern NSString * VLCMediaPlayerTimeChanged;
@@ -61,33 +69,39 @@ extern NSString * VLCMediaPlayerStateToString(VLCMediaPlayerState state);
 @protocol VLCMediaPlayerDelegate
 /**
  * Sent by the default notification center whenever the player's time has changed.
- * \details Discussion The value of aNotification is always an VLCMediaPlayerTimeChanged notification. You can retrieve 
+ * \details Discussion The value of aNotification is always an VLCMediaPlayerTimeChanged notification. You can retrieve
  * the VLCMediaPlayer object in question by sending object to aNotification.
  */
 - (void)mediaPlayerTimeChanged:(NSNotification *)aNotification;
 
 /**
  * Sent by the default notification center whenever the player's state has changed.
- * \details Discussion The value of aNotification is always an VLCMediaPlayerStateChanged notification. You can retrieve 
+ * \details Discussion The value of aNotification is always an VLCMediaPlayerStateChanged notification. You can retrieve
  * the VLCMediaPlayer object in question by sending object to aNotification.
  */
 - (void)mediaPlayerStateChanged:(NSNotification *)aNotification;
 @end
 
+
 // TODO: Should we use medialist_player or our own flavor of media player?
-@interface VLCMediaPlayer : NSObject 
+@interface VLCMediaPlayer : NSObject
 {
     id delegate;                        //< Object delegate
     void * instance;                    //  Internal
     VLCMedia * media;                   //< Current media being played
     VLCTime * cachedTime;               //< Cached time of the media being played
+    VLCTime * cachedRemainingTime;      //< Cached remaining time of the media being played
     VLCMediaPlayerState cachedState;    //< Cached state of the media being played
     float position;                     //< The position of the media being played
+    id drawable;                        //< The drawable associated to this media player
+    VLCAudio *audio;
 }
 
+#if !TARGET_OS_IPHONE
 /* Initializers */
 - (id)initWithVideoView:(VLCVideoView *)aVideoView;
 - (id)initWithVideoLayer:(VLCVideoLayer *)aVideoLayer;
+#endif
 
 /* Properties */
 - (void)setDelegate:(id)value;
@@ -96,21 +110,18 @@ extern NSString * VLCMediaPlayerStateToString(VLCMediaPlayerState state);
 /* Video View Options */
 // TODO: Should be it's own object?
 
+#if !TARGET_OS_IPHONE
 - (void)setVideoView:(VLCVideoView *)aVideoView;
 - (void)setVideoLayer:(VLCVideoLayer *)aVideoLayer;
+#endif
 
 @property (retain) id drawable; /* The videoView or videoLayer */
 
 - (void)setVideoAspectRatio:(char *)value;
 - (char *)videoAspectRatio;
-- (void)setVideoSubTitles:(int)value;
-- (int)videoSubTitles;
 
 - (void)setVideoCropGeometry:(char *)value;
 - (char *)videoCropGeometry;
-
-- (void)setVideoTeleText:(int)value;
-- (int)videoTeleText;
 
 /**
  * Take a snapshot of the current video.
@@ -127,17 +138,16 @@ extern NSString * VLCMediaPlayerStateToString(VLCMediaPlayerState state);
 /**
  * Enable or disable deinterlace filter
  *
- * \param name of deinterlace filter to use (availability depends on underlying VLC version)
- * \param enable boolean to enable or disable deinterlace filter
+ * \param name of deinterlace filter to use (availability depends on underlying VLC version), NULL to disable.
  */
-- (void)setDeinterlaceFilter: (NSString *)name enabled: (BOOL)enabled;
+- (void)setDeinterlaceFilter: (NSString *)name;
 
 @property float rate;
 
 @property (readonly) VLCAudio * audio;
 
 /* Video Information */
-- (NSSize)videoSize;
+- (CGSize)videoSize;
 - (BOOL)hasVideoOut;
 - (float)framesPerSecond;
 
@@ -147,23 +157,79 @@ extern NSString * VLCMediaPlayerStateToString(VLCMediaPlayerState state);
  */
 - (void)setTime:(VLCTime *)value;
 
-/** 
+/**
  * Returns the current position (or time) of the feed.
  * \return VLCTIme object with current time.
  */
 - (VLCTime *)time;
 
-- (void)setChapter:(int)value;
-- (int)chapter;
-- (int)countOfChapters;
+@property (readonly) VLCTime *remainingTime;
+@property (readonly) NSUInteger fps;
+
+/**
+ * Return the current video subtitle index
+ * \return 0 if none is set.
+ *
+ * Pass 0 to disable.
+ */
+@property (readwrite) NSUInteger currentVideoSubTitleIndex;
+
+/**
+ * Return the video subtitle tracks
+ *
+ * It includes the disabled fake track at index 0.
+ */
+- (NSArray *)videoSubTitles;
+
+/**
+ * Load and set a specific video subtitle, from a file.
+ * \param path to a file
+ * \return if the call succeed..
+ */
+- (BOOL)openVideoSubTitlesFromFile:(NSString *)path;
+
+/**
+ * Chapter selection and enumeration, it is bound
+ * to a title option.
+ */
+
+/**
+ * Return the current video subtitle index, or
+ * \return NSNotFound if none is set.
+ *
+ * To disable subtitle pass NSNotFound.
+ */
+@property (readwrite) NSUInteger currentChapterIndex;
+- (void)previousChapter;
+- (void)nextChapter;
+- (NSArray *)chaptersForTitleIndex:(NSUInteger)titleIndex;
+
+/**
+ * Title selection and enumeration
+ * \return NSNotFound if none is set.
+ */
+@property (readwrite) NSUInteger currentTitleIndex;
+- (NSArray *)titles;
 
 /* Audio Options */
-- (void)setAudioTrack:(int)value;
-- (int)audioTrack;
-- (int)countOfAudioTracks;
 
-- (void)setAudioChannel:(int)value;
-- (int)audioChannel;
+/**
+ * Return the current audio track index
+ * \return 0 if none is set.
+ *
+ * Pass 0 to disable.
+ */
+@property (readwrite) NSUInteger currentAudioTrackIndex;
+
+/**
+ * Return the audio tracks
+ *
+ * It includes the "Disable" fake track at index 0.
+ */
+- (NSArray *)audioTracks;
+
+- (void)setAudioChannel:(NSInteger)value;
+- (NSInteger)audioChannel;
 
 /* Media Options */
 - (void)setMedia:(VLCMedia *)value;
@@ -171,8 +237,8 @@ extern NSString * VLCMediaPlayerStateToString(VLCMediaPlayerState state);
 
 /* Playback Operations */
 /**
- * Plays a media resource using the currently selected media controller (or 
- * default controller.  If feed was paused then the feed resumes at the position 
+ * Plays a media resource using the currently selected media controller (or
+ * default controller.  If feed was paused then the feed resumes at the position
  * it was paused in.
  * \return A Boolean determining whether the stream was played or not.
  */
@@ -187,6 +253,11 @@ extern NSString * VLCMediaPlayerStateToString(VLCMediaPlayerState state);
  * Stop the playing.
  */
 - (void)stop;
+
+/**
+ * Advance one frame.
+ */
+- (void)gotoNextFrame;
 
 /**
  * Fast forwards through the feed at the standard 1x rate.
@@ -282,7 +353,7 @@ extern NSString * VLCMediaPlayerStateToString(VLCMediaPlayerState state);
 - (VLCMediaPlayerState)state;
 
 /**
- * Returns the receiver's position in the reading. 
+ * Returns the receiver's position in the reading.
  * \return A number between 0 and 1. indicating the position
  */
 - (float)position;

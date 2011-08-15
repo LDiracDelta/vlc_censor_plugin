@@ -1,5 +1,7 @@
-      $CONFIG \
-      --without-contrib \
+[ -z $CONTRIB_DIR ] && export CONTRIB_DIR=/usr/win32
+
+  $CONFIGURE \
+      --with-contrib="$CONTRIB_DIR" \
       --enable-update-check \
       --enable-lua \
       --enable-faad \
@@ -8,24 +10,25 @@
       --enable-twolame \
       --enable-quicktime \
       --enable-real \
-      --enable-avcodec \
+      --enable-avcodec --enable-merge-ffmpeg \
       --enable-dca \
       --enable-mpc \
       --enable-libass \
       --enable-x264 \
       --enable-schroedinger \
       --enable-realrtsp \
-      --enable-live555 --with-live555-tree=/usr/win32/live.com \
-      --enable-dvdread --with-dvdnav-config-path=/usr/win32/bin \
+      --enable-live555 \
+      --enable-dvdread \
       --enable-shout \
       --enable-goom \
-      --enable-caca --with-caca-config-path=/usr/win32/bin \
-      --enable-portaudio \
-      --enable-sdl --with-sdl-config-path=/usr/win32/bin \
+      --enable-caca \
+      --disable-portaudio \
+      --disable-sdl \
       --enable-qt4 \
-      --enable-mozilla --with-mozilla-sdk-path=/usr/win32/gecko-sdk \
-      --enable-activex \
       --enable-sse --enable-mmx \
-      --disable-cddax --disable-vcdx --disable-libcdio --disable-vcdinfo \
-      --disable-libcddb --disable-dvb --enable-zvbi --disable-telx \
-      --enable-peflags
+      --enable-libcddb \
+      --enable-zvbi --disable-telx \
+      --enable-sqlite \
+      --disable-dirac \
+      --with-peflags \
+      $CONFIGOPTS

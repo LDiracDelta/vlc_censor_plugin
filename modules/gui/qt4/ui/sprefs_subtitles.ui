@@ -7,7 +7,7 @@
    <rect>
     <x>0</x>
     <y>0</y>
-    <width>772</width>
+    <width>758</width>
     <height>446</height>
    </rect>
   </property>
@@ -23,18 +23,40 @@
      <property name="title">
       <string>On Screen Display</string>
      </property>
-     <layout class="QVBoxLayout">
-      <item>
+     <layout class="QGridLayout" name="gridLayout">
+      <item row="0" column="0">
        <widget class="QCheckBox" name="OSDBox">
         <property name="text">
          <string>Enable On Screen Display (OSD)</string>
         </property>
        </widget>
       </item>
-      <item>
+      <item row="1" column="0">
        <widget class="QCheckBox" name="OSDTitleBox">
         <property name="text">
          <string>Show media title on video start</string>
+        </property>
+       </widget>
+      </item>
+      <item row="1" column="2">
+       <widget class="QComboBox" name="OSDTitlePos"/>
+      </item>
+      <item row="1" column="1">
+       <widget class="QLabel" name="OSDTitlePosLabel">
+        <property name="sizePolicy">
+         <sizepolicy hsizetype="Maximum" vsizetype="Preferred">
+          <horstretch>0</horstretch>
+          <verstretch>0</verstretch>
+         </sizepolicy>
+        </property>
+        <property name="text">
+         <string>Position</string>
+        </property>
+        <property name="alignment">
+         <set>Qt::AlignRight|Qt::AlignTrailing|Qt::AlignVCenter</set>
+        </property>
+        <property name="buddy">
+         <cstring>OSDTitlePos</cstring>
         </property>
        </widget>
       </item>
@@ -55,6 +77,12 @@
      <layout class="QGridLayout">
       <item row="0" column="0">
        <widget class="QLabel" name="subLangLabel">
+        <property name="minimumSize">
+         <size>
+          <width>250</width>
+          <height>0</height>
+         </size>
+        </property>
         <property name="text">
          <string>Preferred subtitles language</string>
         </property>
@@ -75,6 +103,12 @@
       </item>
       <item row="1" column="0">
        <widget class="QLabel" name="encodLabel">
+        <property name="minimumSize">
+         <size>
+          <width>250</width>
+          <height>0</height>
+         </size>
+        </property>
         <property name="text">
          <string>Default encoding</string>
         </property>
@@ -89,14 +123,27 @@
    <item>
     <widget class="QGroupBox" name="groupBox">
      <property name="title">
-      <string>Display Settings</string>
+      <string>Subtitles effects</string>
      </property>
-     <layout class="QGridLayout">
-      <item row="3" column="1" colspan="2">
-       <widget class="QComboBox" name="effect"/>
+     <layout class="QGridLayout" rowstretch="0,0,0,0,0" columnstretch="0,0">
+      <item row="3" column="1">
+       <widget class="QComboBox" name="effect">
+        <property name="sizePolicy">
+         <sizepolicy hsizetype="Expanding" vsizetype="Fixed">
+          <horstretch>0</horstretch>
+          <verstretch>0</verstretch>
+         </sizepolicy>
+        </property>
+       </widget>
       </item>
       <item row="3" column="0">
        <widget class="QLabel" name="fontEffectLabel">
+        <property name="minimumSize">
+         <size>
+          <width>250</width>
+          <height>0</height>
+         </size>
+        </property>
         <property name="text">
          <string>Effect</string>
         </property>
@@ -105,11 +152,24 @@
         </property>
        </widget>
       </item>
-      <item row="2" column="1" colspan="2">
-       <widget class="QComboBox" name="fontColor"/>
+      <item row="2" column="1">
+       <widget class="QComboBox" name="fontColor">
+        <property name="sizePolicy">
+         <sizepolicy hsizetype="Expanding" vsizetype="Fixed">
+          <horstretch>0</horstretch>
+          <verstretch>0</verstretch>
+         </sizepolicy>
+        </property>
+       </widget>
       </item>
       <item row="2" column="0">
        <widget class="QLabel" name="fontColorLabel">
+        <property name="minimumSize">
+         <size>
+          <width>250</width>
+          <height>0</height>
+         </size>
+        </property>
         <property name="text">
          <string>Font color</string>
         </property>
@@ -118,11 +178,24 @@
         </property>
        </widget>
       </item>
-      <item row="1" column="1" colspan="2">
-       <widget class="QComboBox" name="fontSize"/>
+      <item row="1" column="1">
+       <widget class="QComboBox" name="fontSize">
+        <property name="sizePolicy">
+         <sizepolicy hsizetype="Expanding" vsizetype="Fixed">
+          <horstretch>0</horstretch>
+          <verstretch>0</verstretch>
+         </sizepolicy>
+        </property>
+       </widget>
       </item>
       <item row="1" column="0">
        <widget class="QLabel" name="fontSizeLabel">
+        <property name="minimumSize">
+         <size>
+          <width>250</width>
+          <height>0</height>
+         </size>
+        </property>
         <property name="text">
          <string>Font size</string>
         </property>
@@ -131,11 +204,14 @@
         </property>
        </widget>
       </item>
-      <item row="0" column="1">
-       <widget class="QFontComboBox" name="font"/>
-      </item>
       <item row="0" column="0">
        <widget class="QLabel" name="fontLabel">
+        <property name="minimumSize">
+         <size>
+          <width>250</width>
+          <height>0</height>
+         </size>
+        </property>
         <property name="text">
          <string>Font</string>
         </property>
@@ -144,8 +220,33 @@
         </property>
        </widget>
       </item>
-      <item row="4" column="1" colspan="2">
+      <item row="4" column="0">
+       <widget class="QLabel" name="subsPosLabel">
+        <property name="minimumSize">
+         <size>
+          <width>250</width>
+          <height>0</height>
+         </size>
+        </property>
+        <property name="text">
+         <string>Force subtitle position</string>
+        </property>
+        <property name="buddy">
+         <cstring>subsPosition</cstring>
+        </property>
+       </widget>
+      </item>
+      <item row="0" column="1">
+       <widget class="QFontComboBox" name="font"/>
+      </item>
+      <item row="4" column="1">
        <widget class="QSpinBox" name="subsPosition">
+        <property name="maximumSize">
+         <size>
+          <width>16777215</width>
+          <height>16777215</height>
+         </size>
+        </property>
         <property name="alignment">
          <set>Qt::AlignRight|Qt::AlignTrailing|Qt::AlignVCenter</set>
         </property>
@@ -160,16 +261,6 @@
         </property>
        </widget>
       </item>
-      <item row="4" column="0">
-       <widget class="QLabel" name="subsPosLabel">
-        <property name="text">
-         <string>Force subtitle position</string>
-        </property>
-        <property name="buddy">
-         <cstring>subsPosition</cstring>
-        </property>
-       </widget>
-      </item>
      </layout>
     </widget>
    </item>
@@ -177,12 +268,15 @@
  </widget>
  <tabstops>
   <tabstop>OSDBox</tabstop>
+  <tabstop>OSDTitleBox</tabstop>
+  <tabstop>OSDTitlePos</tabstop>
   <tabstop>preferredLanguage</tabstop>
   <tabstop>encoding</tabstop>
   <tabstop>font</tabstop>
   <tabstop>fontSize</tabstop>
   <tabstop>fontColor</tabstop>
   <tabstop>effect</tabstop>
+  <tabstop>subsPosition</tabstop>
  </tabstops>
  <resources/>
  <connections/>

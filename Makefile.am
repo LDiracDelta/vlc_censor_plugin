@@ -2,21 +2,14 @@
 # Automake targets and declarations
 ###############################################################################
 
-# Pass --quiet to make when we are not verbose.
-AM_MAKEFLAGS = $(makesilentflags_$(V))
-makesilentflags_ = $(makesilentflags__$(AM_DEFAULT_VERBOSITY))
-makesilentflags_0 = --quiet
-makesilentflags__0 = $(makesilentflags_0)
-
 # SUBDIRS stores the directories where a "make" is required when building
 # something. DIST_SUBDIRS stores the directories where nothing is built but
 # which have makefiles with distribution information.
-#  - src (libvlc) is nedeed by modules, mozilla and bindings
+#  - src (libvlc) is nedeed by modules
 #  - libs/* are needed by modules
 BASE_SUBDIRS = po compat src bin modules share doc test
-EXTRA_SUBDIRS = m4 extras/package/ipkg \
-	libs/loader libs/srtp libs/unzip \
-	projects/mozilla projects/activex
+EXTRA_SUBDIRS = m4 \
+	libs/loader libs/srtp libs/unzip
 DIST_SUBDIRS = $(BASE_SUBDIRS) $(EXTRA_SUBDIRS)
 
 SUBDIRS = po compat src
@@ -35,33 +28,53 @@ if BUILD_VLC
 SUBDIRS += bin
 endif
 SUBDIRS += modules share doc test
-if BUILD_MOZILLA
-SUBDIRS += projects/mozilla
-endif
-if BUILD_ACTIVEX
-SUBDIRS += projects/activex
-endif
 
 EXTRA_DIST = \
 	HACKING \
 	INSTALL.win32 \
-	INSTALL.wince \
 	extras/package/win32/vlc.exe.manifest \
 	extras/package/win32/libvlc.dll.manifest \
-	MAINTAINERS \
 	extras/package/macosx/README.MacOSX.rtf \
 	vlc-config.in.in \
 	extras/package/rpm/vlc.fedora.spec \
 	extras/package/rpm/vlc.altlinux.spec \
 	extras/package/win32/vlc.win32.nsi.in \
+	extras/package/win32/spad.nsi.in \
+	extras/package/win32/UAC.nsh \
+	extras/package/win32/UAC.dll \
 	extras/package/win32/languages/declaration.nsh \
+	extras/package/win32/languages/bengali.nsh \
+	extras/package/win32/languages/brazilian_portuguese.nsh \
+	extras/package/win32/languages/bulgarian.nsh \
+	extras/package/win32/languages/catalan.nsh \
+	extras/package/win32/languages/danish.nsh \
+	extras/package/win32/languages/dutch.nsh \
 	extras/package/win32/languages/english.nsh \
-	extras/package/win32/languages/french.nsh
+	extras/package/win32/languages/estonian.nsh \
+	extras/package/win32/languages/finnish.nsh \
+	extras/package/win32/languages/french.nsh \
+	extras/package/win32/languages/german.nsh \
+	extras/package/win32/languages/hungarian.nsh \
+	extras/package/win32/languages/italian.nsh \
+	extras/package/win32/languages/japanese.nsh \
+	extras/package/win32/languages/occitan.nsh \
+	extras/package/win32/languages/polish.nsh \
+	extras/package/win32/languages/punjabi.nsh \
+	extras/package/win32/languages/romanian.nsh \
+	extras/package/win32/languages/schinese.nsh \
+	extras/package/win32/languages/slovak.nsh \
+	extras/package/win32/languages/slovenian.nsh \
+	extras/package/win32/languages/sorani.nsh \
+	extras/package/win32/languages/spanish.nsh
 
-dist_noinst_SCRIPTS = bootstrap toolbox
+dist_noinst_SCRIPTS = bootstrap
 nodist_noinst_SCRIPTS = compile
 
-BUILT_SOURCES_distclean = vlc-config extras/package/win32/vlc.win32.nsi
+BUILT_SOURCES_distclean = vlc-config
+if HAVE_WIN32
+BUILT_SOURCES_distclean += \
+	extras/package/win32/vlc.win32.nsi extras/package/win32/spad.nsi
+endif
 if HAVE_DARWIN
 BUILT_SOURCES_clean = macosx-sdk
 else
@@ -74,198 +87,239 @@ SUFFIXES =
 
 DISTCHECK_CONFIGURE_FLAGS = \
 	--enable-fast-install \
+	--disable-a52 \
+	--disable-avcodec --disable-avformat \
+	--disable-postproc --disable-swscale \
 	--disable-dbus \
-	--disable-dvd --disable-mad --disable-libmpeg2 \
-	--disable-ffmpeg --disable-faad --disable-skins2 \
+	--disable-mad --disable-libmpeg2 \
+	--disable-faad --disable-skins2 \
 	--disable-live555 \
-	--disable-fribidi --disable-glx
+	--disable-fribidi --disable-glx \
+	--disable-mkv \
+	--with-kde-solid='$${datadir}/kde4/apps'
 
 ACLOCAL_AMFLAGS = -I m4
 AUTOMAKE_OPTIONS = \
-	1.9 \
+	1.11 \
 	-Wall \
 	check-news \
-	dist-bzip2 \
+	dist-xz \
 	no-dist-gzip
 #	std-options
 
 ChangeLog: Makefile.am
 	rm -f -- "$@"
 	cd doc && $(MAKE) $(AM_MAKEFLAGS) changelogs
-	ln -sf doc/ChangeLog-2009 "$@"
+	$(LN_S) -f doc/ChangeLog-2009 "$@"
 
 ###############################################################################
 # MacOS X project
 ###############################################################################
 
 EXTRA_DIST += \
-	extras/package/macosx/Resources/English.lproj/MainMenu.nib/designable.nib \
-	extras/package/macosx/Resources/English.lproj/MainMenu.nib/keyedobjects.nib \
-	extras/package/macosx/Resources/English.lproj/MediaInfo.nib/designable.nib \
-	extras/package/macosx/Resources/English.lproj/MediaInfo.nib/keyedobjects.nib \
+	extras/package/macosx/Resources/about_bg.png \
+	extras/package/macosx/Resources/add_embedded.png \
+	extras/package/macosx/Resources/add_embedded_graphite.png \
+	extras/package/macosx/Resources/dsa_pub.pem \
+	extras/package/macosx/Resources/embedded_vout.png \
 	extras/package/macosx/Resources/English.lproj/About.nib/designable.nib \
 	extras/package/macosx/Resources/English.lproj/About.nib/keyedobjects.nib \
-	extras/package/macosx/Resources/English.lproj/Open.nib/designable.nib \
-	extras/package/macosx/Resources/English.lproj/Open.nib/keyedobjects.nib \
-	extras/package/macosx/Resources/English.lproj/Preferences.nib/designable.nib \
-	extras/package/macosx/Resources/English.lproj/Preferences.nib/keyedobjects.nib \
-	extras/package/macosx/Resources/English.lproj/Wizard.nib/designable.nib \
-	extras/package/macosx/Resources/English.lproj/Wizard.nib/keyedobjects.nib \
+	extras/package/macosx/Resources/English.lproj/AudioEffects.nib/designable.nib \
+	extras/package/macosx/Resources/English.lproj/AudioEffects.nib/keyedobjects.nib \
 	extras/package/macosx/Resources/English.lproj/Bookmarks.nib/designable.nib \
 	extras/package/macosx/Resources/English.lproj/Bookmarks.nib/keyedobjects.nib \
-	extras/package/macosx/Resources/English.lproj/Extended.nib/designable.nib \
-	extras/package/macosx/Resources/English.lproj/Extended.nib/keyedobjects.nib \
 	extras/package/macosx/Resources/English.lproj/CoreDialogs.nib/designable.nib \
 	extras/package/macosx/Resources/English.lproj/CoreDialogs.nib/keyedobjects.nib \
 	extras/package/macosx/Resources/English.lproj/ErrorPanel.nib/designable.nib \
 	extras/package/macosx/Resources/English.lproj/ErrorPanel.nib/keyedobjects.nib \
 	extras/package/macosx/Resources/English.lproj/InfoPlist.strings.in \
-	extras/package/macosx/Resources/dsa_pub.pem \
-	extras/package/macosx/Resources/aiff.icns \
-	extras/package/macosx/Resources/audio.icns \
-	extras/package/macosx/Resources/avi.icns \
-	extras/package/macosx/Resources/flv.icns \
-	extras/package/macosx/Resources/generic.icns \
-	extras/package/macosx/Resources/m4a.icns \
-	extras/package/macosx/Resources/m4v.icns \
-	extras/package/macosx/Resources/mkv.icns \
-	extras/package/macosx/Resources/mov.icns \
-	extras/package/macosx/Resources/movie.icns \
-	extras/package/macosx/Resources/mp3.icns \
-	extras/package/macosx/Resources/mpeg.icns \
-	extras/package/macosx/Resources/ogg.icns \
-	extras/package/macosx/Resources/playlist.icns \
-	extras/package/macosx/Resources/rm.icns \
-	extras/package/macosx/Resources/subtitle.icns \
-	extras/package/macosx/Resources/vob.icns \
-	extras/package/macosx/Resources/wav.icns \
-	extras/package/macosx/Resources/vlc.icns \
-	extras/package/macosx/Resources/wma.icns \
-	extras/package/macosx/Resources/wmv.icns \
-	extras/package/macosx/Resources/pause.png \
-	extras/package/macosx/Resources/pause_blue.png \
-	extras/package/macosx/Resources/play.png \
-	extras/package/macosx/Resources/play_blue.png \
-	extras/package/macosx/Resources/stop.png \
-	extras/package/macosx/Resources/stop_blue.png \
-	extras/package/macosx/Resources/display_left.png \
-	extras/package/macosx/Resources/display_middle.png \
-	extras/package/macosx/Resources/display_right.png \
-	extras/package/macosx/Resources/display_slider.png \
-	extras/package/macosx/Resources/display_track.png \
-	extras/package/macosx/Resources/equalizerdrawer_active.png \
-	extras/package/macosx/Resources/equalizerdrawer_blue.png \
-	extras/package/macosx/Resources/fullscreen_active.png \
-	extras/package/macosx/Resources/fullscreen_blue.png \
-	extras/package/macosx/Resources/next_active.png \
-	extras/package/macosx/Resources/next_blue.png \
-	extras/package/macosx/Resources/playlistdrawer_active.png \
-	extras/package/macosx/Resources/playlistdrawer_blue.png \
-	extras/package/macosx/Resources/previous_active.png \
-	extras/package/macosx/Resources/previous_blue.png \
-	extras/package/macosx/Resources/skip_forward_active.png \
-	extras/package/macosx/Resources/skip_forward_blue.png \
-	extras/package/macosx/Resources/skip_previous_active.png \
-	extras/package/macosx/Resources/skip_previous_blue.png \
-	extras/package/macosx/Resources/volume_high.png \
-	extras/package/macosx/Resources/volume_low.png \
-	extras/package/macosx/Resources/volumeslider_blue.png \
-	extras/package/macosx/Resources/volumeslider_normal.png \
-	extras/package/macosx/Resources/volumetrack.png \
-	extras/package/macosx/Resources/about_bg.png \
-	extras/package/macosx/Resources/skip_forward_active_embedded.png \
-	extras/package/macosx/Resources/play_embedded.png \
+	extras/package/macosx/Resources/English.lproj/MainMenu.nib/designable.nib \
+	extras/package/macosx/Resources/English.lproj/MainMenu.nib/keyedobjects.nib \
+	extras/package/macosx/Resources/English.lproj/MediaInfo.nib/designable.nib \
+	extras/package/macosx/Resources/English.lproj/MediaInfo.nib/keyedobjects.nib \
+	extras/package/macosx/Resources/English.lproj/Open.nib/designable.nib \
+	extras/package/macosx/Resources/English.lproj/Open.nib/keyedobjects.nib \
+	extras/package/macosx/Resources/English.lproj/Preferences.nib/designable.nib \
+	extras/package/macosx/Resources/English.lproj/Preferences.nib/keyedobjects.nib \
+	extras/package/macosx/Resources/English.lproj/SyncTracks.nib/designable.nib \
+	extras/package/macosx/Resources/English.lproj/SyncTracks.nib/keyedobjects.nib \
+	extras/package/macosx/Resources/English.lproj/VideoEffects.nib/designable.nib \
+	extras/package/macosx/Resources/English.lproj/VideoEffects.nib/keyedobjects.nib \
+	extras/package/macosx/Resources/English.lproj/Wizard.nib/designable.nib \
+	extras/package/macosx/Resources/English.lproj/Wizard.nib/keyedobjects.nib \
+	extras/package/macosx/Resources/fspanel/fs_background.png \
+	extras/package/macosx/Resources/fspanel/fs_exit_fullscreen.png \
+	extras/package/macosx/Resources/fspanel/fs_exit_fullscreen_highlight.png \
+	extras/package/macosx/Resources/fspanel/fs_forward.png \
+	extras/package/macosx/Resources/fspanel/fs_forward_highlight.png \
+	extras/package/macosx/Resources/fspanel/fs_pause.png \
+	extras/package/macosx/Resources/fspanel/fs_pause_highlight.png \
+	extras/package/macosx/Resources/fspanel/fs_play.png \
+	extras/package/macosx/Resources/fspanel/fs_play_highlight.png \
+	extras/package/macosx/Resources/fspanel/fs_rewind.png \
+	extras/package/macosx/Resources/fspanel/fs_rewind_highlight.png \
+	extras/package/macosx/Resources/fspanel/fs_skip_next.png \
+	extras/package/macosx/Resources/fspanel/fs_skip_next_highlight.png \
+	extras/package/macosx/Resources/fspanel/fs_skip_previous.png \
+	extras/package/macosx/Resources/fspanel/fs_skip_previous_highlight.png \
+	extras/package/macosx/Resources/fspanel/fs_stop.png \
+	extras/package/macosx/Resources/fspanel/fs_stop_highlight.png \
+	extras/package/macosx/Resources/fspanel/fs_time_slider.png \
+	extras/package/macosx/Resources/fspanel/fs_time_slider_knob.png \
+	extras/package/macosx/Resources/fspanel/fs_time_slider_knob_highlight.png \
+	extras/package/macosx/Resources/fspanel/fs_volume_max.png \
+	extras/package/macosx/Resources/fspanel/fs_volume_max_highlight.png \
+	extras/package/macosx/Resources/fspanel/fs_volume_mute.png \
+	extras/package/macosx/Resources/fspanel/fs_volume_mute_highlight.png \
+	extras/package/macosx/Resources/fspanel/fs_volume_slider_bar.png \
+	extras/package/macosx/Resources/fspanel/fs_volume_slider_knob.png \
+	extras/package/macosx/Resources/fspanel/fs_volume_slider_knob_highlight.png \
+	extras/package/macosx/Resources/icons/aiff.icns \
+	extras/package/macosx/Resources/icons/audio.icns \
+	extras/package/macosx/Resources/icons/avi.icns \
+	extras/package/macosx/Resources/icons/flv.icns \
+	extras/package/macosx/Resources/icons/generic.icns \
+	extras/package/macosx/Resources/icons/m4a.icns \
+	extras/package/macosx/Resources/icons/m4v.icns \
+	extras/package/macosx/Resources/icons/mkv.icns \
+	extras/package/macosx/Resources/icons/mov.icns \
+	extras/package/macosx/Resources/icons/movie.icns \
+	extras/package/macosx/Resources/icons/mp3.icns \
+	extras/package/macosx/Resources/icons/mpeg.icns \
+	extras/package/macosx/Resources/icons/ogg.icns \
+	extras/package/macosx/Resources/icons/playlist.icns \
+	extras/package/macosx/Resources/icons/rm.icns \
+	extras/package/macosx/Resources/icons/subtitle.icns \
+	extras/package/macosx/Resources/icons/vlc.icns \
+	extras/package/macosx/Resources/icons/vob.icns \
+	extras/package/macosx/Resources/icons/wav.icns \
+	extras/package/macosx/Resources/icons/wma.icns \
+	extras/package/macosx/Resources/icons/wmv.icns \
+	extras/package/macosx/Resources/mainwindow/back-pressed.png \
+	extras/package/macosx/Resources/mainwindow/back.png \
+	extras/package/macosx/Resources/mainwindow/bottom-background.png \
+	extras/package/macosx/Resources/mainwindow/bottom-bar-mini.png \
+	extras/package/macosx/Resources/mainwindow/dropzone-background.png \
+	extras/package/macosx/Resources/mainwindow/dropzone.png \
+	extras/package/macosx/Resources/mainwindow/effects-double-buttons-blue.png \
+	extras/package/macosx/Resources/mainwindow/effects-double-buttons-pressed.png \
+	extras/package/macosx/Resources/mainwindow/effects-double-buttons.png \
+	extras/package/macosx/Resources/mainwindow/effects-one-button-blue.png \
+	extras/package/macosx/Resources/mainwindow/effects-one-button.png \
+	extras/package/macosx/Resources/mainwindow/forward-pressed.png \
+	extras/package/macosx/Resources/mainwindow/forward.png \
+	extras/package/macosx/Resources/mainwindow/fullscreen-double-buttons-pressed.png \
+	extras/package/macosx/Resources/mainwindow/fullscreen-double-buttons.png \
+	extras/package/macosx/Resources/mainwindow/mini-progressbar-fill-left.png \
+	extras/package/macosx/Resources/mainwindow/mini-progressbar-fill-middle.png \
+	extras/package/macosx/Resources/mainwindow/mini-progressbar-fill-right.png \
+	extras/package/macosx/Resources/mainwindow/mini-progressbar-knob.png \
+	extras/package/macosx/Resources/mainwindow/mini-progressbar-wrapper-left.png \
+	extras/package/macosx/Resources/mainwindow/mini-progressbar-wrapper-middle.png \
+	extras/package/macosx/Resources/mainwindow/mini-progressbar-wrapper-right.png \
+	extras/package/macosx/Resources/mainwindow/pause-pressed.png \
+	extras/package/macosx/Resources/mainwindow/pause.png \
+	extras/package/macosx/Resources/mainwindow/play-pressed.png \
+	extras/package/macosx/Resources/mainwindow/play.png \
+	extras/package/macosx/Resources/mainwindow/playlist-blue.png \
+	extras/package/macosx/Resources/mainwindow/playlist-pressed.png \
+	extras/package/macosx/Resources/mainwindow/playlist.png \
+	extras/package/macosx/Resources/mainwindow/progression-fill-left.png \
+	extras/package/macosx/Resources/mainwindow/progression-fill-middle.png \
+	extras/package/macosx/Resources/mainwindow/progression-fill-right.png \
+	extras/package/macosx/Resources/mainwindow/progression-knob.png \
+	extras/package/macosx/Resources/mainwindow/progression-track-wrapper-left.png \
+	extras/package/macosx/Resources/mainwindow/progression-track-wrapper-middle.png \
+	extras/package/macosx/Resources/mainwindow/progression-track-wrapper-right.png \
+	extras/package/macosx/Resources/mainwindow/repeat-all-pressed.png \
+	extras/package/macosx/Resources/mainwindow/repeat-all.png \
+	extras/package/macosx/Resources/mainwindow/repeat-one-pressed.png \
+	extras/package/macosx/Resources/mainwindow/repeat-one.png \
+	extras/package/macosx/Resources/mainwindow/repeat-pressed.png \
+	extras/package/macosx/Resources/mainwindow/repeat.png \
+	extras/package/macosx/Resources/mainwindow/shuffle-blue-pressed.png \
+	extras/package/macosx/Resources/mainwindow/shuffle-on.png \
+	extras/package/macosx/Resources/mainwindow/shuffle-pressed.png \
+	extras/package/macosx/Resources/mainwindow/shuffle.png \
+	extras/package/macosx/Resources/mainwindow/stop-pressed.png \
+	extras/package/macosx/Resources/mainwindow/stop.png \
+	extras/package/macosx/Resources/mainwindow/volume-high.png \
+	extras/package/macosx/Resources/mainwindow/volume-low.png \
+	extras/package/macosx/Resources/mainwindow/volume-slider-knob.png \
+	extras/package/macosx/Resources/mainwindow/volume-slider-track.png \
+	extras/package/macosx/Resources/mainwindow_dark/back-pressed_dark.png \
+	extras/package/macosx/Resources/mainwindow_dark/back_dark.png \
+	extras/package/macosx/Resources/mainwindow_dark/bottom-background_dark.png \
+	extras/package/macosx/Resources/mainwindow_dark/effects-double-buttons-blue_dark.png \
+	extras/package/macosx/Resources/mainwindow_dark/effects-double-buttons-pressed_dark.png \
+	extras/package/macosx/Resources/mainwindow_dark/effects-double-buttons_dark.png \
+	extras/package/macosx/Resources/mainwindow_dark/effects-one-button-blue_dark.png \
+	extras/package/macosx/Resources/mainwindow_dark/effects-one-button_dark.png \
+	extras/package/macosx/Resources/mainwindow_dark/forward-pressed_dark.png \
+	extras/package/macosx/Resources/mainwindow_dark/forward_dark.png \
+	extras/package/macosx/Resources/mainwindow_dark/fullscreen-double-buttons-pressed_dark.png \
+	extras/package/macosx/Resources/mainwindow_dark/fullscreen-double-buttons_dark.png \
+	extras/package/macosx/Resources/mainwindow_dark/pause-pressed_dark.png \
+	extras/package/macosx/Resources/mainwindow_dark/pause_dark.png \
+	extras/package/macosx/Resources/mainwindow_dark/play-pressed_dark.png \
+	extras/package/macosx/Resources/mainwindow_dark/play_dark.png \
+	extras/package/macosx/Resources/mainwindow_dark/playlist-blue-pressed_dark.png \
+	extras/package/macosx/Resources/mainwindow_dark/playlist-blue_dark.png \
+	extras/package/macosx/Resources/mainwindow_dark/playlist-pressed_dark.png \
+	extras/package/macosx/Resources/mainwindow_dark/playlist_dark.png \
+	extras/package/macosx/Resources/mainwindow_dark/progressbar-fill-left_dark.png \
+	extras/package/macosx/Resources/mainwindow_dark/progressbar-fill-middle_dark.png \
+	extras/package/macosx/Resources/mainwindow_dark/progressbar-fill-right_dark.png \
+	extras/package/macosx/Resources/mainwindow_dark/progression-knob_dark.png \
+	extras/package/macosx/Resources/mainwindow_dark/progression-track-wrapper-left_dark.png \
+	extras/package/macosx/Resources/mainwindow_dark/progression-track-wrapper-middle_dark.png \
+	extras/package/macosx/Resources/mainwindow_dark/progression-track-wrapper-right_dark.png \
+	extras/package/macosx/Resources/mainwindow_dark/repeat-all-blue-pressed_dark.png \
+	extras/package/macosx/Resources/mainwindow_dark/repeat-all-blue_dark.png \
+	extras/package/macosx/Resources/mainwindow_dark/repeat-one-blue-pressed_dark.png \
+	extras/package/macosx/Resources/mainwindow_dark/repeat-one-blue_dark.png \
+	extras/package/macosx/Resources/mainwindow_dark/repeat-pressed_dark.png \
+	extras/package/macosx/Resources/mainwindow_dark/repeat_dark.png \
+	extras/package/macosx/Resources/mainwindow_dark/shuffle-blue-pressed_dark.png \
+	extras/package/macosx/Resources/mainwindow_dark/shuffle-blue_dark.png \
+	extras/package/macosx/Resources/mainwindow_dark/shuffle-pressed_dark.png \
+	extras/package/macosx/Resources/mainwindow_dark/shuffle_dark.png \
+	extras/package/macosx/Resources/mainwindow_dark/stop-pressed_dark.png \
+	extras/package/macosx/Resources/mainwindow_dark/stop_dark.png \
+	extras/package/macosx/Resources/mainwindow_dark/volume-high_dark.png \
+	extras/package/macosx/Resources/mainwindow_dark/volume-low_dark.png \
+	extras/package/macosx/Resources/mainwindow_dark/volume-slider-knob_dark.png \
+	extras/package/macosx/Resources/mainwindow_dark/volume-slider-track_dark.png \
+	extras/package/macosx/Resources/noart.png \
 	extras/package/macosx/Resources/pause_embedded.png \
-	extras/package/macosx/Resources/skip_previous_active_embedded.png \
-	extras/package/macosx/Resources/pause_embedded_blue.png \
-	extras/package/macosx/Resources/play_embedded_blue.png \
-	extras/package/macosx/Resources/skip_forward_embedded_blue.png \
-	extras/package/macosx/Resources/skip_previous_embedded_blue.png \
-	extras/package/macosx/Resources/vlc.scriptSuite \
-	extras/package/macosx/Resources/vlc.scriptTerminology \
-	extras/package/macosx/Resources/README \
-	extras/package/macosx/Resources/add_embedded.png \
-	extras/package/macosx/Resources/add_embedded_blue.png \
-	extras/package/macosx/Resources/repeat_embedded.png \
-	extras/package/macosx/Resources/repeat_embedded_blue.png \
-	extras/package/macosx/Resources/repeat_single_embedded_blue.png \
-	extras/package/macosx/Resources/shuffle_embedded.png \
-	extras/package/macosx/Resources/shuffle_embedded_blue.png \
-	extras/package/macosx/Resources/fs_volume_slider_knob_highlight.png \
-	extras/package/macosx/Resources/fs_volume_slider_knob.png \
-	extras/package/macosx/Resources/fs_volume_slider_bar.png \
-	extras/package/macosx/Resources/fs_volume_mute_highlight.png \
-	extras/package/macosx/Resources/fs_volume_mute.png \
-	extras/package/macosx/Resources/fs_volume_max_highlight.png \
-	extras/package/macosx/Resources/fs_volume_max.png \
-	extras/package/macosx/Resources/fs_time_slider_knob_highlight.png \
-	extras/package/macosx/Resources/fs_time_slider_knob.png \
-	extras/package/macosx/Resources/fs_time_slider.png \
-	extras/package/macosx/Resources/fs_stop_highlight.png \
-	extras/package/macosx/Resources/fs_stop.png \
-	extras/package/macosx/Resources/fs_skip_previous_highlight.png \
-	extras/package/macosx/Resources/fs_skip_previous.png \
-	extras/package/macosx/Resources/fs_skip_next_highlight.png \
-	extras/package/macosx/Resources/fs_skip_next.png \
-	extras/package/macosx/Resources/fs_rewind_highlight.png \
-	extras/package/macosx/Resources/fs_rewind.png \
-	extras/package/macosx/Resources/fs_play_highlight.png \
-	extras/package/macosx/Resources/fs_play.png \
-	extras/package/macosx/Resources/fs_pause_highlight.png \
-	extras/package/macosx/Resources/fs_pause.png \
-	extras/package/macosx/Resources/fs_forward_highlight.png \
-	extras/package/macosx/Resources/fs_forward.png \
-	extras/package/macosx/Resources/fs_exit_fullscreen_highlight.png \
-	extras/package/macosx/Resources/fs_exit_fullscreen.png \
-	extras/package/macosx/Resources/fs_background.png \
-	extras/package/macosx/Resources/add_embedded_graphite.png \
-	extras/package/macosx/Resources/equalizerdrawer_graphite.png \
-	extras/package/macosx/Resources/fullscreen_graphite.png \
-	extras/package/macosx/Resources/next_graphite.png \
 	extras/package/macosx/Resources/pause_embedded_graphite.png \
-	extras/package/macosx/Resources/pause_graphite.png \
+	extras/package/macosx/Resources/play_embedded.png \
 	extras/package/macosx/Resources/play_embedded_graphite.png \
-	extras/package/macosx/Resources/play_graphite.png \
-	extras/package/macosx/Resources/playlistdrawer_graphite.png \
-	extras/package/macosx/Resources/previous_graphite.png \
+	extras/package/macosx/Resources/prefs/spref_cone_Audio_64.png \
+	extras/package/macosx/Resources/prefs/spref_cone_Hotkeys_64.png \
+	extras/package/macosx/Resources/prefs/spref_cone_Input_64.png \
+	extras/package/macosx/Resources/prefs/spref_cone_Interface_64.png \
+	extras/package/macosx/Resources/prefs/spref_cone_Subtitles_64.png \
+	extras/package/macosx/Resources/prefs/spref_cone_Video_64.png \
+	extras/package/macosx/Resources/README \
+	extras/package/macosx/Resources/repeat_embedded.png \
 	extras/package/macosx/Resources/repeat_embedded_graphite.png \
 	extras/package/macosx/Resources/repeat_single_embedded_graphite.png \
+	extras/package/macosx/Resources/shuffle_embedded.png \
 	extras/package/macosx/Resources/shuffle_embedded_graphite.png \
+	extras/package/macosx/Resources/sidebar-icons/document-music-playlist.png \
+	extras/package/macosx/Resources/sidebar-icons/film-cast.png \
+	extras/package/macosx/Resources/sidebar-icons/film.png \
+	extras/package/macosx/Resources/sidebar-icons/music-beam.png \
+	extras/package/macosx/Resources/sidebar-icons/network-cloud.png \
+	extras/package/macosx/Resources/sidebar-icons/picture.png \
+	extras/package/macosx/Resources/sidebar-icons/README \
+	extras/package/macosx/Resources/skip_forward_active_embedded.png \
 	extras/package/macosx/Resources/skip_forward_embedded_graphite.png \
-	extras/package/macosx/Resources/skip_forward_graphite.png \
+	extras/package/macosx/Resources/skip_previous_active_embedded.png \
 	extras/package/macosx/Resources/skip_previous_embedded_graphite.png \
-	extras/package/macosx/Resources/skip_previous_graphite.png \
-	extras/package/macosx/Resources/stop_graphite.png \
-	extras/package/macosx/Resources/volumeslider_graphite.png \
-	extras/package/macosx/Resources/backward_big_down.png \
-	extras/package/macosx/Resources/backward_big.png \
-	extras/package/macosx/Resources/eq_sm.pdf \
-	extras/package/macosx/Resources/forward_big_down.png \
-	extras/package/macosx/Resources/forward_big.png \
-	extras/package/macosx/Resources/fs_sm.pdf \
-	extras/package/macosx/Resources/list_sm.pdf \
-	extras/package/macosx/Resources/next_sm.pdf \
-	extras/package/macosx/Resources/pause_big_down.png \
-	extras/package/macosx/Resources/pause_big.png \
-	extras/package/macosx/Resources/play_big_down.png \
-	extras/package/macosx/Resources/play_big.png \
-	extras/package/macosx/Resources/prev_sm.pdf \
-	extras/package/macosx/Resources/sidebarAdd.png \
-	extras/package/macosx/Resources/sidebarRepeat.png \
-	extras/package/macosx/Resources/sidebarRepeatOn.png \
-	extras/package/macosx/Resources/sidebarRepeatOneOn.png \
-	extras/package/macosx/Resources/sidebarResizeWidget.png \
-	extras/package/macosx/Resources/sidebarShuffle.png \
-	extras/package/macosx/Resources/sidebarShuffleOn.png \
-	extras/package/macosx/Resources/sidebarStatusAreaBackground.png \
-	extras/package/macosx/Resources/stop_sm.pdf \
-	extras/package/macosx/Resources/noart.png \
-	extras/package/macosx/Resources/spref_cone_Audio_64.png \
-	extras/package/macosx/Resources/spref_cone_Hotkeys_64.png \
-	extras/package/macosx/Resources/spref_cone_Input_64.png \
-	extras/package/macosx/Resources/spref_cone_Interface_64.png \
-	extras/package/macosx/Resources/spref_cone_Subtitles_64.png \
-	extras/package/macosx/Resources/spref_cone_Video_64.png \
+	extras/package/macosx/Resources/vlc.scriptSuite \
+	extras/package/macosx/Resources/vlc.scriptTerminology \
 	extras/package/macosx/fullscreen_panel.svg \
 	extras/package/macosx/ub.sh \
 	extras/package/macosx/vlc.xcodeproj/project.pbxproj \
@@ -276,10 +330,6 @@ EXTRA_DIST += \
 	extras/package/macosx/Delete_Preferences.app/Contents/Resources/applet.icns \
 	extras/package/macosx/Delete_Preferences.app/Contents/Resources/applet.rsrc \
 	extras/package/macosx/Delete_Preferences.app/Contents/Resources/Scripts/main.scpt \
-	extras/package/macosx/plugin/Info.plist.in \
-	extras/package/macosx/plugin/InstallerInfo.plist.in \
-	extras/package/macosx/plugin/InstallerDescription.plist \
-	extras/package/macosx/plugin/pbdevelopment.plist \
 	extras/package/macosx/eyetvplugin/EyeTVPluginDefs.h \
 	extras/package/macosx/eyetvplugin/Info.plist \
 	extras/package/macosx/eyetvplugin/eyetvplugin.c \
@@ -301,10 +351,14 @@ EXTRA_DIST += \
 	extras/analyser/valgrind.suppressions \
 	extras/buildsystem/make.pl \
 	extras/misc/mpris.py \
-	extras/misc/mpris.glade
+	extras/misc/mpris.xml
 
-dist-hook:
-	distdir=$(distdir) srcdir=$(srcdir) $(SHELL) $(srcdir)/toolbox --dist-contrib
+###############################################################################
+# Scripts for building dependencies.
+##############################################################################
+EXTRA_DIST += \
+	contrib/bootstrap \
+	contrib/src/
 
 ###############################################################################
 # Building libvlc
@@ -333,43 +387,13 @@ libcompat:
 libvlc: libcompat
 	cd src && $(MAKE) $(AM_MAKEFLAGS) libvlc.la
 
-core: libvlc
-	cd bin && $(MAKE) $(AM_MAKEFLAGS) vlc$(EXEEXT)
+core: libvlc vlc$(EXEEXT)
+	cd bin && $(MAKE) $(AM_MAKEFLAGS) vlc$(EXEEXT) vlc-static$(EXEEXT)
 
 doc:
 	cd doc && $(MAKE) $(AM_MAKEFLAGS) doc
 
 .PHONY: libvlc core doc
-
-#To get some nice output
-nice:
-	$(top_builddir)/compile
-
-if HAVE_BEOS
-noinst_DATA = vlc-bundle
-vlc-bundle: vlc
-	rm -Rf $(top_builddir)/vlc-bundle ; mkdir -p $(top_builddir)/vlc-bundle
-	cp $(top_builddir)/vlc $(top_builddir)/vlc-bundle/
-	xres -o $(top_builddir)/vlc-bundle/vlc $(srcdir)/share/vlc_beos.rsrc
-	for i in "" `$(VLC_CONFIG) --target plugin` ; do \
-	  if test -n "$$i" ; then \
-	    mkdir -p $(top_builddir)/vlc-bundle/plugins ; \
-	    cp "$$i$(LIBEXT)" $(top_builddir)/vlc-bundle/plugins/ ; \
-	  fi ; \
-	done
-	if test -d $(top_builddir)/extras/contrib/vlc-lib ; then \
-	  mkdir -p $(top_builddir)/vlc-bundle/lib ; \
-	  for i in $(top_builddir)/extras/contrib/vlc-lib/*.so ; do \
-	    cp $$i $(top_builddir)/vlc-bundle/lib/ ; \
-	  done ; \
-	fi
-	cat $(top_srcdir)/po/LINGUAS | while read i; do \
-	  mkdir -p "$(top_builddir)/vlc-bundle/share/locale/$$i/LC_MESSAGES" ; \
-	  cp "$(top_builddir)/po/$$i.gmo" \
-	    "$(top_builddir)/vlc-bundle/share/locale/$$i/LC_MESSAGES/vlc.mo" || true ; \
-	done
-	find $(top_builddir)/vlc-bundle -type f -exec mimeset -f "{}" \;
-endif
 
 ###############################################################################
 # Building aliases
@@ -385,42 +409,40 @@ dist_noinst_SCRIPTS += make-alias
 MKALIAS = bindir="$(bindir)" transform="$(transform)" program_prefix="$(program_prefix)" program_suffix="$(program_suffix)" $(top_srcdir)/make-alias $@
 
 cvlc: make-alias Makefile
-	$(MKALIAS) dummy
+	$(AM_V_GEN)$(MKALIAS) dummy
 
 rvlc: make-alias Makefile
-	$(MKALIAS) rc
+	$(AM_V_GEN)$(MKALIAS) rc
 
 svlc: make-alias Makefile
-	$(MKALIAS) skins2
+	$(AM_V_GEN)$(MKALIAS) skins2
 
 qvlc: make-alias Makefile
-	$(MKALIAS) qt4
+	$(AM_V_GEN)$(MKALIAS) qt4
 
 nvlc: make-alias Makefile
-	$(MKALIAS) ncurses
+	$(AM_V_GEN)$(MKALIAS) ncurses
 
 mvlc: make-alias Makefile
-	$(MKALIAS) maemo
+	$(AM_V_GEN)$(MKALIAS) maemo
 
 if BUILD_VLC
 noinst_SCRIPTS += vlc$(EXEEXT)
 endif
 
 vlc$(EXEEXT):
-	ln -sf bin/vlc-static$(EXEEXT) vlc$(EXEEXT)
+	$(AM_V_GEN)$(LN_S) -f bin/vlc-static$(EXEEXT) vlc$(EXEEXT)
 
 if HAVE_DARWIN
-if BUILD_VLC
+if BUILD_MACOSX_VLC_APP
 # Create the MacOS X app
 noinst_DATA = VLC.app
 endif
 endif
 
 silentstd = $(silentstd_$(V))
-silentstd_ = $(silentstd__$(AM_DEFAULT_VERBOSITY))
+silentstd_ = $(silentstd_$(AM_DEFAULT_VERBOSITY))
 silentstd_0 = 2>&1 >/dev/null
-# '__' prefix trick for old automake version.
-silentstd__0 = $(silentstd_0)
 
 # VLC-release.app for packaging and giving it to your friends
 # use package-macosx to get a nice dmg
@@ -432,7 +454,7 @@ VLC-release.app: vlc
 	for i in vlc.xcodeproj Resources README.MacOSX.rtf ; do \
 	  cp -R $(srcdir)/extras/package/macosx/$$i $(top_builddir)/tmp/extras/package/macosx/; \
 	done
-	REVISION=`(git describe --always || echo exported)` && \
+	REVISION=`(git --git-dir=$(srcdir)/.git describe --always || echo exported)` && \
 	cat $(top_builddir)/extras/package/macosx/Info.plist | \
 	sed "s/#REVISION#/$$REVISION/g" > $(top_builddir)/tmp/extras/package/macosx/Info.plist
 	cp -R $(top_builddir)/extras/package/macosx/Resources $(top_builddir)/tmp/extras/package/macosx/
@@ -440,7 +462,11 @@ VLC-release.app: vlc
 	  cp "$(srcdir)/$$i" $(top_builddir)/tmp; \
 	done
 	mkdir -p $(top_builddir)/tmp/extras/contrib/Sparkle
-	cp -R $(top_srcdir)/extras/contrib/Sparkle/Sparkle.framework $(top_builddir)/tmp/extras/contrib/Sparkle
+	cp -R $(CONTRIB_DIR)/Sparkle/Sparkle.framework $(top_builddir)/tmp/extras/contrib/Sparkle
+	mkdir -p $(top_builddir)/tmp/extras/contrib/BGHUDAppKit
+	cp -R $(CONTRIB_DIR)/BGHUDAppKit/BGHUDAppKit.framework $(top_builddir)/tmp/extras/contrib/BGHUDAppKit
+	mkdir -p $(top_builddir)/tmp/extras/contrib/Growl
+	cp -R $(CONTRIB_DIR)/Growl/Growl.framework $(top_builddir)/tmp/extras/contrib/Growl
 	mkdir -p $(top_builddir)/tmp/modules/audio_output
 	mkdir -p $(top_builddir)/tmp/modules/gui/macosx
 	for i in \
@@ -452,8 +478,6 @@ VLC-release.app: vlc
 	    applescript.m \
 	    controls.h \
 	    controls.m \
-	    equalizer.h \
-	    equalizer.m \
 	    intf.h \
 	    intf.m \
 	    macosx.m \
@@ -477,8 +501,6 @@ VLC-release.app: vlc
 	    voutgl.m \
 	    wizard.h \
 	    wizard.m \
-	    extended.h \
-	    extended.m \
 	    bookmarks.h \
 	    bookmarks.m \
 	    coredialogs.h \
@@ -492,9 +514,9 @@ VLC-release.app: vlc
              $(top_builddir)/tmp/modules/gui/macosx; \
 	done
 	$(AM_V_GEN)cd $(top_builddir)/tmp/extras/package/macosx && \
-        xcodebuild -target vlc $(silentstd) && \
+	xcodebuild -target vlc SYMROOT=../../../build DSTROOT=../../../build $(silentstd) && \
 	cd ../../../../ && \
-	cp -R $(top_builddir)/tmp/extras/package/macosx/build/Default/VLC.bundle $(top_builddir)/VLC-release.app; \
+	cp -R $(top_builddir)/tmp/build/Default/VLC.bundle $(top_builddir)/VLC-release.app; \
 	rm -Rf $(top_builddir)/tmp
 	$(INSTALL) -d $(top_builddir)/VLC-release.app/Contents/MacOS
 	PRODUCT="VLC-release.app" ACTION="release-makefile" src_dir=$(srcdir) build_dir=$(top_builddir) sh $(srcdir)/projects/macosx/framework/Pre-Compile.sh
@@ -538,39 +560,20 @@ VLC-release.app: vlc
 	for i in $(srcdir)/share/lua/http/requests/*.* ; do \
 	  $(INSTALL) -m 644 $${i} $(top_builddir)/VLC-release.app/Contents/MacOS/share/lua/http/requests/`basename $${i}` ; \
 	done
-	$(INSTALL) -m 644 $(srcdir)/share/lua/http/requests/readme $(top_builddir)/VLC-release.app/Contents/MacOS/share/lua/http/requests/readme.txt
-	$(INSTALL) -d $(top_builddir)/VLC-release.app/Contents/MacOS/share/http/dialogs
-	$(INSTALL) -d $(top_builddir)/VLC-release.app/Contents/MacOS/share/http/js
-	$(INSTALL) -d $(top_builddir)/VLC-release.app/Contents/MacOS/share/http/images
-	$(INSTALL) -d $(top_builddir)/VLC-release.app/Contents/MacOS/share/http/requests
-	$(INSTALL) -m 644 $(srcdir)/share/http/.hosts $(top_builddir)/VLC-release.app/Contents/MacOS/share/http/.hosts
-	for i in $(srcdir)/share/http/*.* ; do \
-	  $(INSTALL) -m 644 $${i} $(top_builddir)/VLC-release.app/Contents/MacOS/share/http/`basename $${i}` ; \
-	done
-	for i in $(srcdir)/share/http/dialogs/* ; do \
-	  $(INSTALL) -m 644 $${i} $(top_builddir)/VLC-release.app/Contents/MacOS/share/http/dialogs/`basename $${i}` ; \
-	done
-	for i in $(srcdir)/share/http/js/*.* ; do \
-	  $(INSTALL) -m 644 $${i} $(top_builddir)/VLC-release.app/Contents/MacOS/share/http/js/`basename $${i}` ; \
-	done
-	for i in $(srcdir)/share/http/images/*.* ; do \
-	  $(INSTALL) -m 644 $${i} $(top_builddir)/VLC-release.app/Contents/MacOS/share/http/images/`basename $${i}` ; \
-	done
-	for i in $(srcdir)/share/http/requests/*.* ; do \
-	  $(INSTALL) -m 644 $${i} $(top_builddir)/VLC-release.app/Contents/MacOS/share/http/requests/`basename $${i}` ; \
-	done
-	$(INSTALL) -m 644 $(srcdir)/share/http/requests/readme $(top_builddir)/VLC-release.app/Contents/MacOS/share/http/requests/readme.txt
+	$(INSTALL) -m 644 $(srcdir)/share/lua/http/requests/README.txt $(top_builddir)/VLC-release.app/Contents/MacOS/share/lua/http/requests/README.txt
+	$(INSTALL) -m 644 $(srcdir)/share/vlc512x512.png $(top_builddir)/VLC-release.app/Contents/MacOS/share/vlc512x512.png
 	$(INSTALL) -d $(top_builddir)/VLC-release.app/Contents/MacOS/share/locale
 	cat $(top_srcdir)/po/LINGUAS | while read i; do \
 	  $(INSTALL) -d $(top_builddir)/VLC-release.app/Contents/MacOS/share/locale/$${i}/LC_MESSAGES ; \
 	  $(INSTALL) $(srcdir)/po/$${i}.gmo $(top_builddir)/VLC-release.app/Contents/MacOS/share/locale/$${i}/LC_MESSAGES/vlc.mo || true ; \
 	  mkdir -p $(top_builddir)/VLC-release.app/Contents/Resources/$${i}.lproj ; \
-	  ln -sf ../English.lproj/InfoPlist.strings \
+	  $(LN_S) -f ../English.lproj/InfoPlist.strings \
 	      $(top_builddir)/VLC-release.app/Contents/Resources/$${i}.lproj ; \
-	  ln -sf ../English.lproj/MainMenu.nib \
+	  $(LN_S) -f ../English.lproj/MainMenu.nib \
 	      $(top_builddir)/VLC-release.app/Contents/Resources/$${i}.lproj ; \
 	done
 	printf "APPLVLC#" >| $(top_builddir)/VLC-release.app/Contents/PkgInfo
+	rm -Rf $(top_builddir)/VLC-release.app/Contents/Frameworks/BGHUDAppKit.framework/Resources/
 	find $(top_builddir)/VLC-release.app/Contents/Resources/English.lproj -name designable.nib -delete;
 	find $(top_builddir)/VLC-release.app -type d -exec chmod ugo+rx '{}' \;
 	find $(top_builddir)/VLC-release.app -type f -exec chmod ugo+r '{}' \;
@@ -585,7 +588,7 @@ VLC.app: vlc $(top_builddir)/src/.libs/libvlccore.dylib $(top_builddir)/src/.lib
 	for i in vlc.xcodeproj Resources README.MacOSX.rtf; do \
 	  cp -R $(srcdir)/extras/package/macosx/$$i $(top_builddir)/tmp/extras/package/macosx/; \
 	done
-	REVISION=`(git describe --always || echo exported)` && \
+	REVISION=`(git --git-dir=$(srcdir)/.git describe --always || echo exported)` && \
 	cat $(top_builddir)/extras/package/macosx/Info.plist | \
 	sed "s/#REVISION#/$$REVISION/g" > $(top_builddir)/tmp/extras/package/macosx/Info.plist
 	cp -R $(top_builddir)/extras/package/macosx/Resources $(top_builddir)/tmp/extras/package/macosx/
@@ -593,7 +596,11 @@ VLC.app: vlc $(top_builddir)/src/.libs/libvlccore.dylib $(top_builddir)/src/.lib
 	  cp "$(srcdir)/$$i" $(top_builddir)/tmp; \
 	done
 	mkdir -p $(top_builddir)/tmp/extras/contrib/Sparkle
-	cp -R $(top_srcdir)/extras/contrib/Sparkle/Sparkle.framework $(top_builddir)/tmp/extras/contrib/Sparkle
+	cp -R $(CONTRIB_DIR)/Sparkle/Sparkle.framework $(top_builddir)/tmp/extras/contrib/Sparkle
+	mkdir -p $(top_builddir)/tmp/extras/contrib/BGHUDAppKit
+	cp -R $(CONTRIB_DIR)/BGHUDAppKit/BGHUDAppKit.framework $(top_builddir)/tmp/extras/contrib/BGHUDAppKit
+	mkdir -p $(top_builddir)/tmp/extras/contrib/Growl
+	cp -R $(CONTRIB_DIR)/Growl/Growl.framework $(top_builddir)/tmp/extras/contrib/Growl
 	mkdir -p $(top_builddir)/tmp/modules/audio_output
 	mkdir -p $(top_builddir)/tmp/modules/gui/macosx
 	for i in \
@@ -605,8 +612,6 @@ VLC.app: vlc $(top_builddir)/src/.libs/libvlccore.dylib $(top_builddir)/src/.lib
 	    applescript.m \
 	    controls.h \
 	    controls.m \
-	    equalizer.h \
-	    equalizer.m \
 	    intf.h \
 	    intf.m \
 	    macosx.m \
@@ -630,8 +635,6 @@ VLC.app: vlc $(top_builddir)/src/.libs/libvlccore.dylib $(top_builddir)/src/.lib
 	    voutgl.m \
 	    wizard.h \
 	    wizard.m \
-	    extended.h \
-	    extended.m \
 	    bookmarks.h \
 	    bookmarks.m \
 	    coredialogs.h \
@@ -645,26 +648,26 @@ VLC.app: vlc $(top_builddir)/src/.libs/libvlccore.dylib $(top_builddir)/src/.lib
              $(top_builddir)/tmp/modules/gui/macosx; \
 	done
 	$(AM_V_GEN)cd $(top_builddir)/tmp/extras/package/macosx && \
-	xcodebuild -target vlc $(silentstd) && \
+	xcodebuild -target vlc SYMROOT=../../../build DSTROOT=../../../build $(silentstd) && \
 	cd ../../../../ && \
-	cp -R $(top_builddir)/tmp/extras/package/macosx/build/Default/VLC.bundle $(top_builddir)/VLC.app
+	cp -R -L $(top_builddir)/tmp/build/Default/VLC.bundle $(top_builddir)/VLC.app
 	$(INSTALL) -d $(top_builddir)/VLC.app/Contents/MacOS
 	touch $(top_builddir)/VLC.app/Contents/MacOS/VLC
 	chmod +x $(top_builddir)/VLC.app/Contents/MacOS/VLC
 	$(INSTALL) $(top_builddir)/bin/.libs/vlc $(top_builddir)/VLC.app/Contents/MacOS/VLC
-	ln -sf ../../../modules $(top_builddir)/VLC.app/Contents/MacOS/modules
+	$(LN_S) -f ../../../modules $(top_builddir)/VLC.app/Contents/MacOS/plugins
 	install -d $(top_builddir)/VLC.app/Contents/MacOS/share
 	for i in `ls $(srcdir)/share`; do \
-	   ln -sf `pwd`/$(srcdir)/share/$$i $(top_builddir)/VLC.app/Contents/MacOS/share/; \
+	   $(LN_S) -f `pwd`/$(srcdir)/share/$$i $(top_builddir)/VLC.app/Contents/MacOS/share/; \
 	done
 	$(INSTALL) -d $(top_builddir)/VLC.app/Contents/MacOS/share/locale
 	cat $(top_srcdir)/po/LINGUAS | while read i; do \
 	  mkdir -p $(top_builddir)/VLC.app/Contents/MacOS/share/locale/$${i}/LC_MESSAGES ; \
-	  ln -sfn `pwd`/$(srcdir)/po/$${i}.gmo $(top_builddir)/VLC.app/Contents/MacOS/share/locale/$${i}/LC_MESSAGES/vlc.mo || true ; \
+	  $(LN_S) -f `pwd`/$(srcdir)/po/$${i}.gmo $(top_builddir)/VLC.app/Contents/MacOS/share/locale/$${i}/LC_MESSAGES/vlc.mo || true ; \
 	  mkdir -p $(top_builddir)/VLC.app/Contents/Resources/$${i}.lproj ; \
-	  ln -sf ../English.lproj/InfoPlist.strings \
+	  $(LN_S) -f ../English.lproj/InfoPlist.strings \
 	      $(top_builddir)/VLC.app/Contents/Resources/$${i}.lproj ; \
-	  ln -sf ../English.lproj/MainMenu.nib \
+	  $(LN_S) -f ../English.lproj/MainMenu.nib \
 	      $(top_builddir)/VLC.app/Contents/Resources/$${i}.lproj ; \
 	done
 	printf "APPLVLC#" >| $(top_builddir)/VLC.app/Contents/PkgInfo
@@ -680,246 +683,161 @@ VLC.app: vlc $(top_builddir)/src/.libs/libvlccore.dylib $(top_builddir)/src/.lib
 ############################################################################
 ## Win                                                                    ##
 ############################################################################
+destdir=$(prefix)
 win32_destdir=$(top_builddir)/vlc-$(VERSION)
 win32_debugdir=$(top_builddir)/symbols-$(VERSION)
-npvlc=vlc-$(VERSION)/mozilla/npvlc$(LIBEXT)
-axvlc=vlc-$(VERSION)/activex/axvlc$(LIBEXT)
-win32_lua_destdir=$(win32_destdir)/lua
-win32_http_destdir=$(win32_destdir)/http
+win32_xpi_destdir=$(win32_destdir)/vlc-plugin
 
-#Win-common if for win32 and wince
-package-win-common:
+if HAVE_WIN64
+build-npapi:
+	touch $@
+
+build-activex:
+	touch $@
+else
+if HAVE_WINCE
+build-npapi:
+	touch $@
+
+build-activex:
+	touch $@
+else
+if HAVE_WIN32
+include extras/package/npapi.am
+include extras/package/activex.am
+endif
+endif
+endif
+
+#Win-common is for win32 and wince
+package-win-common: install build-npapi build-activex
 # Check that tmp isn't in the way
 	@if test -e "$(win32_destdir)"; then \
-	  echo "Error: please remove $(win32_destdir), it is in the way"; \
-	  false; \
+	    echo "Error: please remove $(win32_destdir), it is in the way"; \
+	    false; \
+	elif test -e "$(win32_debugdir)"; then \
+	    echo "Error: please remove $(win32_debugdir), it is in the way"; \
+	    false; \
 	else \
-	  echo "OK."; mkdir -p "$(win32_destdir)"; \
+	    echo "Debug dir OK."; mkdir -p "$(win32_debugdir)"; \
+	    echo "Dest dir OK."; mkdir -p "$(win32_destdir)"; \
 	fi
 
-# Copy relevant files
-# Copy executables and libs
-	cp "$(top_builddir)/bin/.libs/vlc$(EXEEXT)" "$(win32_destdir)/"
-	cp "$(top_srcdir)/extras/package/win32/vlc.exe.manifest" "$(win32_destdir)/"
-		cp "$(top_srcdir)/extras/package/win32/libvlc.dll.manifest" "$(win32_destdir)/"
-	cp "$(top_builddir)/src/.libs/libvlccore$(LIBEXT)" "$(win32_destdir)/"
-	cp "$(top_builddir)/src/.libs/libvlc$(LIBEXT)" "$(win32_destdir)/"
+# Executables, major libs+manifests
+	find $(destdir) -maxdepth 4 \( -name "*$(LIBEXT)" -o -name "*$(EXEEXT)" \) -exec cp {} "$(win32_destdir)/" \;
+	for file in $(top_srcdir)/extras/package/win32/vlc$(EXEEXT).manifest \
+                $(top_srcdir)/extras/package/win32/libvlc$(LIBEXT).manifest; \
+	    do cp $$file "$(win32_destdir)/" ; done;
 
-# Copy Text files
-	for file in AUTHORS MAINTAINERS THANKS ; \
+# Text files and clean them
+	for file in AUTHORS THANKS ; \
 	  do sed 's/@/_AT_/' < "$(srcdir)/$$file" > "$(win32_destdir)/$${file}.txt" ; done;
 	for file in NEWS COPYING README; \
 	  do cp "$(srcdir)/$$file" "$(win32_destdir)/$${file}.txt"; done
-	unix2dos "$(win32_destdir)/"*.txt || echo "WARNING: this shouldn't happen"
 
-# Necessary icons
-	cp $(srcdir)/share/vlc.ico $(win32_destdir)/
+# Necessary icon
+	cp $(srcdir)/share/icons/vlc.ico $(win32_destdir)
 
-# Copy the locales
-	mkdir -p $(win32_destdir)/locale
-	cat $(top_srcdir)/po/LINGUAS | while read i; do \
-	  mkdir -p "$(win32_destdir)/locale/$${i}/LC_MESSAGES" ; \
-	  cp "$(srcdir)/po/$${i}.gmo" \
-	    "$(win32_destdir)/locale/$${i}/LC_MESSAGES/vlc.mo" \
-            || true ; \
-	done
-	mkdir -p $(win32_destdir)/locale/qt4/
-	cp $(QT4LOCALEDIR)/*.qm $(win32_destdir)/locale/qt4/ || true
-
-#  Mozilla plugin
-if BUILD_MOZILLA
-	mkdir -p "$(win32_destdir)/mozilla"
-	cp $(top_builddir)/projects/mozilla/.libs/npvlc$(LIBEXT) $(win32_destdir)/mozilla/
-	cp $(top_srcdir)/projects/mozilla/npvlc.dll.manifest $(win32_destdir)/mozilla/
-endif
-
-# ActiveX plugin
-if BUILD_ACTIVEX
-	mkdir -p "$(win32_destdir)/activex"
-	cp $(srcdir)/projects/activex/README.TXT  $(win32_destdir)/activex/
-	cp $(srcdir)/projects/activex/test.html  $(win32_destdir)/activex/
-	unix2dos $(win32_destdir)/activex/*
-
-	cp $(top_builddir)/projects/activex/.libs/axvlc$(LIBEXT) $(win32_destdir)/activex/
-	cp $(top_srcdir)/projects/activex/axvlc.dll.manifest $(win32_destdir)/activex/
-endif
-
-# Rebase all those DLLs to speed up loading (need cygwin rebase)
-	if rebase -b 0x42 /dev/null >/dev/null 2>&1; then \
-		find $(win32_destdir) -type f -name '*.dll' -print | rebase -b 0x70000000 -T -; \
-	fi
-
-package-win32-base-debug: package-win-common
-# Copy relevant files
-# Script installer
-	cp "$(top_builddir)/extras/package/win32/vlc.win32.nsi" "$(win32_destdir)/"
-	mkdir "$(win32_destdir)/languages"
-	cp $(srcdir)/extras/package/win32/languages/*.nsh "$(win32_destdir)/languages/"
+# Locales
+	-cp -r $(destdir)/share/locale $(win32_destdir)
 
 # Plugins
-	mkdir -p "$(win32_destdir)/plugins"
-	find modules/ -name '*_plugin$(LIBEXT)' | while read i; do \
-	  if test -n "$$i" ; then \
-	    $(INSTALL) "$$i" "vlc-$(VERSION)/plugins/" ; \
-	  fi ; done
-
-# Contrib *.dll's
-	cp $(srcdir)/extras/contrib/lib/*.dll "vlc-$(VERSION)/" || true
-
-#Enable DEP and ASLR for all the binaries
-if USE_PEFLAGS
-	find $(win32_destdir) -type f -name '*.dll' -print -o -name '*.exe' -print | while read i; do \
-	$(PEFLAGS) --dynamicbase=true --nxcompat=true "$$i" ; \
-	done
-endif
-
-# Copy the lua scripts (HTTP)
-if BUILD_LUA
-	mkdir -p "$(win32_lua_destdir)/http/images"
-	mkdir -p "$(win32_lua_destdir)/http/requests"
-	mkdir -p "$(win32_lua_destdir)/http/js"
-	mkdir -p "$(win32_lua_destdir)/http/dialogs"
-	cp $(srcdir)/share/lua/http/*.html $(win32_lua_destdir)/http/
-	unix2dos $(win32_lua_destdir)/http/*.html
-	cp $(srcdir)/share/lua/http/.hosts $(win32_lua_destdir)/http/
-	unix2dos $(win32_lua_destdir)/http/.hosts
-	cp $(srcdir)/share/lua/http/*.css $(win32_lua_destdir)/http/
-	unix2dos $(win32_lua_destdir)/http/*.css
-	cp $(srcdir)/share/lua/http/js/*.js $(win32_lua_destdir)/http/js/
-	unix2dos $(win32_lua_destdir)/http/js/*.js
-	cp $(srcdir)/share/lua/http/dialogs/* $(win32_lua_destdir)/http/dialogs/
-	unix2dos $(win32_lua_destdir)/http/dialogs/*
-	cp $(srcdir)/share/lua/http/dialogs/.hosts $(win32_lua_destdir)/http/dialogs/
-	unix2dos $(win32_lua_destdir)/http/dialogs/.hosts
-	cp $(srcdir)/share/lua/http/*.ico $(win32_lua_destdir)/http/
-	cp $(srcdir)/share/lua/http/images/*.png $(win32_lua_destdir)/http/images/
-	cp $(srcdir)/share/lua/http/requests/*.xml $(win32_lua_destdir)/http/requests/
-	unix2dos $(win32_lua_destdir)/http/requests/*.xml
-	cp $(srcdir)/share/lua/http/requests/readme $(win32_lua_destdir)/http/requests/readme.txt
-	unix2dos $(win32_lua_destdir)/http/requests/readme.txt
-endif
+	cp -r $(destdir)/lib/vlc/plugins $(win32_destdir)
 
 if BUILD_LUA
-#Lua Scripts
-	$(INSTALL) -d $(win32_lua_destdir)
-	for i in $(srcdir)/share/lua/*.* ; do \
-	  $(INSTALL) -m 644 -- "$${i}" $(win32_lua_destdir)/`basename $${i}` ; \
-	done
-	$(INSTALL) -d $(win32_lua_destdir)/playlist
-	for i in $(srcdir)/share/lua/playlist/*.* ; do \
-	  $(INSTALL) -m 644 -- "$${i}" $(win32_lua_destdir)/playlist/`basename $${i}` ; \
-	done
-	$(INSTALL) -d $(win32_lua_destdir)/meta
-	for i in $(srcdir)/share/lua/meta/*.* ; do \
-	  $(INSTALL) -m 644 -- "$${i}" $(win32_lua_destdir)/meta/`basename $${i}` ; \
-	done
-	$(INSTALL) -d $(win32_lua_destdir)/intf
-	for i in $(srcdir)/share/lua/intf/*.* ; do \
-	  $(INSTALL) -m 644 -- "$${i}" $(win32_lua_destdir)/intf/`basename $${i}` ; \
-	done
-	$(INSTALL) -d $(win32_lua_destdir)/intf/modules
-	for i in $(srcdir)/share/lua/intf/modules/*.* ; do \
-	  $(INSTALL) -m 644 -- "$${i}" $(win32_lua_destdir)/intf/modules/`basename $${i}` ; \
-	done
-endif
-
-# Copy the http files
-if BUILD_HTTPD
-	mkdir -p "$(win32_http_destdir)/images"
-	mkdir -p "$(win32_http_destdir)/requests"
-	mkdir -p "$(win32_http_destdir)/js"
-	mkdir -p "$(win32_http_destdir)/dialogs"
-	cp $(srcdir)/share/http/*.html $(win32_http_destdir)/
-	unix2dos $(win32_http_destdir)/*.html
-	cp $(srcdir)/share/http/.hosts $(win32_http_destdir)/
-	unix2dos $(win32_http_destdir)/.hosts
-	cp $(srcdir)/share/http/*.css $(win32_http_destdir)/
-	unix2dos $(win32_http_destdir)/*.css
-	cp $(srcdir)/share/http/js/*.js $(win32_http_destdir)/js/
-	unix2dos $(win32_http_destdir)/js/*.js
-	cp $(srcdir)/share/http/dialogs/* $(win32_http_destdir)/dialogs/
-	unix2dos $(win32_http_destdir)/dialogs/*
-	cp $(srcdir)/share/http/dialogs/.hosts $(win32_http_destdir)/dialogs/
-	unix2dos $(win32_http_destdir)/dialogs/.hosts
-	cp $(srcdir)/share/http/*.ico $(win32_http_destdir)/
-	cp $(srcdir)/share/http/images/*.png $(win32_http_destdir)/images/
-	cp $(srcdir)/share/http/requests/*.xml $(win32_http_destdir)/requests/
-	unix2dos $(win32_http_destdir)/requests/*.xml
-	cp $(srcdir)/share/http/requests/readme $(win32_http_destdir)/requests/readme.txt
-	unix2dos $(win32_http_destdir)/requests/readme.txt
-
+	mkdir -p $(win32_destdir)/lua
+	cp -r $(destdir)/lib/vlc/lua/* $(win32_destdir)/lua
+	cp -r $(destdir)/share/vlc/lua/* $(win32_destdir)/lua
 endif
 
 if BUILD_SKINS
-# Skins
-	mkdir -p $(win32_destdir)/skins/fonts
-	for i in $(srcdir)/share/skins2/fonts/*.*; do \
-	  cp -- "$$i" $(win32_destdir)/skins/fonts/ || true ; \
-	done
-	for i in $(top_builddir)/share/skins2/*.*; do \
-	  cp -- "$$i" $(win32_destdir)/skins/ || true ; \
-	done
-	cp -- $(srcdir)/share/skins2/skin.catalog $(win32_destdir)/skins/ || true ;
-	cp -- $(srcdir)/share/skins2/skin.dtd $(win32_destdir)/skins/ || true ;
+	cp -r $(destdir)/share/vlc/skins2 $(win32_destdir)/skins
 endif
-
 if BUILD_OSDMENU
-#OSD Menu
-	mkdir -p "$(win32_destdir)/osdmenu"
-	cp $(srcdir)/share/osdmenu/*.* "$(win32_destdir)/osdmenu"
-	for dir in default default/selected default/selection default/volume ;do \
-		mkdir -p "$(win32_destdir)/osdmenu/$$dir"; \
-		for file in $(srcdir)/share/osdmenu/$${dir}/*.png;do \
-			 cp -- "$$file" "$(win32_destdir)/osdmenu/$$dir"; \
-		done; \
-	done
-	unix2dos $(win32_destdir)/osdmenu/*.cfg;
+	cp -r $(destdir)/share/vlc/osdmenu "$(win32_destdir)/osdmenu"
 	for file in $(win32_destdir)/osdmenu/*.cfg; do \
 		sed 's%share/osdmenu%osdmenu%g' "$$file" > "$$file.tmp" || exit $$? ; \
 		sed 's%/%\\%g' "$$file.tmp" > "$$file" || exit$$? ; \
 		rm -f -- "$$file.tmp"; \
 	done
 endif
+if !HAVE_WIN64
+if !HAVE_WINCE
+	cp "$(top_builddir)/activex-vlc/src/axvlc.dll.manifest" "$(win32_destdir)/"
+	cp "$(top_builddir)/activex-vlc/installed/lib/axvlc.dll" "$(win32_destdir)/"
+	cp "$(top_builddir)/npapi-vlc/npapi/npvlc.dll.manifest" "$(win32_destdir)/"
+	cp "$(top_builddir)/npapi-vlc/installed/lib/npvlc.dll" "$(win32_destdir)/"
+endif
+endif
 
 # SDK
-	mkdir -p "$(win32_destdir)/sdk.tmp"
-	mkdir -p "$(win32_destdir)/sdk"
-	d=$$(pwd) && \
-	cd src && \
-	make install DESTDIR="$$d/vlc-$(VERSION)/sdk.tmp"
-	cd vlc-$(VERSION) && mv sdk.tmp/$(prefix)/* sdk/
-	find vlc-$(VERSION)/sdk.tmp -type d | sort -r | xargs rmdir
-	rm -Rf vlc-$(VERSION)/sdk/bin
+	mkdir -p "$(win32_destdir)/sdk/lib"
+	cp -r $(destdir)/include "$(win32_destdir)/sdk"
+	cp -r $(destdir)/lib/pkgconfig "$(win32_destdir)/sdk/lib"
+	for file in libvlc.dll.a libvlc.la libvlccore.dll.a libvlccore.la; do \
+        cp -rv $(destdir)/lib/$$file "$(win32_destdir)/sdk/lib"; done
+if !HAVE_WIN64
+if !HAVE_WINCE
+	mkdir -p "$(win32_destdir)/sdk/activex"
+	cp $(top_builddir)/activex-vlc/README $(win32_destdir)/sdk/activex/README.TXT
+	cp $(top_builddir)/activex-vlc/src/test.html $(win32_destdir)/sdk/activex/
+endif
+endif
 
-#strip exe and main dll
-package-win-common-strip: package-win32-base-debug
-	@if test -e "$(win32_debugdir)"; then \
-	  echo "Error: please remove $(win32_debugdir), it is in the way"; \
-	  false; \
-	else \
-	  echo "OK."; mkdir -p "$(win32_debugdir)"; \
-	fi
-	for i in "" vlc-$(VERSION)/*$(LIBEXT) ; \
-      do if test -n "$$i" ; then \
-      $(OBJCOPY) --only-keep-debug "$$i" "$$i.dbg"; \
-      $(OBJCOPY) --strip-all "$$i" ; \
-      $(OBJCOPY) --add-gnu-debuglink="$$i.dbg" "$$i" ; \
-	  mv "$$i.dbg" "$(win32_debugdir)"; \
-    fi; done
+	find $(win32_destdir) -type f \( -name "*xml" -or -name "*html" -or -name '*js' -or -name '*css' -or -name '*hosts' -or -iname '*txt' -or -name '*.cfg' -or -name '*.lua' \) -exec $(U2D) {} \;
 
-#strip all plugins dll
-package-win32-base: package-win-common-strip
-	for i in "" $(win32_destdir)/plugins/*$(LIBEXT) ; \
-	  do if test -n "$$i" ; then \
-	  $(OBJCOPY) --only-keep-debug "$$i" "$$i.dbg"; \
-	  $(OBJCOPY) --strip-all "$$i" ; \
-	  $(OBJCOPY) --add-gnu-debuglink="$$i.dbg" "$$i" ; \
-	  mv "$$i.dbg" "$(win32_debugdir)"; \
-	fi ; done
+#Enable DEP and ASLR for all the binaries
+if USE_PEFLAGS
+	find $(win32_destdir) -type f \( -name '*$(LIBEXT)' -print -o -name '*$(EXEEXT)' -print \) -exec $(PEFLAGS) --dynamicbase=true --nxcompat=true {} \;
+endif
+	find $(win32_destdir)/plugins/ -type f \( -name '*.a' -or -name '*.la' \) -exec rm -rvf {} \;
 
-package-win32-base-exe: package-win32-base
+package-win-base: package-win-common
+	find $(win32_destdir) -type f \( -name '*$(LIBEXT)' -or -name '*$(EXEEXT)' \) | while read i; \
+	do if test -n "$$i" ; then \
+	    $(OBJCOPY) --only-keep-debug "$$i" "$$i.dbg"; \
+	    $(OBJCOPY) --strip-all "$$i" ; \
+	    $(OBJCOPY) --add-gnu-debuglink="$$i.dbg" "$$i" ; \
+	    mv "$$i.dbg" "$(win32_debugdir)"; \
+	  fi ; \
+	done
+
+package-win32-webplugin-common: package-win-base
+	mkdir -p "$(win32_xpi_destdir)/plugins"
+	find $(destdir) -maxdepth 4 -name "*$(LIBEXT)" -exec cp {} "$(win32_xpi_destdir)/" \;
+if !HAVE_WIN64
+	cp $(top_builddir)/npapi-vlc/npapi/npvlc.dll.manifest "$(win32_xpi_destdir)/plugins"
+endif
+	cp "$(top_srcdir)/extras/package/win32/libvlc.dll.manifest" "$(win32_xpi_destdir)/plugins"
+	cp -r $(win32_destdir)/plugins/ "$(win32_xpi_destdir)/plugins"
+	rm -rf "$(win32_xpi_destdir)/plugins/plugins/*qt*"
+	rm -rf "$(win32_xpi_destdir)/plugins/plugins/*skins*"
+
+package-win32-xpi: package-win32-webplugin-common
+if !HAVE_WIN64
+	cp $(top_builddir)/npapi-vlc/npapi/install.rdf "$(win32_xpi_destdir)"
+	cd $(win32_xpi_destdir) && zip -r "../vlc-$(VERSION).xpi" install.rdf plugins
+endif
+
+package-win32-crx: package-win32-webplugin-common
+if !HAVE_WIN64
+	cp $(top_builddir)/npapi-vlc/npapi/manifest.json "$(win32_xpi_destdir)"
+	crxmake --pack-extension "$(win32_xpi_destdir)" \
+		--extension-output "$(win32_destdir)/vlc-$(VERSION).crx" --ignore-file install.rdf
+endif
+
+package-win32-base-exe: package-win-base
+# Script installer
+	cp "$(top_builddir)/extras/package/win32/vlc.win32.nsi" "$(win32_destdir)/"
+	cp "$(top_builddir)/extras/package/win32/spad.nsi" "$(win32_destdir)/"
+	mkdir "$(win32_destdir)/languages"
+	cp $(srcdir)/extras/package/win32/languages/*.nsh "$(win32_destdir)/languages/"
+# Copy the UAC NSIS plugin
+	mkdir -p "$(win32_destdir)/NSIS"
+	cp "$(top_srcdir)/extras/package/win32/UAC.nsh" "$(win32_destdir)/NSIS"
+	cp "$(top_srcdir)/extras/package/win32/UAC.dll" "$(win32_destdir)/NSIS"
+
 # Create package
-	rm -Rf $(win32_destdir)/sdk
 	if makensis -VERSION >/dev/null 2>&1; then \
 	    MAKENSIS="makensis"; \
 	elif [ -x "/cygdrive/c/Program Files/NSIS/makensis" ]; then \
@@ -931,104 +849,59 @@ package-win32-base-exe: package-win32-base
 	else \
 	    echo 'Error: cannot locate makensis tool'; exit 1; \
 	fi; \
+	eval "$$MAKENSIS $(win32_destdir)/spad.nsi"; \
 	eval "$$MAKENSIS $(win32_destdir)/vlc.win32.nsi"
 
-package-win32-base-zip: package-win32-base
-# Create package 
+package-win32-base-zip: package-win-base
+# Create package
 	rm -f -- vlc-$(VERSION)-win32.zip
 	zip -r -9 vlc-$(VERSION)-win32.zip vlc-$(VERSION)
 
-package-win32-base-debug-zip: package-win32-base-debug
+package-win32-base-debug-zip: package-win-common
 # Create package
 	rm -f -- vlc-$(VERSION)-win32-debug.zip
 	zip -r -9 vlc-$(VERSION)-win32-debug.zip vlc-$(VERSION)
 
-package-win32-base-7zip: package-win32-base
-# Create package 
+package-win32-base-7zip: package-win-base
+# Create package
 	7z a -t7z -m0=lzma -mx=9 -mfb=64 -md=32m -ms=on vlc-$(VERSION)-win32.7z vlc-$(VERSION)
 
-package-win32-base-debug-7zip: package-win32-base-debug
+package-win32-base-debug-7zip: package-win-common
 # Create package
 	7z a -t7z -m0=lzma -mx=9 -mfb=64 -md=32m -ms=on vlc-$(VERSION)-win32-debug.7z vlc-$(VERSION)
 
-package-win32-exe: package-win32-base package-win32-base-exe
-# Clean up
-	rm -Rf $(win32_destdir)
+package-win32-cleanup:
+	rm -Rf $(win32_destdir) $(win32_debugdir)
 
-package-win32-zip: package-win32-base-zip
-# Clean up
-	rm -Rf $(win32_destdir)
+package-win32-exe: package-win-base package-win32-base-exe package-win32-cleanup
 
-package-win32-debug-zip: package-win32-base-debug-zip
-# Clean up
-	rm -Rf $(win32_destdir)
+package-win32-zip: package-win32-base-zip package-win32-cleanup
 
-package-win32-7zip: package-win32-base-7zip
-# Clean up
-	rm -Rf $(win32_destdir)
+package-win32-debug-zip: package-win32-base-debug-zip package-win32-cleanup
 
-package-win32-debug-7zip: package-win32-base-debug-7zip
-# Clean up
-	rm -Rf $(win32_destdir)
+package-win32-7zip: package-win32-base-7zip package-win32-cleanup
 
-package-win32-no-clean: package-win32-base-zip package-win32-base-7zip package-win32-base-exe 
+package-win32-debug-7zip: package-win32-base-debug-7zip package-win32-cleanup
 
-package-win32: package-win32-no-clean
-# Clean up
-	rm -Rf $(win32_destdir)
+package-win32-no-clean: package-win32-base-zip package-win32-base-7zip package-win32-base-exe package-win32-xpi
 
-package-win32-debug: package-win32-base-debug-zip package-win32-base-debug-7zip
-# Clean up
-	rm -Rf $(win32_destdir)
+package-win32: package-win32-no-clean package-win32-cleanup
 
-package-wince-base: package-win-common package-win-common-strip
-
-package-wince-base-zip:
-# Create package 
-	zip -r vlc-$(VERSION)-wince.zip vlc-$(VERSION)
-
-package-wince: package-wince-base  package-wince-base-zip
-# Clean up
-	rm -Rf $(win32_destdir)
+package-win32-debug: package-win32-base-debug-zip package-win32-base-debug-7zip package-win32-cleanup
 
 
-#####################################################################
-##   BeOS                                                          ##
-#####################################################################
-package-beos:
-# Check that tmp isn't in the way
-	@if test -e $(srcdir)/tmp; then \
-	  echo "Error: please remove $(srcdir)/tmp, it is in the way"; \
-	  false ; \
-	else \
-	  echo "OK." ; mkdir $(srcdir)/tmp ; \
-	fi
+#######
+# WinCE
+#######
+package-wince-base: package-win-base
 
-# Copy relevant files
-	mkdir -p $(srcdir)/tmp/vlc
-	cd $(srcdir) && cp -R vlc-bundle/* AUTHORS COPYING ChangeLog README \
-	  THANKS NEWS tmp/vlc/
+package-wince-base-zip: package-wince-base
+# Create package
+	rm -f -- vlc-$(VERSION)-wince.zip
+	zip -r -9 vlc-$(VERSION)-wince.zip vlc-$(VERSION)
 
-# Create debug package
-	xres -o $(srcdir)/tmp/vlc/vlc $(srcdir)/share/vlc_beos.rsrc
-	find $(srcdir)/tmp/vlc -exec mimeset -f {} \;
-	mv $(srcdir)/tmp/vlc $(srcdir)/tmp/vlc-$(VERSION)
-	(cd $(srcdir)/tmp && zip -9 -r vlc-$(VERSION)-BeOS-debug.zip vlc-$(VERSION) )
-	mv $(srcdir)/tmp/vlc-$(VERSION)-BeOS-debug.zip $(srcdir)/
-	mv $(srcdir)/tmp/vlc-$(VERSION) $(srcdir)/tmp/vlc
+package-wince: package-wince-base-zip package-win32-cleanup
 
-# Create normal package
-	$(STRIP) --strip-debug --strip-unneeded $(srcdir)/tmp/vlc/vlc
-	find $(srcdir)/tmp/vlc -name 'lib*.so' -exec $(STRIP) \
-	  --strip-debug --strip-unneeded "{}" \;
-	xres -o $(srcdir)/tmp/vlc/vlc $(srcdir)/share/vlc_beos.rsrc
-	find $(srcdir)/tmp/vlc -exec mimeset -f {} \;
-	mv $(srcdir)/tmp/vlc $(srcdir)/tmp/vlc-$(VERSION)
-	(cd $(srcdir)/tmp &&  zip -9 -r vlc-$(VERSION)-BeOS.zip vlc-$(VERSION) )
-	mv $(srcdir)/tmp/vlc-$(VERSION)-BeOS.zip $(srcdir)/
-
-# Clean up
-	rm -Rf $(srcdir)/tmp
 
 #########################################################################
 ## MacOS X                                                             ##
@@ -1057,7 +930,7 @@ package-macosx: VLC-release.app ChangeLog
 	cp -L $(top_builddir)/ChangeLog $(top_builddir)/vlc-$(VERSION)/Goodies/
 
 # Place a link to the application folder
-	ln -s /Applications $(top_builddir)/vlc-$(VERSION)/Applications
+	$(LN_S) /Applications $(top_builddir)/vlc-$(VERSION)/Applications
 
 # Create disk image (temporarily taken from the 0.8.6-bugfix branch to provide reliable NBs)
 	echo "Creating disk image"
@@ -1114,7 +987,7 @@ package-macosx-zip: VLC-release.app
 	     $(top_builddir)/vlc-$(VERSION)/Goodies
 	cp $(srcdir)/extras/package/macosx/README.MacOSX.rtf \
 	   $(top_builddir)/vlc-$(VERSION)/Read\ Me.rtf
-	zip -r $(top_builddir)/vlc-$(VERSION).zip $(top_builddir)/vlc-$(VERSION)
+	zip -r -y -9 $(top_builddir)/vlc-$(VERSION).zip $(top_builddir)/vlc-$(VERSION)
 	rm -Rf $(top_builddir)/vlc-$(VERSION)
 
 package-macosx-framework-zip:
@@ -1126,41 +999,8 @@ package-macosx-framework-zip:
 	for i in AUTHORS COPYING ChangeLog README THANKS NEWS; do \
 	  cp $(srcdir)/$$i $(top_builddir)/vlckit-$(VERSION)/Goodies; \
 	done
-	zip -r $(top_builddir)/vlckit-$(VERSION).zip $(top_builddir)/vlckit-$(VERSION)
+	zip -r -y -9 $(top_builddir)/vlckit-$(VERSION).zip $(top_builddir)/vlckit-$(VERSION)
 	rm -Rf $(top_builddir)/vlc-$(VERSION)
-
-package-macosx-plugin:
-if BUILD_MOZILLA
-# Create Installer
-	rm -rf "$(top_builddir)/macosx-plugin-instdata/"; true
-	mkdir -p "$(top_builddir)/macosx-plugin-instdata"
-	rm -f "$(top_builddir)/projects/mozilla/VLC Plugin.plugin/Contents/MacOS/modules/libmacosx_plugin.dylib" 
-	cp -R "$(top_builddir)/projects/mozilla/VLC Plugin.plugin" "$(top_builddir)/macosx-plugin-instdata"
-	rm -rf "$(top_builddir)/VLC Internet Plug-In.pkg"
-	export PACKAGEMAKER=
-	if test -x /Developer/Tools/packagemaker; then \
-	   export PACKAGEMAKER=/Developer/Tools/packagemaker; \
-	fi; \
-	if test -x /Developer/Applications/Utilities/PackageMaker.app/Contents/MacOS/PackageMaker; then \
-	   export PACKAGEMAKER=/Developer/Applications/Utilities/PackageMaker.app/Contents/MacOS/PackageMaker; \
-	fi; \
-	$${PACKAGEMAKER} -build -ds -p "$(top_builddir)/VLC Internet Plug-In.pkg" \
-	-f "$(top_builddir)/macosx-plugin-instdata" \
-	-i "$(top_builddir)/extras/package/macosx/plugin/InstallerInfo.plist" \
-	-d "$(top_srcdir)/extras/package/macosx/plugin/InstallerDescription.plist"; true
-	rm -rf "$(top_builddir)/macosx-plugin-instdata/"
-
-# Create disk image 
-	rm -f "$(top_builddir)/vlc-plugin-$(VERSION).dmg"; true
-	rm -rf "$(top_builddir)/vlc-plugin-$(VERSION)/"; true
-	mkdir -p "$(top_builddir)/vlc-plugin-$(VERSION)/"
-	mv "$(top_builddir)/VLC Internet Plug-In.pkg" "$(top_builddir)/vlc-plugin-$(VERSION)/"
-	hdiutil create -srcfolder "$(top_builddir)/vlc-plugin-$(VERSION)" \
-	  "$(top_builddir)/vlc-plugin-$(VERSION).dmg" -format UDBZ \
-	  -scrub -imagekey zlib-level=9
-	echo "Disk image creation completed:"
-	rm -rf "$(top_builddir)/vlc-plugin-$(VERSION)"
-endif
 
 package-translations:
 	@if test -e "$(srcdir)/vlc-translations-$(VERSION)"; then \

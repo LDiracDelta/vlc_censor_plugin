@@ -22,14 +22,10 @@
  * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston MA 02110-1301, USA.
  *****************************************************************************/
 
-#import <Cocoa/Cocoa.h>
+#import <Foundation/Foundation.h>
 #import "VLCAudio.h"
 #import "VLCMediaList.h"
 #import "VLCMedia.h"
-
-// FIXME: Hide from public header
-extern void * CreateSharedLibraryOnStartup( void ) __attribute__((constructor));
-extern void * DestroySharedLibraryAtExit( void ) __attribute__((destructor));
 
 @class VLCAudio;
 
@@ -45,7 +41,6 @@ extern void * DestroySharedLibraryAtExit( void ) __attribute__((destructor));
 @interface VLCLibrary : NSObject 
 {
     void * instance;
-    VLCAudio * audio;
 }
 
 /* Factories */
@@ -55,11 +50,18 @@ extern void * DestroySharedLibraryAtExit( void ) __attribute__((destructor));
  */
 + (VLCLibrary *)sharedLibrary;
 
-/* Properties */
 /**
- * Returns the library's audio object.  This object is used to manipulate the global audio properities of the shared
- * library.
- * \return The library's shared audio instance.
+ * Returns the library's version
+ * \return The library version example "0.9.0-git Grishenko".
  */
-@property (readonly) VLCAudio * audio;
+
+@property (readonly) NSString * version;
+
+/**
+ * Returns the library's changeset
+ * \return The library version example "adfee99".
+ */
+
+@property (readonly) NSString * changeset;
+
 @end

@@ -62,6 +62,7 @@ static picture_t *PictureFifoPop(picture_fifo_t *fifo)
         fifo->first = picture->p_next;
         if (!fifo->first)
             fifo->last_ptr = &fifo->first;
+        picture->p_next = NULL;
     }
     return picture;
 }
@@ -146,5 +147,6 @@ void picture_fifo_Delete(picture_fifo_t *fifo)
 {
     picture_fifo_Flush(fifo, INT64_MAX, true);
     vlc_mutex_destroy(&fifo->lock);
+    free(fifo);
 }
 

@@ -44,17 +44,21 @@
 }
 + (id)rtpBroadcastStreamOutputWithSAPAnnounce:(NSString *)announceName
 {
-    return [self streamOutputWithOptionDictionary:[NSDictionary dictionaryWithObjectsAndKeys:
+    NSString *name = [announceName copy];
+    id output = [self streamOutputWithOptionDictionary:[NSDictionary dictionaryWithObjectsAndKeys:
                                             [NSDictionary dictionaryWithObjectsAndKeys:
                                                 @"ts", @"muxer",
                                                 @"file", @"access",
-                                                @"sap", @"sdp",
-                                                [announceName copy], @"name",
+                                                @"sdp", @"sdp",
+                                                @"sap", @"sap",
+                                                name, @"name",
                                                 @"239.255.1.1", @"destination", nil
                                             ], @"rtpOptions",
                                             nil
                                             ]
                                         ];
+    [name release];
+    return output;
 }
 
 + (id)rtpBroadcastStreamOutput
@@ -66,20 +70,21 @@
 {
     return [self streamOutputWithOptionDictionary:[NSDictionary dictionaryWithObjectsAndKeys:
                                             [NSDictionary dictionaryWithObjectsAndKeys:
-                                                @"mp4v", @"videoCodec",
-                                                @"1024",  @"videoBitrate",
+                                                @"h264", @"videoCodec",
+                                                @"1024",  @"videoBitrate", // max by Apple: 1.5 mbps
                                                 @"mp4a", @"audioCodec",
-                                                @"192", @"audioBitrate",
+                                                @"128", @"audioBitrate", // max by Apple: 160 kbps
                                                 @"2",   @"channels",
-                                                @"320", @"width",
-                                                @"240", @"canvasHeight",
+                                                @"640", @"width", // max by Apple: do.
+                                                @"480", @"canvasHeight", // max by Apple: do.
                                                 @"Yes", @"audio-sync",
                                                 nil
                                             ], @"transcodingOptions",
                                             [NSDictionary dictionaryWithObjectsAndKeys:
                                                 @"mp4", @"muxer",
                                                 @"file", @"access",
-                                                [filePath copy], @"destination", nil
+                                                [[filePath copy] autorelease], @"destination", 
+                                                nil
                                             ], @"outputOptions",
                                             nil
                                             ]
@@ -99,7 +104,7 @@
                                             [NSDictionary dictionaryWithObjectsAndKeys:
                                                 @"mp4", @"muxer",
                                                 @"file", @"access",
-                                                [filePath copy], @"destination", nil
+                                                [[filePath copy] autorelease], @"destination", nil
                                             ], @"outputOptions",
                                             nil
                                             ]
@@ -112,7 +117,7 @@
                                             [NSDictionary dictionaryWithObjectsAndKeys:
                                                 @"ps", @"muxer",
                                                 @"file", @"access",
-                                                [filePath copy], @"destination", nil
+                                                [[filePath copy] autorelease], @"destination", nil
                                             ], @"outputOptions",
                                             nil
                                             ]
@@ -125,15 +130,15 @@
                                             [NSDictionary dictionaryWithObjectsAndKeys:
                                                 @"mp2v", @"videoCodec",
                                                 @"1024", @"videoBitrate",
-                                                @"mp2a",   @"audioCodec",
+                                                @"mpga",   @"audioCodec",
                                                 @"128",   @"audioBitrate",
                                                 @"Yes",   @"audio-sync",
                                                 nil
                                             ], @"transcodingOptions",
                                             [NSDictionary dictionaryWithObjectsAndKeys:
-                                                @"mpeg", @"muxer",
+                                                @"ps", @"muxer",
                                                 @"file", @"access",
-                                                [filePath copy], @"destination", nil
+                                                [[filePath copy] autorelease], @"destination", nil
                                             ], @"outputOptions",
                                             nil
                                             ]
@@ -170,7 +175,7 @@
         if( audioBitrate ) [subOptions addObject:[NSString stringWithFormat:@"ab=%@", audioBitrate]];
         if( channels ) [subOptions addObject:[NSString stringWithFormat:@"channels=%@", channels]];
         if( audioSync ) [subOptions addObject:[NSString stringWithFormat:@"audioSync", width]];
-        [optionsAsArray addObject: [NSString stringWithFormat:@"transcode{%@}", [subOptions componentsJoinedByString:@","]]];
+        [optionsAsArray addObject: [NSString stringWithFormat:@"#transcode{%@}", [subOptions componentsJoinedByString:@","]]];
         [subOptions removeAllObjects];
     }
     
@@ -185,7 +190,7 @@
         if( destination ) [subOptions addObject:[NSString stringWithFormat:@"dst=\"%@\"", [destination stringByReplacingOccurrencesOfString:@"\"" withString:@"\\\""]]];
         if( url ) [subOptions addObject:[NSString stringWithFormat:@"url=\"%@\"", [url stringByReplacingOccurrencesOfString:@"\"" withString:@"\\\""]]];
         if( access )      [subOptions addObject:[NSString stringWithFormat:@"access=%@", access]];
-        [optionsAsArray addObject:[NSString stringWithFormat:@"std{%@}", [subOptions componentsJoinedByString:@","]]];
+        [optionsAsArray addObject:[NSString stringWithFormat:@"#std{%@}", [subOptions componentsJoinedByString:@","]]];
         [subOptions removeAllObjects];
     }
 
@@ -196,11 +201,13 @@
         NSString * destination = [rtpOptions objectForKey:@"destination"];
         NSString * sdp = [rtpOptions objectForKey:@"sdp"];
         NSString * name = [rtpOptions objectForKey:@"name"];
+        NSString * sap = [rtpOptions objectForKey:@"sap"];
         if( muxer )       [subOptions addObject:[NSString stringWithFormat:@"muxer=%@", muxer]];
         if( destination ) [subOptions addObject:[NSString stringWithFormat:@"dst=%@", destination]];
         if( sdp )      [subOptions addObject:[NSString stringWithFormat:@"sdp=%@", sdp]];
+        if( sap )      [subOptions addObject:@"sap"];
         if( name )      [subOptions addObject:[NSString stringWithFormat:@"name=\"%@\"", name]];
-        [optionsAsArray addObject:[NSString stringWithFormat:@"rtp{%@}", [subOptions componentsJoinedByString:@","]]];
+        [optionsAsArray addObject:[NSString stringWithFormat:@"#rtp{%@}", [subOptions componentsJoinedByString:@","]]];
         [subOptions removeAllObjects];
     }
     representedOptions = [optionsAsArray componentsJoinedByString:@":"];

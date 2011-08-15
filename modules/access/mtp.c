@@ -38,9 +38,7 @@
 
 #include <assert.h>
 #include <errno.h>
-#ifdef HAVE_SYS_TYPES_H
-#   include <sys/types.h>
-#endif
+#include <sys/types.h>
 #ifdef HAVE_SYS_STAT_H
 #   include <sys/stat.h>
 #endif
@@ -51,7 +49,7 @@
 #include <unistd.h>
 #include <poll.h>
 
-#include <vlc_charset.h>
+#include <vlc_fs.h>
 
 #include "libmtp.h"
 
@@ -81,7 +79,7 @@ vlc_module_end()
  * Exported prototypes
  *****************************************************************************/
 
-static int  Seek( access_t *, int64_t );
+static int  Seek( access_t *, uint64_t );
 static ssize_t Read( access_t *, uint8_t *, size_t );
 static int  Control( access_t *, int, va_list );
 
@@ -112,8 +110,8 @@ static int Open( vlc_object_t *p_this )
     /* Update default_pts to a suitable value for file access */
     var_Create( p_access, "file-caching", VLC_VAR_INTEGER|VLC_VAR_DOINHERIT );
 
-    if( sscanf( p_access->psz_path, "%"SCNu32":%"SCNu8":%"SCNu16":%d", &i_bus,
-                &i_dev, &i_product_id, &i_track_id ) != 4 )
+    if( sscanf( p_access->psz_location, "%"SCNu32":%"SCNu8":%"SCNu16":%d",
+                &i_bus, &i_dev, &i_product_id, &i_track_id ) != 4 )
         return VLC_EGENERIC;
     i_ret = LIBMTP_Detect_Raw_Devices( &p_rawdevices, &i_numrawdevices );
     if( i_ret != 0 || i_numrawdevices <= 0 || !p_rawdevices )
@@ -128,8 +126,10 @@ static int Open( vlc_object_t *p_this )
             if( ( p_device = LIBMTP_Open_Raw_Device( &p_rawdevices[i] )
                 ) != NULL )
             {
-                free( p_access->psz_path );
-                if( ( p_access->psz_path = tempnam( NULL, "vlc" ) ) == NULL )
+                free( p_access->psz_filepath );
+#warning Oooh no! Not tempnam()!
+                p_access->psz_filepath = tempnam( NULL, "vlc" );
+                if( p_access->psz_filepath == NULL )
                 {
                     LIBMTP_Release_Device( p_device );
                     free( p_rawdevices );
@@ -137,9 +137,11 @@ static int Open( vlc_object_t *p_this )
                 }
                 else
                 {
-                    msg_Dbg( p_access, "About to write %s", p_access->psz_path );
+                    msg_Dbg( p_access, "About to write %s",
+                             p_access->psz_filepath );
                     LIBMTP_Get_File_To_File( p_device, i_track_id,
-                                             p_access->psz_path, NULL, NULL );
+                                             p_access->psz_filepath, NULL,
+                                             NULL );
                     LIBMTP_Release_Device( p_device );
                     i = i_numrawdevices;
                 }
@@ -158,8 +160,8 @@ static int Open( vlc_object_t *p_this )
     int fd = p_sys->fd = -1;
 
     /* Open file */
-    msg_Dbg( p_access, "opening file `%s'", p_access->psz_path );
-    fd = open_file( p_access, p_access->psz_path );
+    msg_Dbg( p_access, "opening file `%s'", p_access->psz_filepath );
+    fd = open_file( p_access, p_access->psz_filepath );
 
     if( fd == -1 )
     {
@@ -189,8 +191,9 @@ static void Close( vlc_object_t * p_this )
     access_sys_t *p_sys = p_access->p_sys;
 
     close ( p_sys->fd );
-    if(	utf8_unlink( p_access->psz_path ) != 0 )
-        msg_Err( p_access, "Error deleting file %s, %m", p_access->psz_path );
+    if(	vlc_unlink( p_access->psz_filepath ) != 0 )
+        msg_Err( p_access, "Error deleting file %s, %m",
+                 p_access->psz_filepath );
     free( p_sys );
 }
 
@@ -235,7 +238,7 @@ static ssize_t Read( access_t *p_access, uint8_t *p_buffer, size_t i_len )
 /*****************************************************************************
  * Seek: seek to a specific location in a file
  *****************************************************************************/
-static int Seek( access_t *p_access, int64_t i_pos )
+static int Seek( access_t *p_access, uint64_t i_pos )
 {
     p_access->info.i_pos = i_pos;
     p_access->info.b_eof = false;
@@ -299,7 +302,7 @@ static int Control( access_t *p_access, int i_query, va_list args )
  *****************************************************************************/
 static int open_file( access_t *p_access, const char *path )
 {
-    int fd = utf8_open( path, O_RDONLY | O_NONBLOCK );
+    int fd = vlc_open( path, O_RDONLY | O_NONBLOCK );
     if( fd == -1 )
     {
         msg_Err( p_access, "cannot open file %s (%m)", path );

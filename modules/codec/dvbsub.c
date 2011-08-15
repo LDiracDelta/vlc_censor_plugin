@@ -122,10 +122,10 @@ vlc_module_begin ()
     set_subcategory( SUBCAT_INPUT_SCODEC )
     set_callbacks( Open, Close )
 
-    add_integer( DVBSUB_CFG_PREFIX "position", 8, NULL, POS_TEXT, POS_LONGTEXT, true )
-        change_integer_list( pi_pos_values, ppsz_pos_descriptions, NULL )
-    add_integer( DVBSUB_CFG_PREFIX "x", -1, NULL, POSX_TEXT, POSX_LONGTEXT, false )
-    add_integer( DVBSUB_CFG_PREFIX "y", -1, NULL, POSY_TEXT, POSY_LONGTEXT, false )
+    add_integer( DVBSUB_CFG_PREFIX "position", 8, POS_TEXT, POS_LONGTEXT, true )
+        change_integer_list( pi_pos_values, ppsz_pos_descriptions )
+    add_integer( DVBSUB_CFG_PREFIX "x", -1, POSX_TEXT, POSX_LONGTEXT, false )
+    add_integer( DVBSUB_CFG_PREFIX "y", -1, POSY_TEXT, POSY_LONGTEXT, false )
 
 #   define ENC_CFG_PREFIX "sout-dvbsub-"
     add_submodule ()
@@ -133,9 +133,8 @@ vlc_module_begin ()
     set_capability( "encoder", 100 )
     set_callbacks( OpenEncoder, CloseEncoder )
 
-    add_integer( ENC_CFG_PREFIX "x", -1, NULL, ENC_POSX_TEXT, ENC_POSX_LONGTEXT, false )
-    add_integer( ENC_CFG_PREFIX "y", -1, NULL, ENC_POSY_TEXT, ENC_POSY_LONGTEXT, false )
-    add_obsolete_integer( ENC_CFG_PREFIX "timeout" ) /* Suppressed since 0.8.5 */
+    add_integer( ENC_CFG_PREFIX "x", -1, ENC_POSX_TEXT, ENC_POSX_LONGTEXT, false )
+    add_integer( ENC_CFG_PREFIX "y", -1, ENC_POSY_TEXT, ENC_POSY_LONGTEXT, false )
 vlc_module_end ()
 
 static const char *const ppsz_enc_options[] = { "x", "y", NULL };
@@ -335,7 +334,7 @@ static int Open( vlc_object_t *p_this )
     if( !p_sys )
         return VLC_ENOMEM;
 
-    p_sys->i_pts          = (mtime_t) 0;
+    p_sys->i_pts          = VLC_TS_INVALID;
     p_sys->i_id           = p_dec->fmt_in.subs.dvb.i_id & 0xFFFF;
     p_sys->i_ancillary_id = p_dec->fmt_in.subs.dvb.i_id >> 16;
 
@@ -405,7 +404,7 @@ static subpicture_t *Decode( decoder_t *p_dec, block_t **pp_block )
         default_dds_init( p_dec );
 
     p_sys->i_pts = p_block->i_pts;
-    if( p_sys->i_pts <= 0 )
+    if( p_sys->i_pts <= VLC_TS_INVALID )
     {
 #ifdef DEBUG_DVBSUB
         /* Some DVB channels send stuffing segments in non-dated packets so
@@ -442,7 +441,7 @@ static subpicture_t *Decode( decoder_t *p_dec, block_t **pp_block )
         decode_segment( p_dec, &p_sys->bs );
     }
 
-    if( bs_read( &p_sys->bs, 8 ) != 0xff ) /* End marker */
+    if( ( bs_read( &p_sys->bs, 8 ) & 0x3f ) != 0x3f ) /* End marker */
     {
         msg_Warn( p_dec, "end marker not found (corrupted subtitle ?)" );
         block_Release( p_block );
@@ -913,7 +912,7 @@ static void decode_region_composition( decoder_t *p_dec, bs_t *s )
             free( p_region->p_pixbuf );
         }
 
-        p_region->p_pixbuf = malloc( i_height * i_width );
+        p_region->p_pixbuf = xmalloc( i_height * i_width );
         p_region->i_depth = 0;
         b_fill = true;
     }
@@ -947,8 +946,7 @@ static void decode_region_composition( decoder_t *p_dec, bs_t *s )
 
         /* We create a new object */
         p_region->i_object_defs++;
-        p_region->p_object_defs =
-            realloc( p_region->p_object_defs,
+        p_region->p_object_defs = xrealloc( p_region->p_object_defs,
                      sizeof(dvbsub_objectdef_t) * p_region->i_object_defs );
 
         /* We parse object properties */
@@ -1165,7 +1163,7 @@ static void decode_object( decoder_t *p_dec, bs_t *s )
                 if( p_region->p_object_defs[i].i_id != i_id ) continue;
 
                 p_region->p_object_defs[i].psz_text =
-                    realloc( p_region->p_object_defs[i].psz_text,
+                    xrealloc( p_region->p_object_defs[i].psz_text,
                              i_number_of_codes + 1 );
 
                 /* FIXME 16bits -> char ??? See Preamble */
@@ -1478,17 +1476,18 @@ static subpicture_t *render( decoder_t *p_dec )
     int i_base_y;
 
     /* Allocate the subpicture internal data. */
-    p_spu = decoder_NewSubpicture( p_dec );
+    p_spu = decoder_NewSubpicture( p_dec, NULL );
     if( !p_spu )
         return NULL;
 
     p_spu->b_absolute = p_sys->b_absolute;
     /* Set the pf_render callback */
-    p_spu->i_start = (mtime_t) p_sys->i_pts;
+    p_spu->i_start = p_sys->i_pts;
     //p_spu->i_stop = (mtime_t) 0;
     p_spu->b_ephemer = true;
     //p_spu->b_fade = true;
     //p_spu->i_stop = p_spu->i_start + (mtime_t) (i_timeout * 1000000);
+    p_spu->b_subtitle = true;
 
     /* Correct positioning of SPU */
     i_base_x = p_sys->i_spu_x;
@@ -1583,7 +1582,8 @@ static subpicture_t *render( decoder_t *p_dec )
         /* Create new SPU region */
         memset( &fmt, 0, sizeof(video_format_t) );
         fmt.i_chroma = VLC_CODEC_YUVP;
-        fmt.i_aspect = 0; /* 0 means use aspect ratio of background video */
+        fmt.i_sar_num = 0; /* 0 means use aspect ratio of background video */
+        fmt.i_sar_den = 1;
         fmt.i_width = fmt.i_visible_width = p_region->i_width;
         fmt.i_height = fmt.i_visible_height = p_region->i_height;
         fmt.i_x_offset = fmt.i_y_offset = 0;
@@ -1636,16 +1636,12 @@ static subpicture_t *render( decoder_t *p_dec )
             /* Create new SPU region */
             memset( &fmt, 0, sizeof(video_format_t) );
             fmt.i_chroma = VLC_CODEC_TEXT;
-            fmt.i_aspect = VOUT_ASPECT_FACTOR;
+            fmt.i_sar_num = 1;
+            fmt.i_sar_den = 1;
             fmt.i_width = fmt.i_visible_width = p_region->i_width;
             fmt.i_height = fmt.i_visible_height = p_region->i_height;
             fmt.i_x_offset = fmt.i_y_offset = 0;
             p_spu_region = subpicture_region_New( &fmt );
-            if( !p_region )
-            {
-                msg_Err( p_dec, "cannot allocate SPU region" );
-                continue;
-            }
 
             p_spu_region->psz_text = strdup( p_object_def->psz_text );
             p_spu_region->i_x = i_base_x + p_regiondef->i_x + p_object_def->i_x;
@@ -1838,7 +1834,7 @@ static subpicture_t *YuvaYuvp( subpicture_t *p_subpic )
 #endif
 
 #ifndef RANDOM_DITHERING
-        pi_delta = malloc( ( p_region->p_picture->p[0].i_pitch + 1 )
+        pi_delta = xmalloc( ( p_region->p_picture->p[0].i_pitch + 1 )
                             * sizeof(int) * 4  );
         for( i = 0; i < (p_region->p_picture->p[0].i_pitch + 1) * 4 ; i++ )
         {
@@ -1971,7 +1967,7 @@ static block_t *Encode( encoder_t *p_enc, subpicture_t *p_subpic )
         char psz_fourcc[5];
         memset( &psz_fourcc, 0, sizeof( psz_fourcc ) );
         vlc_fourcc_to_char( p_region->fmt.i_chroma, &psz_fourcc );
-        msg_Err( p_enc, "chroma %4s not supported", psz_fourcc );
+        msg_Err( p_enc, "chroma %4.4s not supported", psz_fourcc );
         return NULL;
     }
 
@@ -2078,9 +2074,8 @@ static void encode_page_composition( encoder_t *p_enc, bs_t *s,
         {
             encoder_region_t region;
             region.i_width = region.i_height = 0;
-            p_sys->p_regions =
-                realloc( p_sys->p_regions, sizeof(encoder_region_t) *
-                         (p_sys->i_regions + 1) );
+            p_sys->p_regions = xrealloc( p_sys->p_regions,
+                          sizeof(encoder_region_t) * (p_sys->i_regions + 1) );
             p_sys->p_regions[p_sys->i_regions++] = region;
         }
 

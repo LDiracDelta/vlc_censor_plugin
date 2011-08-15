@@ -1,7 +1,7 @@
 /*****************************************************************************
  * libmp4.h : LibMP4 library for mp4 module for vlc
  *****************************************************************************
- * Copyright (C) 2001-2004 the VideoLAN team
+ * Copyright (C) 2001-2004, 2010 the VideoLAN team
  * $Id$
  * Authors: Laurent Aimar <fenrir@via.ecp.fr>
  *
@@ -96,6 +96,7 @@
 #define FOURCC_rtp  VLC_FOURCC( 'r', 't', 'p', ' ' )
 
 #define FOURCC_isom VLC_FOURCC( 'i', 's', 'o', 'm' )
+#define FOURCC_3gp4 VLC_FOURCC( '3', 'g', 'p', '4' )
 #define FOURCC_esds VLC_FOURCC( 'e', 's', 'd', 's' )
 
 #define FOURCC__mp3 VLC_FOURCC( '.', 'm', 'p', '3' )
@@ -120,6 +121,9 @@
 #define FOURCC_alac VLC_FOURCC( 'a', 'l', 'a', 'c' )
 #define FOURCC_dac3 VLC_FOURCC( 'd', 'a', 'c', '3' )
 #define FOURCC_dec3 VLC_FOURCC( 'd', 'e', 'c', '3' )
+#define FOURCC_enda VLC_FOURCC( 'e', 'n', 'd', 'a' )
+#define FOURCC_gnre VLC_FOURCC( 'g', 'n', 'r', 'e' )
+#define FOURCC_trkn VLC_FOURCC( 't', 'r', 'k', 'n' )
 
 #define FOURCC_zlib VLC_FOURCC( 'z', 'l', 'i', 'b' )
 #define FOURCC_SVQ1 VLC_FOURCC( 'S', 'V', 'Q', '1' )
@@ -193,7 +197,6 @@
 
 #define FOURCC_0xa9nam VLC_FOURCC( 0xa9, 'n', 'a', 'm' )
 #define FOURCC_0xa9aut VLC_FOURCC( 0xa9, 'a', 'u', 't' )
-#define FOURCC_0xa9swr VLC_FOURCC( 0xa9, 's', 'w', 'r' )
 #define FOURCC_0xa9cpy VLC_FOURCC( 0xa9, 'c', 'p', 'y' )
 #define FOURCC_0xa9inf VLC_FOURCC( 0xa9, 'i', 'n', 'f' )
 #define FOURCC_0xa9ART VLC_FOURCC( 0xa9, 'A', 'R', 'T' )
@@ -217,6 +220,14 @@
 #define FOURCC_0xa9wrt VLC_FOURCC( 0xa9, 'w', 'r', 't' )
 #define FOURCC_0xa9com VLC_FOURCC( 0xa9, 'c', 'o', 'm' )
 #define FOURCC_0xa9gen VLC_FOURCC( 0xa9, 'g', 'e', 'n' )
+#define FOURCC_0xa9too VLC_FOURCC( 0xa9, 't', 'o', 'o' )
+#define FOURCC_0xa9wrn VLC_FOURCC( 0xa9, 'w', 'r', 'n' )
+#define FOURCC_0xa9swr VLC_FOURCC( 0xa9, 's', 'w', 'r' )
+#define FOURCC_0xa9mak VLC_FOURCC( 0xa9, 'm', 'a', 'k' )
+#define FOURCC_0xa9mod VLC_FOURCC( 0xa9, 'm', 'o', 'd' )
+#define FOURCC_0xa9PRD VLC_FOURCC( 0xa9, 'P', 'R', 'D' )
+#define FOURCC_0xa9grp VLC_FOURCC( 0xa9, 'g', 'r', 'p' )
+#define FOURCC_0xa9lyr VLC_FOURCC( 0xa9, 'g', 'r', 'p' )
 #define FOURCC_chpl VLC_FOURCC( 'c', 'h', 'p', 'l' )
 #define FOURCC_WLOC VLC_FOURCC( 'W', 'L', 'O', 'C' )
 
@@ -810,6 +821,63 @@ typedef struct
 
 } MP4_Box_data_rmqu_t;
 
+typedef struct MP4_Box_data_mfhd_s
+{
+    uint32_t i_sequence_number;
+
+    uint8_t *p_vendor_extension;
+
+} MP4_Box_data_mfhd_t;
+
+#define MP4_TFHD_BASE_DATA_OFFSET     (1LL<<0)
+#define MP4_TFHD_SAMPLE_DESC_INDEX    (1LL<<1)
+#define MP4_TFHD_DFLT_SAMPLE_DURATION (1LL<<3)
+#define MP4_TFHD_DFLT_SAMPLE_SIZE     (1LL<<4)
+#define MP4_TFHD_DFLT_SAMPLE_FLAGS    (1LL<<5)
+typedef struct MP4_Box_data_tfhd_s
+{
+    uint8_t  i_version;
+    uint32_t i_flags;
+    uint32_t i_track_ID;
+
+    /* optional fields */
+    uint64_t i_base_data_offset;
+    uint32_t i_sample_description_index;
+    uint32_t i_default_sample_duration;
+    uint32_t i_default_sample_size;
+    uint32_t i_default_sample_flags;
+
+} MP4_Box_data_tfhd_t;
+
+#define MP4_TRUN_DATA_OFFSET         (1<<0)
+#define MP4_TRUN_FIRST_FLAGS         (1<<2)
+#define MP4_TRUN_SAMPLE_DURATION     (1<<8)
+#define MP4_TRUN_SAMPLE_SIZE         (1<<9)
+#define MP4_TRUN_SAMPLE_FLAGS        (1<<10)
+#define MP4_TRUN_SAMPLE_TIME_OFFSET  (1<<11)
+typedef struct MP4_descriptor_trun_sample_t
+{
+    uint32_t i_duration;
+    uint32_t i_size;
+    uint32_t i_flags;
+    uint32_t i_composition_time_offset;
+} MP4_descriptor_trun_sample_t;
+
+typedef struct MP4_Box_data_trun_s
+{
+    uint8_t  i_version;
+    uint32_t i_flags;
+    uint32_t i_sample_count;
+
+    /* optional fields */
+    uint32_t i_data_offset;
+    uint32_t i_first_sample_flags;
+
+    MP4_descriptor_trun_sample_t *p_samples;
+
+} MP4_Box_data_trun_t;
+
+
 typedef struct
 {
     char *psz_text;
@@ -872,6 +940,25 @@ typedef struct
 
 } MP4_Box_data_dac3_t;
 
+typedef struct
+{
+    uint16_t i_little_endian;
+
+} MP4_Box_data_enda_t;
+
+typedef struct
+{
+    uint16_t i_genre;
+
+} MP4_Box_data_gnre_t;
+
+typedef struct
+{
+    uint32_t i_track_number;
+    uint32_t i_track_total;
+
+} MP4_Box_data_trkn_t;
+
 /*
 typedef struct MP4_Box_data__s
 {
@@ -886,6 +973,9 @@ typedef union MP4_Box_data_s
 {
     MP4_Box_data_ftyp_t *p_ftyp;
     MP4_Box_data_mvhd_t *p_mvhd;
+    MP4_Box_data_mfhd_t *p_mfhd;
+    MP4_Box_data_tfhd_t *p_tfhd;
+    MP4_Box_data_trun_t *p_trun;
     MP4_Box_data_tkhd_t *p_tkhd;
     MP4_Box_data_mdhd_t *p_mdhd;
     MP4_Box_data_hdlr_t *p_hdlr;
@@ -898,14 +988,17 @@ typedef union MP4_Box_data_s
     MP4_Box_data_stts_t *p_stts;
     MP4_Box_data_ctts_t *p_ctts;
     MP4_Box_data_stsd_t *p_stsd;
-        MP4_Box_data_sample_vide_t *p_sample_vide;
-        MP4_Box_data_sample_soun_t *p_sample_soun;
-        MP4_Box_data_sample_text_t *p_sample_text;
-        MP4_Box_data_sample_hint_t *p_sample_hint;
+    MP4_Box_data_sample_vide_t *p_sample_vide;
+    MP4_Box_data_sample_soun_t *p_sample_soun;
+    MP4_Box_data_sample_text_t *p_sample_text;
+    MP4_Box_data_sample_hint_t *p_sample_hint;
 
-        MP4_Box_data_esds_t *p_esds;
-        MP4_Box_data_avcC_t *p_avcC;
-        MP4_Box_data_dac3_t *p_dac3;
+    MP4_Box_data_esds_t *p_esds;
+    MP4_Box_data_avcC_t *p_avcC;
+    MP4_Box_data_dac3_t *p_dac3;
+    MP4_Box_data_enda_t *p_enda;
+    MP4_Box_data_gnre_t *p_gnre;
+    MP4_Box_data_trkn_t *p_trkn;
 
     MP4_Box_data_stsz_t *p_stsz;
     MP4_Box_data_stz2_t *p_stz2;
@@ -986,7 +1079,7 @@ void MP4_BoxFree( stream_t *, MP4_Box_t *p_box );
 /*****************************************************************************
  * MP4_DumpBoxStructure: print the structure of the p_box
  *****************************************************************************
- * Usefull while debugging
+ * Useful while debugging
  *****************************************************************************/
 void MP4_BoxDumpStructure( stream_t *p_input, MP4_Box_t *p_box );
 

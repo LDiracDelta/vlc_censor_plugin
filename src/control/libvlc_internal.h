@@ -36,16 +36,21 @@
 
 #include <vlc_common.h>
 
+/* Note well: this header is included from LibVLC core.
+ * Therefore, static inline functions MUST NOT call LibVLC functions here
+ * (this can cause linkage failure on some platforms). */
+
 /***************************************************************************
  * Internal creation and destruction functions
  ***************************************************************************/
-VLC_EXPORT (libvlc_int_t *, libvlc_InternalCreate, ( void ) );
-VLC_EXPORT (int, libvlc_InternalInit, ( libvlc_int_t *, int, const char *ppsz_argv[] ) );
-VLC_EXPORT (void, libvlc_InternalCleanup, ( libvlc_int_t * ) );
-VLC_EXPORT (void, libvlc_InternalDestroy, ( libvlc_int_t * ) );
+VLC_API libvlc_int_t *libvlc_InternalCreate( void );
+VLC_API int libvlc_InternalInit( libvlc_int_t *, int, const char *ppsz_argv[] );
+VLC_API void libvlc_InternalCleanup( libvlc_int_t * );
+VLC_API void libvlc_InternalDestroy( libvlc_int_t * );
 
-VLC_EXPORT (int, libvlc_InternalAddIntf, ( libvlc_int_t *, const char * ) );
-VLC_EXPORT (void, libvlc_InternalWait, ( libvlc_int_t * ) );
+VLC_API int libvlc_InternalAddIntf( libvlc_int_t *, const char * );
+VLC_API void libvlc_InternalWait( libvlc_int_t * );
+VLC_API void libvlc_SetExitHandler( libvlc_int_t *, void (*) (void *), void * );
 
 typedef void (*libvlc_vlm_release_func_t)( libvlc_instance_t * ) ;
 
@@ -81,16 +86,14 @@ void libvlc_deinit_threads (void);
 
 /* Events */
 libvlc_event_manager_t * libvlc_event_manager_new(
-        void * p_obj, libvlc_instance_t * p_libvlc_inst,
-        libvlc_exception_t *p_e );
+        void * p_obj, libvlc_instance_t * p_libvlc_inst );
 
 void libvlc_event_manager_release(
         libvlc_event_manager_t * p_em );
 
 void libvlc_event_manager_register_event_type(
         libvlc_event_manager_t * p_em,
-        libvlc_event_type_t event_type,
-        libvlc_exception_t * p_e );
+        libvlc_event_type_t event_type );
 
 void libvlc_event_send(
         libvlc_event_manager_t * p_em,
@@ -99,16 +102,16 @@ void libvlc_event_send(
 void libvlc_event_attach_async( libvlc_event_manager_t * p_event_manager,
                                libvlc_event_type_t event_type,
                                libvlc_callback_t pf_callback,
-                               void *p_user_data,
-                               libvlc_exception_t *p_e );
+                               void *p_user_data );
 
-/* Exception shorcuts */
+static inline libvlc_time_t from_mtime(mtime_t time)
+{
+    return (time + 500ULL)/ 1000ULL;
+}
 
-#define RAISENULL( ... ) { libvlc_printerr(__VA_ARGS__); \
-                           libvlc_exception_raise( p_e ); \
-                           return NULL; }
-#define RAISEZERO( ... ) { libvlc_printerr(__VA_ARGS__); \
-                           libvlc_exception_raise( p_e ); \
-                           return 0; }
+static inline mtime_t to_mtime(libvlc_time_t time)
+{
+    return time * 1000ULL;
+}
 
 #endif

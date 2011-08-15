@@ -48,24 +48,9 @@
 
 enum
 {
-    NO_PROTO,
-    HTTP_PROTO,
-    HTTPS_PROTO,
-    MMS_PROTO,
-    FTP_PROTO,
-    RTSP_PROTO,
-    RTP_PROTO,
-    UDP_PROTO,
-    RTMP_PROTO
-};
-
-enum
-{
-    V4L_DEVICE,
     V4L2_DEVICE,
     PVR_DEVICE,
-    DVB_DEVICE,
-    BDA_DEVICE,
+    DTV_DEVICE,
     DSHOW_DEVICE,
     SCREEN_DEVICE,
     JACK_DEVICE
@@ -75,10 +60,11 @@ class QWidget;
 class QLineEdit;
 class QString;
 class QStringListModel;
+class QEvent;
 
 class OpenPanel: public QWidget
 {
-    Q_OBJECT;
+    Q_OBJECT
 public:
     OpenPanel( QWidget *p, intf_thread_t *_p_intf ) : QWidget( p )
     {
@@ -86,6 +72,7 @@ public:
     }
     virtual ~OpenPanel() {};
     virtual void clear() = 0;
+    virtual void onFocus() {}
 protected:
     intf_thread_t *p_intf;
 public slots:
@@ -97,7 +84,7 @@ signals:
 
 class FileOpenBox: public QFileDialog
 {
-    Q_OBJECT;
+    Q_OBJECT
 public:
     FileOpenBox( QWidget *parent, const QString &caption,
                  const QString &directory, const QString &filter ):
@@ -110,14 +97,14 @@ public slots:
 
 class FileOpenPanel: public OpenPanel
 {
-    Q_OBJECT;
+    Q_OBJECT
 public:
     FileOpenPanel( QWidget *, intf_thread_t * );
     virtual ~FileOpenPanel();
     virtual void clear() ;
     virtual void accept() ;
 protected:
-    bool eventFilter(QObject *obj, QEvent *event)
+    bool eventFilter(QObject *, QEvent *event)
     {
         if( event->type() == QEvent::Hide ||
             event->type() == QEvent::HideToParent )
@@ -127,6 +114,10 @@ protected:
         }
         return false;
     }
+    virtual void dropEvent( QDropEvent *);
+    virtual void dragEnterEvent( QDragEnterEvent * );
+    virtual void dragMoveEvent( QDragMoveEvent * );
+    virtual void dragLeaveEvent( QDragLeaveEvent * );
 private:
     Ui::OpenFile ui;
     FileOpenBox *dialogBox;
@@ -143,24 +134,40 @@ private slots:
 
 class NetOpenPanel: public OpenPanel
 {
-    Q_OBJECT;
+    Q_OBJECT
 public:
     NetOpenPanel( QWidget *, intf_thread_t * );
     virtual ~NetOpenPanel();
     virtual void clear() ;
+    void onFocus();
 private:
     Ui::OpenNetwork ui;
     QStringListModel *mrlList;
 public slots:
     virtual void updateMRL();
 private slots:
-    void updateProtocol( int );
-    void updateCompleter();
+    void updateModel();
+};
+
+class UrlValidator : public QValidator
+{
+   Q_OBJECT
+public:
+   UrlValidator( QObject *parent ) : QValidator( parent ) { }
+   void fixup( QString& ) const;
+   QValidator::State validate( QString&, int& ) const;
 };
 
 class DiscOpenPanel: public OpenPanel
 {
-    Q_OBJECT;
+    Q_OBJECT
+    enum    DiscType
+    {
+        None,
+        Dvd,
+        Vcd,
+        Cdda
+    };
 public:
     DiscOpenPanel( QWidget *, intf_thread_t * );
     virtual ~DiscOpenPanel();
@@ -169,7 +176,7 @@ public:
 private:
     Ui::OpenDisk ui;
     char *psz_dvddiscpath, *psz_vcddiscpath, *psz_cddadiscpath;
-    bool b_firstdvd, b_firstvcd, b_firstcdda;
+    DiscType    m_discType;
 public slots:
     virtual void updateMRL() ;
 private slots:
@@ -181,7 +188,7 @@ private slots:
 
 class CaptureOpenPanel: public OpenPanel
 {
-    Q_OBJECT;
+    Q_OBJECT
 public:
     CaptureOpenPanel( QWidget *, intf_thread_t * );
     virtual ~CaptureOpenPanel();
@@ -193,26 +200,22 @@ private:
     QString advMRL;
     QDialog *adv;
 #ifdef WIN32
-    QRadioButton *bdas, *bdat, *bdac, *bdaa;
-    QSpinBox *bdaCard, *bdaFreq, *bdaSrate;
-    QLabel *bdaSrateLabel, *bdaBandLabel;
-    QComboBox *bdaBandBox;
     StringListConfigControl *vdevDshowW, *adevDshowW;
     QLineEdit *dshowVSizeLine;
 #else
-    QRadioButton *dvbs, *dvbt, *dvbc;
-    QLabel *dvbBandLabel, *dvbSrateLabel;
-    QSpinBox  *v4lFreq, *pvrFreq, *pvrBitr;
-    QLineEdit *v4lVideoDevice, *v4lAudioDevice;
-    QLineEdit *v4l2VideoDevice, *v4l2AudioDevice;
+    QSpinBox  *pvrFreq, *pvrBitr;
+    QComboBox *v4l2VideoDevice, *v4l2AudioDevice;
     QLineEdit *pvrDevice, *pvrRadioDevice;
-    QComboBox *v4lNormBox, *v4l2StdBox, *pvrNormBox, *dvbBandBox;
-    QSpinBox *dvbCard, *dvbFreq, *dvbSrate;
+    QComboBox *v4l2StdBox, *pvrNormBox;
     QSpinBox *jackChannels, *jackCaching;
     QCheckBox *jackPace, *jackConnect;
     QLineEdit *jackPortsSelected;
 #endif
-    QSpinBox *screenFPS;
+    QRadioButton *dvbc, *dvbs, *dvbs2, *dvbt, *dvbt2, *atsc, *cqam;
+    QLabel *dvbBandLabel, *dvbSrateLabel, *dvbModLabel;
+    QComboBox *dvbQamBox, *dvbPskBox, *dvbBandBox;
+    QSpinBox *dvbCard, *dvbFreq, *dvbSrate;
+    QDoubleSpinBox *screenFPS;
 
 public slots:
     virtual void updateMRL();

@@ -21,15 +21,11 @@
  * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston MA 02110-1301, USA.
  *****************************************************************************/
 
-#if defined(__PLUGIN__) || defined(__BUILTIN__) || !defined(__LIBVLC__)
-# error This header file can only be included from LibVLC.
-#endif
-
-#ifndef _VLM_INTERNAL_H
-#define _VLM_INTERNAL_H 1
+#ifndef LIBVLC_VLM_INTERNAL_H
+#define LIBVLC_VLM_INTERNAL_H 1
 
 #include <vlc_vlm.h>
-#include "input_internal.h"
+#include "input_interface.h"
 
 /* Private */
 typedef struct
@@ -42,6 +38,7 @@ typedef struct
 
     bool      b_sout_keep;
 
+    vlc_object_t *p_parent;
     input_item_t      *p_item;
     input_thread_t    *p_input;
     input_resource_t *p_input_resource;
@@ -90,12 +87,16 @@ struct vlm_t
 
     vlc_mutex_t  lock;
     vlc_thread_t thread;
+    vlc_mutex_t  lock_manage;
+    vlc_cond_t   wait_manage;
+    unsigned     users;
 
+    /* tell vlm thread there is work to do */
+    bool         input_state_changed;
     /* */
     int64_t        i_id;
 
     /* Vod server (used by media) */
-    int            i_vod;
     vod_t          *p_vod;
 
     /* Media list */

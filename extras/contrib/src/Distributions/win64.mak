@@ -1,13 +1,15 @@
 # WIN32 rules
 all: .iconv .intl .freetype .fribidi .zlib \
-        .a52 .mpeg2 .id3tag .mad .ogg .vorbis .shout .vorbisenc .theora \
-        .flac .speex .faad .lame .ebml  .matroska .ffmpeg .dvdcss \
-        .live .goom2k4 .caca .mod .x264  .xml .twolame \
-        .png .gpg-error .gcrypt .gnutls .mpcdec \
-        .dvdnav .dvbpsi .qt4_win32 .schroedinger .SDL_image \
-        .dx_headers .dshow_headers .gecko-win32 .dca \
-        .lua .tag .fontconfig .portaudio .kate .libass
+        .gpg-error .gcrypt .gnutls .xml .fontconfig \
+        .a52 .mpeg2 .mad .ogg .vorbis .shout .vorbisenc .theora \
+        .flac .speex .faad .lame .ebml .matroska .ffmpeg \
+        .live .goom2k4 .caca .mod .x264 .twolame \
+        .png .mpcdec .schroedinger .dvbpsi \
+        .dca .kate .libass .SDL_image  \
+        .libbluray .dvdcss .libupnp .dvdnav .qt4_win32 \
+        .dx_headers .dshow_headers .portaudio .gecko \
+        .lua .tag .peflags .sqlite3 .libprojectM
 # .pthreads
 #.zvbi \
-#        .fluid .aclocal
+#        .fluid
 #       .daap .cddb .cdio .vcdimager

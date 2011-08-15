@@ -35,80 +35,20 @@
 extern "C" {
 # endif
 
+/**
+ * \ingroup libvlc_core
+ * @{
+ */
+
 /** This structure is opaque. It represents a libvlc instance */
 typedef struct libvlc_instance_t libvlc_instance_t;
-
-/*****************************************************************************
- * Exceptions
- *****************************************************************************/
-
-/** \defgroup libvlc_exception libvlc_exception
- * \ingroup libvlc_core
- * LibVLC Exceptions handling
- * @{
- */
-
-typedef struct libvlc_exception_t
-{
-    int b_raised;
-} libvlc_exception_t;
-
-/**@} */
-
-/*****************************************************************************
- * Time
- *****************************************************************************/
-/** \defgroup libvlc_time libvlc_time
- * \ingroup libvlc_core
- * LibVLC Time support in libvlc
- * @{
- */
 
 typedef int64_t libvlc_time_t;
 
 /**@} */
 
-/*****************************************************************************
- * Media Descriptor
- *****************************************************************************/
-/** \defgroup libvlc_media libvlc_media
- * \ingroup libvlc
- * LibVLC Media Descriptor handling
- * @{
- */
-
-
-/**@} */
-
-
-/*****************************************************************************
- * Playlist
- *****************************************************************************/
-/** \defgroup libvlc_playlist libvlc_playlist (Deprecated)
- * \ingroup libvlc
- * LibVLC Playlist handling (Deprecated)
- * @deprecated Use media_list
- * @{
- */
-
-typedef struct libvlc_playlist_item_t
-{
-    int i_id;
-    char * psz_uri;
-    char * psz_name;
-
-} libvlc_playlist_item_t;
-
-/**@} */
-
-
-/*****************************************************************************
- * Message log handling
- *****************************************************************************/
-
-/** \defgroup libvlc_log libvlc_log
- * \ingroup libvlc_core
- * LibVLC Message Logging
+/**
+ * \ingroup libvlc_log
  * @{
  */
 
@@ -120,7 +60,6 @@ typedef struct libvlc_log_iterator_t libvlc_log_iterator_t;
 
 typedef struct libvlc_log_message_t
 {
-    unsigned    sizeof_msg;   /* sizeof() of message structure, must be filled in by user */
     int         i_severity;   /* 0=INFO, 1=ERR, 2=WARN, 3=DBG */
     const char *psz_type;     /* module type */
     const char *psz_name;     /* module name */

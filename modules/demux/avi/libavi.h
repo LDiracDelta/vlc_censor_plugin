@@ -174,10 +174,10 @@ typedef struct
 typedef struct avi_chunk_indx_s
 {
     AVI_CHUNK_COMMON
-    int16_t i_longsperentry;
-    int8_t  i_indexsubtype;
-    int8_t  i_indextype;
-    int32_t i_entriesinuse;
+    int16_t  i_longsperentry;
+    int8_t   i_indexsubtype;
+    int8_t   i_indextype;
+    uint32_t i_entriesinuse;
     vlc_fourcc_t i_id;
 
     int64_t i_baseoffset;
@@ -216,6 +216,7 @@ typedef union avi_chunk_u
 int     _AVI_ChunkRead( stream_t *,
                         avi_chunk_t *p_chk,
                         avi_chunk_t *p_father );
+void    _AVI_ChunkFree( stream_t *, avi_chunk_t * );
 
 int     _AVI_ChunkCount( avi_chunk_t *, vlc_fourcc_t );
 void   *_AVI_ChunkFind ( avi_chunk_t *, vlc_fourcc_t, int );
@@ -229,6 +230,8 @@ void    AVI_ChunkFreeRoot( stream_t *, avi_chunk_t  *p_chk );
     _AVI_ChunkCount( (avi_chunk_t*)p_chk, i_fourcc )
 #define AVI_ChunkFind( p_chk, i_fourcc, i_number ) \
     _AVI_ChunkFind( (avi_chunk_t*)p_chk, i_fourcc, i_number )
+#define AVI_ChunkFree( a, b ) \
+    _AVI_ChunkFree( (a), (avi_chunk_t*)(b) )
 
 
     /* *** avi stuff *** */
@@ -296,6 +299,9 @@ void    AVI_ChunkFreeRoot( stream_t *, avi_chunk_t  *p_chk );
 #define AVITWOCC_dc            VLC_TWOCC('d','c')
 #define AVITWOCC_pc            VLC_TWOCC('p','c')
 #define AVITWOCC_AC            VLC_TWOCC('A','C')
+#define AVITWOCC_tx            VLC_TWOCC('t','x')
+#define AVITWOCC_sb            VLC_TWOCC('s','b')
+
     /* *** codex stuff ***  */
 
     /* DV */

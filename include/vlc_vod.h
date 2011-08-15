@@ -30,7 +30,8 @@
  */
 
 /**
- * \defgroup server Video On Demand (VOD)
+ * \defgroup vod Video On Demand (VOD)
+ * \ingroup server
  * Video On Demand (VOD) functionality is provided from VLM.
  * @{
  */
@@ -45,8 +46,6 @@ struct vod_t
 
     vod_media_t * (*pf_media_new)   ( vod_t *, const char *, input_item_t * );
     void          (*pf_media_del)   ( vod_t *, vod_media_t * );
-    int           (*pf_media_add_es)( vod_t *, vod_media_t *, es_format_t * );
-    void          (*pf_media_del_es)( vod_t *, vod_media_t *, es_format_t * );
 
     /* Owner properties */
     int (*pf_media_control) ( void *, vod_media_t *, const char *, int, va_list );
@@ -70,8 +69,8 @@ static inline int vod_MediaControl( vod_t *p_vod, vod_media_t *p_media,
 
 enum vod_query_e
 {
-    VOD_MEDIA_PLAY,         /* arg1= char *         res=    */
-    VOD_MEDIA_PAUSE,        /* arg1=                res=    */
+    VOD_MEDIA_PLAY,         /* arg1= char *, arg2= int64_t *, res=    */
+    VOD_MEDIA_PAUSE,        /* arg1= int64_t *      res=    */
     VOD_MEDIA_STOP,         /* arg1=                res=can fail    */
     VOD_MEDIA_SEEK,         /* arg1= double         res=    */
     VOD_MEDIA_REWIND,       /* arg1= double         res=    */

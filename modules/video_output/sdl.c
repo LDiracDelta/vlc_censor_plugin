@@ -38,7 +38,14 @@
 
 #include <assert.h>
 
-#include <SDL/SDL.h>
+#include <SDL.h>
+
+#ifndef WIN32
+# ifdef X_DISPLAY_MISSING
+#  error Xlib required due to XInitThreads
+# endif
+# include <vlc_xlib.h>
+#endif
 
 /*****************************************************************************
  * Module descriptor
@@ -51,25 +58,19 @@ static void Close(vlc_object_t *);
     "Force the SDL renderer to use a specific chroma format instead of " \
     "trying to improve performances by using the most efficient one.")
 
-#define DRIVER_TEXT N_("SDL video driver name")
-#define DRIVER_LONGTEXT N_(\
-    "Force a specific SDL video output driver.")
-
 vlc_module_begin()
     set_shortname("SDL")
     set_category(CAT_VIDEO)
     set_subcategory(SUBCAT_VIDEO_VOUT)
     set_description(N_("Simple DirectMedia Layer video output"))
-    set_capability("vout display", 60)
+    set_capability("vout display", 70)
     add_shortcut("sdl")
-    add_string("sdl-chroma", NULL, NULL, CHROMA_TEXT, CHROMA_LONGTEXT, true)
-#ifdef HAVE_SETENV
-    add_string("sdl-video-driver", NULL, NULL, DRIVER_TEXT, DRIVER_LONGTEXT, true)
-#endif
+    add_string("sdl-chroma", NULL, CHROMA_TEXT, CHROMA_LONGTEXT, true)
+    add_obsolete_string("sdl-video-driver") /* obsolete since 1.1.0 */
     set_callbacks(Open, Close)
 #if defined(__i386__) || defined(__x86_64__)
     /* On i386, SDL is linked against svgalib */
-    linked_with_a_crap_library_which_uses_atexit()
+    cannot_unload_broken_library()
 #endif
 vlc_module_end()
 
@@ -77,10 +78,10 @@ vlc_module_end()
 /*****************************************************************************
  * Local prototypes
  *****************************************************************************/
-static picture_t *Get    (vout_display_t *);
-static void       Display(vout_display_t *, picture_t *);
-static int        Control(vout_display_t *, int, va_list);
-static void       Manage(vout_display_t *);
+static picture_pool_t *Pool  (vout_display_t *, unsigned);
+static void           PictureDisplay(vout_display_t *, picture_t *, subpicture_t *);
+static int            Control(vout_display_t *, int, va_list);
+static void           Manage(vout_display_t *);
 
 /* */
 static int ConvertKey(SDLKey);
@@ -115,6 +116,11 @@ static int Open(vlc_object_t *object)
     vout_display_t *vd = (vout_display_t *)object;
     vout_display_sys_t *sys;
 
+#ifndef WIN32
+    if (!vlc_xlib_init (object))
+        return VLC_EGENERIC;
+#endif
+
     /* XXX: check for conflicts with the SDL audio output */
     vlc_mutex_lock(&sdl_lock);
 
@@ -129,14 +135,6 @@ static int Open(vlc_object_t *object)
         vlc_mutex_unlock(&sdl_lock);
         return VLC_ENOMEM;
     }
-
-#ifdef HAVE_SETENV
-    char *psz_driver = var_CreateGetNonEmptyString(vd, "sdl-video-driver");
-    if (psz_driver) {
-        setenv("SDL_VIDEODRIVER", psz_driver, 1);
-        free(psz_driver);
-    }
-#endif
 
     /* */
     int sdl_flags = SDL_INIT_VIDEO;
@@ -194,6 +192,7 @@ static int Open(vlc_object_t *object)
         msg_Err(vd, "no video mode available");
         goto error;
     }
+    vout_display_DeleteWindow(vd, NULL);
 
     sys->display = SDL_SetVideoMode(display_width, display_height,
                                     sys->display_bpp, sys->display_flags);
@@ -207,7 +206,7 @@ static int Open(vlc_object_t *object)
 
     /* */
     vlc_fourcc_t forced_chroma = 0;
-    char *psz_chroma = var_CreateGetNonEmptyString(vd, "sdl-chroma");
+    char *psz_chroma = var_InheritString(vd, "sdl-chroma");
     if (psz_chroma) {
         forced_chroma = vlc_fourcc_GetCodecFromString(VIDEO_ES, psz_chroma);
         if (forced_chroma)
@@ -218,7 +217,7 @@ static int Open(vlc_object_t *object)
 
     /* Try to open an overlay if requested */
     sys->overlay = NULL;
-    const bool is_overlay = var_CreateGetBool(vd, "overlay");
+    const bool is_overlay = var_InheritBool(vd, "overlay");
     if (is_overlay) {
         static const struct
         {
@@ -337,9 +336,9 @@ static int Open(vlc_object_t *object)
     vd->fmt = fmt;
     vd->info = info;
 
-    vd->get     = Get;
+    vd->pool    = Pool;
     vd->prepare = NULL;
-    vd->display = Display;
+    vd->display = PictureDisplay;
     vd->control = Control;
     vd->manage  = Manage;
 
@@ -389,11 +388,12 @@ static void Close(vlc_object_t *object)
 }
 
 /**
- * Return a direct buffer
+ * Return a pool of direct buffers
  */
-static picture_t *Get(vout_display_t *vd)
+static picture_pool_t *Pool(vout_display_t *vd, unsigned count)
 {
     vout_display_sys_t *sys = vd->sys;
+    VLC_UNUSED(count);
 
     if (!sys->pool) {
         picture_resource_t rsc;
@@ -430,17 +430,15 @@ static picture_t *Get(vout_display_t *vd)
             return NULL;
 
         sys->pool = picture_pool_New(1, &picture);
-        if (!sys->pool)
-            return NULL;
     }
 
-    return picture_pool_Get(sys->pool);
+    return sys->pool;
 }
 
 /**
  * Display a picture
  */
-static void Display(vout_display_t *vd, picture_t *p_pic)
+static void PictureDisplay(vout_display_t *vd, picture_t *p_pic, subpicture_t *p_subpicture)
 {
     vout_display_sys_t *sys = vd->sys;
 
@@ -459,6 +457,7 @@ static void Display(vout_display_t *vd, picture_t *p_pic)
     }
 
     picture_Release(p_pic);
+    VLC_UNUSED(p_subpicture);
 }
 
 
@@ -477,13 +476,11 @@ static int Control(vout_display_t *vd, int query, va_list args)
 
     case VOUT_DISPLAY_CHANGE_DISPLAY_SIZE: {
         const vout_display_cfg_t *cfg = va_arg(args, const vout_display_cfg_t *);
-        const bool is_forced = (bool)va_arg(args, int);
 
         /* */
-        if (is_forced)
-            sys->display = SDL_SetVideoMode(cfg->display.width,
-                                            cfg->display.height,
-                                            sys->display_bpp, sys->display_flags);
+        sys->display = SDL_SetVideoMode(cfg->display.width,
+                                        cfg->display.height,
+                                        sys->display_bpp, sys->display_flags);
         if (!sys->display) {
             sys->display = SDL_SetVideoMode(vd->cfg->display.width,
                                             vd->cfg->display.height,
@@ -559,7 +556,7 @@ static int Control(vout_display_t *vd, int query, va_list args)
     }
 
     case VOUT_DISPLAY_CHANGE_SOURCE_CROP:
-    case VOUT_DISPLAY_CHANGE_ON_TOP:
+    case VOUT_DISPLAY_CHANGE_WINDOW_STATE:
         /* I don't think it is possible to support with SDL:
          * - crop
          * - on top
@@ -647,9 +644,7 @@ static void Manage(vout_display_t *vd)
             const int y = (int64_t)(event.motion.y - sys->place.y) * vd->source.i_height / sys->place.height;
 
             SDL_ShowCursor(1);
-            if (x >= 0 && (unsigned)x < vd->source.i_width &&
-                y >= 0 && (unsigned)y < vd->source.i_height)
-                vout_display_SendEventMouseMoved(vd, x, y);
+            vout_display_SendEventMouseMoved(vd, x, y);
             break;
         }
 

@@ -1,4 +1,6 @@
 # Ignore install path
+build
+hosts
 translations
 demos
 examples
@@ -6,23 +8,8 @@ mkspecs
 phrasebooks
 *.xml
 *.tar.bz2
-share
-bin
-lib
-include
-man
-sbin
-etc
-gecko-sdk
-doc
-info
-Sparkle
 *.bak
-# Ignore fetched contrib
-src/*
-# But not our files
-!Makefile
-!src/Distributions/*
-!src/Patches
-!src/packages.mak
-!src/Makefile
+toolchain.cmake
+build-src/
+distro.mak
+config.mak

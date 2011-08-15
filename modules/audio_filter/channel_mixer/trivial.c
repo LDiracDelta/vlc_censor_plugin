@@ -46,7 +46,7 @@ static block_t *DoWork( filter_t *, block_t * );
  *****************************************************************************/
 vlc_module_begin ()
     set_description( N_("Audio filter for trivial channel mixing") )
-    set_capability( "audio filter2", 1 )
+    set_capability( "audio filter", 1 )
     set_category( CAT_AUDIO )
     set_subcategory( SUBCAT_AUDIO_MISC )
     set_callbacks( Create, NULL )
@@ -115,6 +115,9 @@ static block_t *DoWork( filter_t * p_filter, block_t * p_in_buf )
         if( !p_out_buf )
             goto out;
         p_out_buf->i_nb_samples = p_in_buf->i_nb_samples;
+        p_out_buf->i_dts        = p_in_buf->i_dts;
+        p_out_buf->i_pts        = p_in_buf->i_pts;
+        p_out_buf->i_length     = p_in_buf->i_length;
     }
 
     int32_t * p_dest = (int32_t *)p_out_buf->p_buffer;
@@ -161,10 +164,11 @@ static block_t *DoWork( filter_t * p_filter, block_t * p_in_buf )
         int i;
         for ( i = p_in_buf->i_nb_samples; i--; )
         {
-            *p_dest = p_src[1];
-            p_dest++;
-            *p_dest = p_src[0];
-            p_dest++;
+            int32_t i_tmp = p_src[0];
+            p_dest[0] = p_src[1];
+            p_dest[1] = i_tmp;
+
+            p_dest += 2;
             p_src += 2;
         }
     }

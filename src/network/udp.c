@@ -35,10 +35,6 @@
 
 #include <errno.h>
 
-#ifdef HAVE_SYS_TIME_H
-#    include <sys/time.h>
-#endif
-
 #include <vlc_network.h>
 
 #ifdef WIN32
@@ -49,7 +45,6 @@
 #       define IP_ADD_MEMBERSHIP 5
 #   endif
 #   define EAFNOSUPPORT WSAEAFNOSUPPORT
-#   define if_nametoindex( str ) atoi( str )
 #else
 #   include <unistd.h>
 #   ifdef HAVE_NET_IF_H
@@ -146,6 +141,7 @@ static int net_ListenSingle (vlc_object_t *obj, const char *host, int port,
     memset (&hints, 0, sizeof( hints ));
     hints.ai_family = family;
     hints.ai_socktype = SOCK_DGRAM;
+    hints.ai_protocol = protocol;
     hints.ai_flags = AI_PASSIVE;
 
     if (host && !*host)
@@ -158,7 +154,7 @@ static int net_ListenSingle (vlc_object_t *obj, const char *host, int port,
     if (val)
     {
         msg_Err (obj, "Cannot resolve %s port %d : %s", host, port,
-                 vlc_gai_strerror (val));
+                 gai_strerror (val));
         return -1;
     }
 
@@ -167,7 +163,7 @@ static int net_ListenSingle (vlc_object_t *obj, const char *host, int port,
     for (const struct addrinfo *ptr = res; ptr != NULL; ptr = ptr->ai_next)
     {
         int fd = net_Socket (obj, ptr->ai_family, ptr->ai_socktype,
-                             protocol ? protocol : ptr->ai_protocol);
+                             ptr->ai_protocol);
         if (fd == -1)
         {
             msg_Dbg (obj, "socket error: %m");
@@ -183,25 +179,13 @@ static int net_ListenSingle (vlc_object_t *obj, const char *host, int port,
             int on = (family == AF_INET6);
             setsockopt (fd, SOL_IPV6, IPV6_V6ONLY, &on, sizeof (on));
         }
-        else if (ptr->ai_family == AF_INET && family == AF_UNSPEC)
-        {
-            for (const struct addrinfo *p = ptr; p != NULL; p = p->ai_next)
-                if (p->ai_family == AF_INET6)
-                {
-                    net_Close (fd);
-                    fd = -1;
-                    break;
-                }
-            if (fd == -1)
-                continue;
-        }
-#else
+        if (ptr->ai_family == AF_INET)
+#endif
         if (family == AF_UNSPEC && ptr->ai_next != NULL)
         {
             msg_Warn (obj, "ambiguous network protocol specification");
             msg_Warn (obj, "please select IP version explicitly");
         }
-#endif
 
         fd = net_SetupDgramSocket( obj, fd, ptr );
         if( fd == -1 )
@@ -218,7 +202,7 @@ static int net_ListenSingle (vlc_object_t *obj, const char *host, int port,
         break;
     }
 
-    vlc_freeaddrinfo (res);
+    freeaddrinfo (res);
     return val;
 }
 
@@ -259,9 +243,13 @@ static int net_SetMcastHopLimit( vlc_object_t *p_this,
         /* BSD compatibility */
         unsigned char buf;
 
+        msg_Dbg( p_this, "cannot set hop limit (%d): %m", hlim );
         buf = (unsigned char)(( hlim > 255 ) ? 255 : hlim);
         if( setsockopt( fd, proto, cmd, &buf, sizeof( buf ) ) )
+        {
+            msg_Err( p_this, "cannot set hop limit (%d): %m", hlim );
             return VLC_EGENERIC;
+        }
     }
 
     return VLC_SUCCESS;
@@ -367,7 +355,7 @@ net_IPv4Join (vlc_object_t *obj, int fd,
     socklen_t optlen;
 
     /* Multicast interface IPv4 address */
-    char *iface = var_CreateGetNonEmptyString (obj, "miface-addr");
+    char *iface = var_InheritString (obj, "miface-addr");
     if ((iface != NULL)
      && (inet_pton (AF_INET, iface, &id) <= 0))
     {
@@ -380,7 +368,7 @@ net_IPv4Join (vlc_object_t *obj, int fd,
     memset (&opt, 0, sizeof (opt));
     if (src != NULL)
     {
-# ifdef IP_ADD_SOURCE_MEMBERSHIP
+# if defined( IP_ADD_SOURCE_MEMBERSHIP ) && !defined( __ANDROID__ )
         cmd = IP_ADD_SOURCE_MEMBERSHIP;
         opt.gsr4.imr_multiaddr = grp->sin_addr;
         opt.gsr4.imr_sourceaddr = src->sin_addr;
@@ -470,7 +458,7 @@ net_SourceSubscribe (vlc_object_t *obj, int fd,
 {
     int level, iid = 0;
 
-    char *iface = var_CreateGetNonEmptyString (obj, "miface");
+    char *iface = var_InheritString (obj, "miface");
     if (iface != NULL)
     {
         iid = if_nametoindex (iface);
@@ -645,25 +633,26 @@ static int net_SetDSCP( int fd, uint8_t dscp )
     return setsockopt( fd, level, cmd, &(int){ dscp }, sizeof (int));
 }
 
-
+#undef net_ConnectDgram
 /*****************************************************************************
- * __net_ConnectDgram:
+ * net_ConnectDgram:
  *****************************************************************************
  * Open a datagram socket to send data to a defined destination, with an
  * optional hop limit.
  *****************************************************************************/
-int __net_ConnectDgram( vlc_object_t *p_this, const char *psz_host, int i_port,
-                        int i_hlim, int proto )
+int net_ConnectDgram( vlc_object_t *p_this, const char *psz_host, int i_port,
+                      int i_hlim, int proto )
 {
     struct addrinfo hints, *res, *ptr;
     int             i_val, i_handle = -1;
     bool      b_unreach = false;
 
     if( i_hlim < 0 )
-        i_hlim = var_CreateGetInteger( p_this, "ttl" );
+        i_hlim = var_InheritInteger( p_this, "ttl" );
 
     memset( &hints, 0, sizeof( hints ) );
     hints.ai_socktype = SOCK_DGRAM;
+    hints.ai_protocol = proto;
 
     msg_Dbg( p_this, "net: connecting to [%s]:%d", psz_host, i_port );
 
@@ -671,7 +660,7 @@ int __net_ConnectDgram( vlc_object_t *p_this, const char *psz_host, int i_port,
     if( i_val )
     {
         msg_Err( p_this, "cannot resolve [%s]:%d : %s", psz_host, i_port,
-                 vlc_gai_strerror( i_val ) );
+                 gai_strerror( i_val ) );
         return -1;
     }
 
@@ -679,11 +668,10 @@ int __net_ConnectDgram( vlc_object_t *p_this, const char *psz_host, int i_port,
     {
         char *str;
         int fd = net_Socket (p_this, ptr->ai_family, ptr->ai_socktype,
-                             proto ? proto : ptr->ai_protocol);
+                             ptr->ai_protocol);
         if (fd == -1)
             continue;
 
-#if !defined( SYS_BEOS )
         /* Increase the receive buffer size to 1/2MB (8Mb/s during 1/2s)
         * to avoid packet loss caused by scheduling problems */
         setsockopt (fd, SOL_SOCKET, SO_RCVBUF, &(int){ 0x80000 }, sizeof (int));
@@ -691,26 +679,25 @@ int __net_ConnectDgram( vlc_object_t *p_this, const char *psz_host, int i_port,
 
         /* Allow broadcast sending */
         setsockopt (fd, SOL_SOCKET, SO_BROADCAST, &(int){ 1 }, sizeof (int));
-#endif
 
         if( i_hlim >= 0 )
             net_SetMcastHopLimit( p_this, fd, ptr->ai_family, i_hlim );
 
-        str = var_CreateGetNonEmptyString (p_this, "miface");
+        str = var_InheritString (p_this, "miface");
         if (str != NULL)
         {
             net_SetMcastOut (p_this, fd, ptr->ai_family, str, NULL);
             free (str);
         }
 
-        str = var_CreateGetNonEmptyString (p_this, "miface-addr");
+        str = var_InheritString (p_this, "miface-addr");
         if (str != NULL)
         {
             net_SetMcastOut (p_this, fd, ptr->ai_family, NULL, str);
             free (str);
         }
 
-        net_SetDSCP (fd, var_CreateGetInteger (p_this, "dscp"));
+        net_SetDSCP (fd, var_InheritInteger (p_this, "dscp"));
 
         if( connect( fd, ptr->ai_addr, ptr->ai_addrlen ) == 0 )
         {
@@ -733,7 +720,7 @@ int __net_ConnectDgram( vlc_object_t *p_this, const char *psz_host, int i_port,
         }
     }
 
-    vlc_freeaddrinfo( res );
+    freeaddrinfo( res );
 
     if( i_handle == -1 )
     {
@@ -746,15 +733,15 @@ int __net_ConnectDgram( vlc_object_t *p_this, const char *psz_host, int i_port,
     return i_handle;
 }
 
-
+#undef net_OpenDgram
 /*****************************************************************************
- * __net_OpenDgram:
+ * net_OpenDgram:
  *****************************************************************************
  * OpenDgram a datagram socket and return a handle
  *****************************************************************************/
-int __net_OpenDgram( vlc_object_t *obj, const char *psz_bind, int i_bind,
-                     const char *psz_server, int i_server,
-                     int family, int protocol )
+int net_OpenDgram( vlc_object_t *obj, const char *psz_bind, int i_bind,
+                   const char *psz_server, int i_server,
+                   int family, int protocol )
 {
     if ((psz_server == NULL) || (psz_server[0] == '\0'))
         return net_ListenSingle (obj, psz_bind, i_bind, family, protocol);
@@ -768,12 +755,13 @@ int __net_OpenDgram( vlc_object_t *obj, const char *psz_bind, int i_bind,
     memset (&hints, 0, sizeof (hints));
     hints.ai_family = family;
     hints.ai_socktype = SOCK_DGRAM;
+    hints.ai_protocol = protocol;
 
     val = vlc_getaddrinfo (obj, psz_server, i_server, &hints, &rem);
     if (val)
     {
         msg_Err (obj, "cannot resolve %s port %d : %s", psz_bind, i_bind,
-                 vlc_gai_strerror (val));
+                 gai_strerror (val));
         return -1;
     }
 
@@ -782,15 +770,16 @@ int __net_OpenDgram( vlc_object_t *obj, const char *psz_bind, int i_bind,
     if (val)
     {
         msg_Err (obj, "cannot resolve %s port %d : %s", psz_bind, i_bind,
-                 vlc_gai_strerror (val));
-        vlc_freeaddrinfo (rem);
+                 gai_strerror (val));
+        freeaddrinfo (rem);
         return -1;
     }
 
+    val = -1;
     for (struct addrinfo *ptr = loc; ptr != NULL; ptr = ptr->ai_next)
     {
         int fd = net_Socket (obj, ptr->ai_family, ptr->ai_socktype,
-                             protocol ? protocol : ptr->ai_protocol);
+                             ptr->ai_protocol);
         if (fd == -1)
             continue; // usually, address family not supported
 
@@ -798,7 +787,6 @@ int __net_OpenDgram( vlc_object_t *obj, const char *psz_bind, int i_bind,
         if( fd == -1 )
             continue;
 
-        val = -1;
         for (struct addrinfo *ptr2 = rem; ptr2 != NULL; ptr2 = ptr2->ai_next)
         {
             if ((ptr2->ai_family != ptr->ai_family)
@@ -826,8 +814,8 @@ int __net_OpenDgram( vlc_object_t *obj, const char *psz_bind, int i_bind,
         net_Close (fd);
     }
 
-    vlc_freeaddrinfo (rem);
-    vlc_freeaddrinfo (loc);
+    freeaddrinfo (rem);
+    freeaddrinfo (loc);
     return val;
 }
 

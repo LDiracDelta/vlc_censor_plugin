@@ -35,7 +35,7 @@
 #include <vlc_plugin.h>
 #include <vlc_block.h>
 #include <vlc_sout.h>
-#include <vlc_charset.h>
+#include <vlc_fs.h>
 #include <assert.h>
 
 /*****************************************************************************
@@ -62,7 +62,7 @@ vlc_module_begin ()
     set_category( CAT_SOUT )
     set_subcategory( SUBCAT_SOUT_STREAM )
 
-    add_string( SOUT_CFG_PREFIX "dst-prefix", "", NULL, DST_PREFIX_TEXT,
+    add_string( SOUT_CFG_PREFIX "dst-prefix", "", DST_PREFIX_TEXT,
                 DST_PREFIX_LONGTEXT, true )
 
     set_callbacks( Open, Close )
@@ -148,11 +148,11 @@ static int Open( vlc_object_t *p_this )
     p_sys->i_date_start = -1;
     p_sys->i_size = 0;
 #ifdef OPTIMIZE_MEMORY
-    p_sys->i_max_wait = 5*1000000; /* 5s */
-    p_sys->i_max_size = 1*1000000; /* 1 Mbyte */
+    p_sys->i_max_wait = 5*CLOCK_FREQ; /* 5s */
+    p_sys->i_max_size = 1*1024*1024; /* 1 MiB */
 #else
-    p_sys->i_max_wait = 30*1000000; /* 30s */
-    p_sys->i_max_size = 20*1000000; /* 20 Mbyte */
+    p_sys->i_max_wait = 30*CLOCK_FREQ; /* 30s */
+    p_sys->i_max_size = 20*1024*1024; /* 20 MiB */
 #endif
     p_sys->b_drop = false;
     p_sys->i_dts_start = 0;
@@ -170,7 +170,7 @@ static void Close( vlc_object_t * p_this )
     sout_stream_sys_t *p_sys = p_stream->p_sys;
 
     if( p_sys->p_out )
-        sout_StreamDelete( p_sys->p_out );
+        sout_StreamChainDelete( p_sys->p_out, p_sys->p_out );
 
     TAB_CLEAN( p_sys->i_id, p_sys->id );
     free( p_sys->psz_prefix );
@@ -327,7 +327,7 @@ static int OutputNew( sout_stream_t *p_stream,
     /* Create the output */
     msg_Dbg( p_stream, "Using record output `%s'", psz_output );
 
-    p_sys->p_out = sout_StreamNew( p_stream->p_sout, psz_output );
+    p_sys->p_out = sout_StreamChainNew( p_stream->p_sout, psz_output, NULL, NULL );
 
     if( !p_sys->p_out )
         goto error;
@@ -374,7 +374,7 @@ static void OutputStart( sout_stream_t *p_stream )
     const char *psz_muxer = NULL;
     const char *psz_extension = NULL;
 
-    /* Look for prefered muxer
+    /* Look for preferred muxer
      * TODO we could insert transcode in a few cases like
      * s16l <-> s16b
      */
@@ -445,7 +445,7 @@ static void OutputStart( sout_stream_t *p_stream )
 
             if( i_es < 0 )
             {
-                utf8_unlink( psz_file );
+                vlc_unlink( psz_file );
                 free( psz_file );
                 continue;
             }
@@ -460,7 +460,7 @@ static void OutputStart( sout_stream_t *p_stream )
                 id->id = NULL;
             }
             if( p_sys->p_out )
-                sout_StreamDelete( p_sys->p_out );
+                sout_StreamChainDelete( p_sys->p_out, p_sys->p_out );
             p_sys->p_out = NULL;
 
             if( i_es > i_best_es )
@@ -471,7 +471,7 @@ static void OutputStart( sout_stream_t *p_stream )
                 if( i_best_es >= p_sys->i_id )
                     break;
             }
-            utf8_unlink( psz_file );
+            vlc_unlink( psz_file );
             free( psz_file );
         }
 

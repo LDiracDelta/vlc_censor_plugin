@@ -29,7 +29,7 @@
 #include <vlc_common.h>
 #include <vlc_md5.h>
 #include "libmp4.h"
-#include <vlc_charset.h>
+#include <vlc_fs.h>
 
 #ifdef WIN32
 #   include <io.h>
@@ -51,21 +51,22 @@
 #ifdef HAVE_SYS_STAT_H
 #   include <sys/stat.h>
 #endif
-#ifdef HAVE_SYS_TYPES_H
-#   include <sys/types.h>
-#endif
+#include <sys/types.h>
 
 /* In Solaris (and perhaps others) PATH_MAX is in limits.h. */
 #include <limits.h>
 
 #ifdef __APPLE__
+#include "TargetConditionals.h"
+#ifndef TARGET_OS_IPHONE
+#define HAVE_MACOS_IOKIT
+#endif
+#endif
+
+#ifdef HAVE_MACOS_IOKIT
 #   include <mach/mach.h>
 #   include <IOKit/IOKitLib.h>
 #   include <CoreFoundation/CFNumber.h>
-#endif
-
-#ifdef HAVE_SYSFS_LIBSYSFS_H
-#   include <sysfs/libsysfs.h>
 #endif
 
 #include "drms.h"
@@ -1365,7 +1366,7 @@ static int WriteUserKey( void *_p_drms, uint32_t *p_user_key )
         snprintf( psz_path, PATH_MAX - 1, "%s/" DRMS_DIRNAME "/%08X.%03d",
                   p_drms->psz_homedir, p_drms->i_user, p_drms->i_key );
 
-        file = utf8_fopen( psz_path, "wb" );
+        file = vlc_fopen( psz_path, "wb" );
         if( file != NULL )
         {
             i_ret = fwrite( p_user_key, sizeof(uint32_t),
@@ -1393,7 +1394,7 @@ static int ReadUserKey( void *_p_drms, uint32_t *p_user_key )
               "%s/" DRMS_DIRNAME "/%08X.%03d", p_drms->psz_homedir,
               p_drms->i_user, p_drms->i_key );
 
-    file = utf8_fopen( psz_path, "rb" );
+    file = vlc_fopen( psz_path, "rb" );
     if( file != NULL )
     {
         i_ret = fread( p_user_key, sizeof(uint32_t),
@@ -1563,42 +1564,14 @@ static int GetSCIData( char *psz_ipod, uint32_t **pp_sci,
     if( psz_ipod == NULL )
     {
 #ifdef WIN32
-        const wchar_t *wfile =
-                L"\\Apple Computer\\iTunes\\SC Info\\SC Info.sidb";
-        typedef HRESULT (WINAPI *SHGETFOLDERPATH)( HWND, int, HANDLE, DWORD,
-                                                   LPWSTR );
-        HINSTANCE shfolder_dll = NULL;
-        SHGETFOLDERPATH dSHGetFolderPath = NULL;
-        wchar_t wpath[PATH_MAX];
-
-        if( ( shfolder_dll = LoadLibrary( _T("SHFolder.dll") ) ) != NULL )
-        {
-            dSHGetFolderPath =
-                (SHGETFOLDERPATH)GetProcAddress( shfolder_dll,
-                                                 _T("SHGetFolderPathW") );
-        }
-
-        if( dSHGetFolderPath != NULL &&
-            SUCCEEDED( dSHGetFolderPath( NULL, CSIDL_COMMON_APPDATA,
-                                         NULL, 0, wpath ) ) )
-        {
-            if (wcslen( wpath ) + wcslen( wfile ) >= PATH_MAX )
-            {
-                return -1;
-            }
-            wcscat( wpath, wfile );
-
-            psz_path = FromWide( wpath );
-            strncpy( p_tmp, psz_path, sizeof( p_tmp ) - 1 );
-            p_tmp[sizeof( p_tmp ) - 1] = '\0';
-            free( psz_path );
-            psz_path = p_tmp;
-        }
-
-        if( shfolder_dll != NULL )
-        {
-            FreeLibrary( shfolder_dll );
-        }
+        const char *SCIfile =
+        "\\Apple Computer\\iTunes\\SC Info\\SC Info.sidb";
+        strncpy(p_tmp, config_GetConfDir(), sizeof(p_tmp -1));
+        if( strlen( p_tmp ) + strlen( SCIfile ) >= PATH_MAX )
+            return -1;
+        strcat(p_tmp, SCIfile);
+        p_tmp[sizeof( p_tmp ) - 1] = '\0';
+        psz_path = p_tmp;
 #endif
     }
     else
@@ -1621,7 +1594,7 @@ static int GetSCIData( char *psz_ipod, uint32_t **pp_sci,
         return -1;
     }
 
-    file = utf8_fopen( psz_path, "rb" );
+    file = vlc_fopen( psz_path, "rb" );
     if( file != NULL )
     {
         struct stat st;
@@ -1758,7 +1731,7 @@ static int GetiPodID( int64_t *p_ipod_id )
         return 0;
     }
 
-#ifdef __APPLE__
+#ifdef HAVE_MACOS_IOKIT
     CFTypeRef value;
     mach_port_t port;
     io_object_t device;
@@ -1785,6 +1758,7 @@ static int GetiPodID( int64_t *p_ipod_id )
             CFDictionarySetValue( match_dic,
                                   CFSTR(kIOPropertyMatchKey),
                                   smatch_dic );
+            CFRelease( smatch_dic );
 
             if( IOServiceGetMatchingServices( port, match_dic,
                                               &iterator ) == KERN_SUCCESS )
@@ -1816,49 +1790,17 @@ static int GetiPodID( int64_t *p_ipod_id )
 
                 IOObjectRelease( iterator );
             }
-            CFRelease( match_dic );
         }
+        else
+        {
+            if( match_dic )
+                CFRelease( match_dic );
+            if( smatch_dic )
+                CFRelease( smatch_dic );
+        }
+
 
         mach_port_deallocate( mach_task_self(), port );
-    }
-
-#elif defined (HAVE_SYSFS_LIBSYSFS_H)
-    struct sysfs_bus *bus = NULL;
-    struct dlist *devlist = NULL;
-    struct dlist *attributes = NULL;
-    struct sysfs_device *curdev = NULL;
-    struct sysfs_attribute *curattr = NULL;
-
-    bus = sysfs_open_bus( "ieee1394" );
-    if( bus != NULL )
-    {
-        devlist = sysfs_get_bus_devices( bus );
-        if( devlist != NULL )
-        {
-            dlist_for_each_data( devlist, curdev, struct sysfs_device )
-            {
-                attributes = sysfs_get_device_attributes( curdev );
-                if( attributes != NULL )
-                {
-                    dlist_for_each_data( attributes, curattr,
-                                         struct sysfs_attribute )
-                    {
-                        if( ( strcmp( curattr->name, "model_name" ) == 0 ) &&
-                            ( strncmp( curattr->value, PROD_NAME,
-                                       sizeof(PROD_NAME) ) == 0 ) )
-                        {
-                            *p_ipod_id = strtoll( curdev->name, NULL, 16 );
-                            i_ret = 0;
-                            break;
-                        }
-                    }
-               }
-
-                if( !i_ret ) break;
-            }
-        }
-
-        sysfs_close_bus( bus );
     }
 #endif
 

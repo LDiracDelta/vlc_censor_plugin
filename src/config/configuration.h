@@ -18,10 +18,6 @@
  * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston MA 02110-1301, USA.
  *****************************************************************************/
 
-#if defined(__PLUGIN__) || defined(__BUILTIN__) || !defined(__LIBVLC__)
-# error This header file can only be included from LibVLC.
-#endif
-
 #ifndef LIBVLC_CONFIGURATION_H
 # define LIBVLC_CONFIGURATION_H 1
 
@@ -36,24 +32,36 @@ int  config_AutoSaveConfigFile( vlc_object_t * );
 
 void config_Free( module_t * );
 
-void config_SetCallbacks( module_config_t *, module_config_t *, size_t );
-void config_UnsetCallbacks( module_config_t *, size_t );
+int config_LoadCmdLine   ( vlc_object_t *, int, const char *[], int * );
+int config_LoadConfigFile( vlc_object_t * );
+#define config_LoadCmdLine(a,b,c,d) config_LoadCmdLine(VLC_OBJECT(a),b,c,d)
+#define config_LoadConfigFile(a) config_LoadConfigFile(VLC_OBJECT(a))
 
-#define config_LoadCmdLine(a,b,c,d) __config_LoadCmdLine(VLC_OBJECT(a),b,c,d)
-#define config_LoadConfigFile(a,b) __config_LoadConfigFile(VLC_OBJECT(a),b)
+int config_SortConfig (void);
+void config_UnsortConfig (void);
 
-int __config_LoadCmdLine   ( vlc_object_t *, int *, const char *[], bool );
-int __config_LoadConfigFile( vlc_object_t *, const char * );
+char *config_GetDataDirDefault( void );
 
-int IsConfigStringType( int type );
-int IsConfigIntegerType (int type);
-static inline int IsConfigFloatType (int type)
+#define CONFIG_CLASS(x) ((x) & ~0x1F)
+
+static inline bool IsConfigStringType(unsigned type)
+{
+    return (type & CONFIG_ITEM_STRING) != 0;
+}
+
+static inline bool IsConfigIntegerType (int type)
+{
+    return (type & CONFIG_ITEM_INTEGER) != 0;
+}
+
+static inline bool IsConfigFloatType (int type)
 {
     return type == CONFIG_ITEM_FLOAT;
 }
 
-uint_fast32_t ConfigStringToKey( const char * );
-char *ConfigKeyToString( uint_fast32_t );
+extern vlc_rwlock_t config_lock;
+
+bool config_IsSafe (const char *);
 
 /* The configuration file */
 #define CONFIG_FILE                     "vlcrc"

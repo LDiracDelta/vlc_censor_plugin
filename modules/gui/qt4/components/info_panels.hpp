@@ -49,10 +49,12 @@ class QTreeView;
 class QSpinBox;
 class QLineEdit;
 class CoverArtLabel;
+class QTextEdit;
+class QLabel;
 
 class MetaPanel: public QWidget
 {
-    Q_OBJECT;
+    Q_OBJECT
 public:
     MetaPanel( QWidget *, struct intf_thread_t * );
     void saveMeta();
@@ -71,15 +73,20 @@ private:
     QLineEdit *copyright_text;
     QLineEdit *collection_text;
     QLineEdit *seqnum_text;
-    QLineEdit *description_text;
+    QLineEdit *seqtot_text;
+
+    QTextEdit *description_text;
 //    QSpinBox *rating_text;
     QLineEdit *date_text;
 //    QLineEdit *setting_text;
     QLineEdit *language_text;
     QLineEdit *nowplaying_text;
     QLineEdit *publisher_text;
-//    QLineEdit *encodedby_text;
+    QLineEdit *encodedby_text;
     CoverArtLabel *art_cover;
+
+    QLabel   *lblURL;
+    char     *currentURL;
 
 public slots:
     void update( input_item_t * );
@@ -95,7 +102,7 @@ signals:
 
 class ExtraMetaPanel: public QWidget
 {
-    Q_OBJECT;
+    Q_OBJECT
 public:
     ExtraMetaPanel( QWidget *, struct intf_thread_t * );
 private:
@@ -108,7 +115,7 @@ public slots:
 
 class InputStatsPanel: public QWidget
 {
-    Q_OBJECT;
+    Q_OBJECT
 public:
     InputStatsPanel( QWidget *, struct intf_thread_t * );
 private:
@@ -146,7 +153,7 @@ public slots:
 
 class InfoPanel: public QWidget
 {
-    Q_OBJECT;
+    Q_OBJECT
 public:
     InfoPanel( QWidget *, struct intf_thread_t * );
 private:

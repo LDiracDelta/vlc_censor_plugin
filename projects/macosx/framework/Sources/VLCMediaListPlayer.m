@@ -1,10 +1,28 @@
-//
-//  VLCMediaListPlayer.m
-//  VLCKit
-//
-//  Created by Pierre d'Herbemont on 8/24/09.
-//  Copyright 2009 __MyCompanyName__. All rights reserved.
-//
+/*****************************************************************************
+ * VLCMediaListPlayer.m: VLCKit.framework VLCMediaListPlayer implementation
+ *****************************************************************************
+ * Copyright (C) 2009 Pierre d'Herbemont
+ * Partial Copyright (C) 2009 Felix Paul Kühne
+ * Copyright (C) 2009 the VideoLAN team
+ * $Id$
+ *
+ * Authors: Pierre d'Herbemont <pdherbemont # videolan.org>
+ *          Felix Paul Kühne <fkuehne # videolan.org
+ *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 2 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program; if not, write to the Free Software
+ * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston MA 02110-1301, USA.
+ *****************************************************************************/
 
 #import "VLCMediaListPlayer.h"
 #import "VLCMedia.h"
@@ -19,12 +37,8 @@
     {
         _mediaPlayer = [[VLCMediaPlayer alloc] init];
 
-        libvlc_exception_t ex;
-        libvlc_exception_init(&ex);
-        instance = libvlc_media_list_player_new([VLCLibrary sharedInstance], &ex);
-        catch_exception(&ex);
-        libvlc_media_list_player_set_media_player(instance, [_mediaPlayer libVLCMediaPlayer], &ex);
-        catch_exception(&ex);
+        instance = libvlc_media_list_player_new([VLCLibrary sharedInstance]);
+        libvlc_media_list_player_set_media_player(instance, [_mediaPlayer libVLCMediaPlayer]);
     }
     return self;
 }
@@ -34,6 +48,7 @@
     libvlc_media_list_player_release(instance);
     [_mediaPlayer release];
     [_rootMedia release];
+    [_mediaList release];
     [super dealloc];
 }
 - (VLCMediaPlayer *)mediaPlayer
@@ -47,11 +62,8 @@
         return;
     [_mediaList release];
     _mediaList = [mediaList retain];
-    
-    libvlc_exception_t ex;
-    libvlc_exception_init(&ex);
-    libvlc_media_list_player_set_media_list(instance, [mediaList libVLCMediaList], &ex);
-    catch_exception(&ex);
+
+    libvlc_media_list_player_set_media_list(instance, [mediaList libVLCMediaList]);
     [self willChangeValueForKey:@"rootMedia"];
     [_rootMedia release];
     _rootMedia = nil;
@@ -90,25 +102,43 @@
 
 - (void)playMedia:(VLCMedia *)media
 {
-    libvlc_exception_t ex;
-    libvlc_exception_init(&ex);
-    libvlc_media_list_player_play_item(instance, [media libVLCMediaDescriptor], &ex);
-    catch_exception(&ex);    
+    libvlc_media_list_player_play_item(instance, [media libVLCMediaDescriptor]);
 }
 
 - (void)play
 {
-    libvlc_exception_t ex;
-    libvlc_exception_init(&ex);
-    libvlc_media_list_player_play(instance, &ex);
-    catch_exception(&ex);    
+    libvlc_media_list_player_play(instance);
 }
 
 - (void)stop
 {
-    libvlc_exception_t ex;
-    libvlc_exception_init(&ex);
-    libvlc_media_list_player_stop(instance, &ex);
-    catch_exception(&ex);        
+    libvlc_media_list_player_stop(instance);
+}
+
+- (void)setRepeatMode:(VLCRepeatMode)repeatMode
+{
+    libvlc_playback_mode_t mode;
+    switch (repeatMode) {
+        case VLCRepeatAllItems:
+            mode = libvlc_playback_mode_loop;
+            break;
+        case VLCDoNotRepeat:
+            mode = libvlc_playback_mode_default;
+            break;
+        case VLCRepeatCurrentItem:
+            mode = libvlc_playback_mode_repeat;
+            break;
+        default:
+            NSAssert(0, @"Should not be reached");
+            break;
+    }
+    libvlc_media_list_player_set_playback_mode(instance, mode);
+
+    _repeatMode = repeatMode;
+}
+
+- (VLCRepeatMode)repeatMode
+{
+    return _repeatMode;
 }
 @end

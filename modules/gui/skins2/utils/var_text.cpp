@@ -152,16 +152,10 @@ void VarText::set( const UString &rText )
             pVarManager->getHelpText().addObserver( this );
         }
         if( m_text.find( "$T" ) != UString::npos ||
-            m_text.find( "$t" ) != UString::npos )
-        {
-            pVlcProc->getTimeVar().addObserver( this );
-        }
-        if( m_text.find( "$L" ) != UString::npos ||
-            m_text.find( "$l" ) != UString::npos )
-        {
-            pVlcProc->getTimeVar().addObserver( this );
-        }
-        if( m_text.find( "$D" ) != UString::npos ||
+            m_text.find( "$t" ) != UString::npos ||
+            m_text.find( "$L" ) != UString::npos ||
+            m_text.find( "$l" ) != UString::npos ||
+            m_text.find( "$D" ) != UString::npos ||
             m_text.find( "$d" ) != UString::npos )
         {
             pVlcProc->getTimeVar().addObserver( this );
@@ -194,6 +188,7 @@ void VarText::set( const UString &rText )
 
 void VarText::onUpdate( Subject<VarPercent> &rVariable, void *arg )
 {
+    (void)rVariable; (void)arg;
     UString newText = get();
     // If the text has changed, notify the observers
     if( newText != m_lastText )
@@ -206,6 +201,7 @@ void VarText::onUpdate( Subject<VarPercent> &rVariable, void *arg )
 
 void VarText::onUpdate( Subject<VarText> &rVariable, void *arg )
 {
+    (void)rVariable; (void)arg;
     UString newText = get();
     // If the text has changed, notify the observers
     if( newText != m_lastText )
@@ -219,14 +215,21 @@ void VarText::onUpdate( Subject<VarText> &rVariable, void *arg )
 void VarText::delObservers()
 {
     // Stop observing other variables
-    VlcProc *pVlcProc = VlcProc::instance( getIntf() );
-    pVlcProc->getTimeVar().delObserver( this );
-    pVlcProc->getVolumeVar().delObserver( this );
-    pVlcProc->getStreamNameVar().delObserver( this );
-    pVlcProc->getStreamURIVar().delObserver( this );
-    pVlcProc->getStreamBitRateVar().delObserver( this );
-    pVlcProc->getStreamSampleRateVar().delObserver( this );
-    VarManager *pVarManager = VarManager::instance( getIntf() );
-    pVarManager->getHelpText().delObserver( this );
+
+    VlcProc *pVlcProc = getIntf()->p_sys->p_vlcProc;
+    VarManager *pVarManager = getIntf()->p_sys->p_varManager;
+
+    if( pVlcProc )
+    {
+        pVlcProc->getTimeVar().delObserver( this );
+        pVlcProc->getVolumeVar().delObserver( this );
+        pVlcProc->getStreamNameVar().delObserver( this );
+        pVlcProc->getStreamURIVar().delObserver( this );
+        pVlcProc->getStreamBitRateVar().delObserver( this );
+        pVlcProc->getStreamSampleRateVar().delObserver( this );
+    }
+
+    if( pVarManager )
+        pVarManager->getHelpText().delObserver( this );
 }
 

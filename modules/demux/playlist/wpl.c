@@ -30,7 +30,6 @@
 
 #include <vlc_common.h>
 #include <vlc_demux.h>
-#include <vlc_charset.h>
 
 #include "playlist.h"
 
@@ -78,6 +77,8 @@ static int Demux( demux_t *p_demux )
     char       *psz_line;
     input_item_t *p_current_input = GetCurrentItem(p_demux);
 
+    input_item_node_t *p_subitems = input_item_node_Create( p_current_input );
+
     while( (psz_line = stream_ReadLine( p_demux->s )) )
     {
         char *psz_parse = psz_line;
@@ -98,9 +99,10 @@ static int Demux( demux_t *p_demux )
 
                 *psz_parse = '\0';
                 psz_uri = ProcessMRL( psz_uri, p_demux->p_sys->psz_prefix );
-                p_input = input_item_NewExt( p_demux, psz_uri, psz_uri,
+                p_input = input_item_NewExt( psz_uri, psz_uri,
                                         0, NULL, 0, -1 );
-                input_item_AddSubItem( p_current_input, p_input );
+                input_item_node_AppendItem( p_subitems, p_input );
+                vlc_gc_decref( p_input );
             }
         }
 
@@ -108,6 +110,9 @@ static int Demux( demux_t *p_demux )
         free( psz_line );
 
     }
+
+    input_item_node_PostAndDelete( p_subitems );
+
     vlc_gc_decref(p_current_input);
     var_Destroy( p_demux, "wpl-extvlcopt" );
     return 0; /* Needed for correct operation of go back */

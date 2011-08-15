@@ -31,9 +31,9 @@
 
 #include <vlc_common.h>
 #include <vlc_plugin.h>
-#include <vlc_charset.h>
+#include <vlc_fs.h>
+#include <vlc_modules.h>
 
-#include <errno.h>
 #include <stdlib.h>                                                /* free() */
 #include <string.h>                                            /* strerror() */
 #include <fcntl.h>                                                 /* open() */
@@ -180,40 +180,40 @@ vlc_module_begin ()
     set_category( CAT_INTERFACE )
     set_subcategory( SUBCAT_INTERFACE_MAIN )
 
-    add_file( "fbosd-dev", "/dev/fb0", NULL, DEVICE_TEXT, DEVICE_LONGTEXT,
-              false )
-    add_string( "fbosd-aspect-ratio", "", NULL, ASPECT_RATIO_TEXT,
+    add_loadfile( "fbosd-dev", "/dev/fb0", DEVICE_TEXT, DEVICE_LONGTEXT,
+                  false )
+    add_string( "fbosd-aspect-ratio", "", ASPECT_RATIO_TEXT,
                 ASPECT_RATIO_LONGTEXT, true )
 
-    add_string( "fbosd-image", NULL, NULL, FBOSD_IMAGE_TEXT,
+    add_string( "fbosd-image", NULL, FBOSD_IMAGE_TEXT,
                 FBOSD_IMAGE_LONGTEXT, true )
-    add_string( "fbosd-text", NULL, NULL, FBOSD_TEXT,
+    add_string( "fbosd-text", NULL, FBOSD_TEXT,
                 FBOSD_LONGTEXT, true )
 
-    add_integer_with_range( "fbosd-alpha", 255, 0, 255, NULL, ALPHA_TEXT,
+    add_integer_with_range( "fbosd-alpha", 255, 0, 255, ALPHA_TEXT,
                             ALPHA_LONGTEXT, true )
 
     set_section( N_("Position"), NULL )
-    add_integer( "fbosd-x", 0, NULL, POSX_TEXT,
+    add_integer( "fbosd-x", 0, POSX_TEXT,
                  POSX_LONGTEXT, false )
-    add_integer( "fbosd-y", 0, NULL, POSY_TEXT,
+    add_integer( "fbosd-y", 0, POSY_TEXT,
                  POSY_LONGTEXT, false )
-    add_integer( "fbosd-position", 8, NULL, POS_TEXT, POS_LONGTEXT, true )
-        change_integer_list( pi_pos_values, ppsz_pos_descriptions, NULL );
+    add_integer( "fbosd-position", 8, POS_TEXT, POS_LONGTEXT, true )
+        change_integer_list( pi_pos_values, ppsz_pos_descriptions );
 
     set_section( N_("Font"), NULL )
-    add_integer_with_range( "fbosd-font-opacity", 255, 0, 255, NULL,
+    add_integer_with_range( "fbosd-font-opacity", 255, 0, 255,
         OPACITY_TEXT, OPACITY_LONGTEXT, false )
-    add_integer( "fbosd-font-color", 0x00FFFFFF, NULL, COLOR_TEXT, COLOR_LONGTEXT,
+    add_integer( "fbosd-font-color", 0x00FFFFFF, COLOR_TEXT, COLOR_LONGTEXT,
                  false )
-        change_integer_list( pi_color_values, ppsz_color_descriptions, NULL );
-    add_integer( "fbosd-font-size", -1, NULL, SIZE_TEXT, SIZE_LONGTEXT,
+        change_integer_list( pi_color_values, ppsz_color_descriptions );
+    add_integer( "fbosd-font-size", -1, SIZE_TEXT, SIZE_LONGTEXT,
                  false )
 
     set_section( N_("Commands"), NULL )
-    add_bool( "fbosd-clear", false, NULL, CLEAR_TEXT, CLEAR_LONGTEXT, true )
-    add_bool( "fbosd-render", false, NULL, RENDER_TEXT, RENDER_LONGTEXT, true )
-    add_bool( "fbosd-display", false, NULL, DISPLAY_TEXT, DISPLAY_LONGTEXT, true )
+    add_bool( "fbosd-clear", false, CLEAR_TEXT, CLEAR_LONGTEXT, true )
+    add_bool( "fbosd-render", false, RENDER_TEXT, RENDER_LONGTEXT, true )
+    add_bool( "fbosd-display", false, DISPLAY_TEXT, DISPLAY_LONGTEXT, true )
 
     set_description( N_("GNU/Linux osd/overlay framebuffer interface") )
     set_capability( "interface", 10 )
@@ -331,6 +331,10 @@ static int Create( vlc_object_t *p_this )
     p_sys->i_alpha = var_CreateGetIntegerCommand( p_intf, "fbosd-alpha" );
     var_AddCallback( p_intf, "fbosd-alpha", OverlayCallback, NULL );
 
+    /* Use PAL by default */
+    p_sys->i_width  = p_sys->fmt_out.i_width  = 704;
+    p_sys->i_height = p_sys->fmt_out.i_height = 576;
+
     p_sys->i_aspect = -1;
     psz_aspect =
             var_CreateGetNonEmptyString( p_intf, "fbosd-aspect-ratio" );
@@ -343,17 +347,14 @@ static int Create( vlc_object_t *p_this )
             *psz_parser++ = '\0';
             p_sys->i_aspect = ( atoi( psz_aspect )
                               * VOUT_ASPECT_FACTOR ) / atoi( psz_parser );
-            p_sys->fmt_out.i_aspect = p_sys->i_aspect;
+            p_sys->fmt_out.i_sar_num = p_sys->i_aspect    * p_sys->i_height;
+            p_sys->fmt_out.i_sar_den = VOUT_ASPECT_FACTOR * p_sys->i_width;
         }
         msg_Dbg( p_intf, "using aspect ratio %d:%d",
                   atoi( psz_aspect ), atoi( psz_parser ) );
 
         free( psz_aspect );
     }
-
-    /* Use PAL by default */
-    p_sys->i_width  = p_sys->fmt_out.i_width  = 704;
-    p_sys->i_height = p_sys->fmt_out.i_height = 576;
 
     psz_tmp = var_CreateGetNonEmptyStringCommand( p_intf, "fbosd-image" );
     var_AddCallback( p_intf, "fbosd-image", OverlayCallback, NULL );
@@ -529,14 +530,15 @@ static int OpenBlending( intf_thread_t *p_intf )
 
     p_intf->p_sys->p_blend =
             vlc_object_create( p_intf, sizeof(filter_t) );
-    vlc_object_attach( p_intf->p_sys->p_blend, p_intf );
     p_intf->p_sys->p_blend->fmt_out.video.i_x_offset =
         p_intf->p_sys->p_blend->fmt_out.video.i_y_offset = 0;
-    p_intf->p_sys->p_blend->fmt_out.video.i_aspect =
-            p_intf->p_sys->fmt_out.i_aspect;
+    p_intf->p_sys->p_blend->fmt_out.video.i_sar_num =
+            p_intf->p_sys->fmt_out.i_sar_num;
+    p_intf->p_sys->p_blend->fmt_out.video.i_sar_den =
+            p_intf->p_sys->fmt_out.i_sar_den;
     p_intf->p_sys->p_blend->fmt_out.video.i_chroma =
             p_intf->p_sys->fmt_out.i_chroma;
-    if( config_GetInt( p_intf, "freetype-yuvp" ) )
+    if( var_InheritBool( p_intf, "freetype-yuvp" ) )
         p_intf->p_sys->p_blend->fmt_in.video.i_chroma =
                 VLC_CODEC_YUVP;
     else
@@ -560,7 +562,6 @@ static void CloseBlending( intf_thread_t *p_intf )
             module_unneed( p_intf->p_sys->p_blend,
                            p_intf->p_sys->p_blend->p_module );
 
-        vlc_object_detach( p_intf->p_sys->p_blend );
         vlc_object_release( p_intf->p_sys->p_blend );
     }
 }
@@ -574,7 +575,6 @@ static int OpenTextRenderer( intf_thread_t *p_intf )
 
     p_intf->p_sys->p_text =
             vlc_object_create( p_intf, sizeof(filter_t) );
-    vlc_object_attach( p_intf->p_sys->p_text, p_intf );
 
     p_intf->p_sys->p_text->fmt_out.video.i_width =
         p_intf->p_sys->p_text->fmt_out.video.i_visible_width =
@@ -611,7 +611,6 @@ static void CloseTextRenderer( intf_thread_t *p_intf )
             module_unneed( p_intf->p_sys->p_text,
                            p_intf->p_sys->p_text->p_module );
 
-        vlc_object_detach( p_intf->p_sys->p_text );
         vlc_object_release( p_intf->p_sys->p_text );
     }
 }
@@ -622,9 +621,7 @@ static void CloseTextRenderer( intf_thread_t *p_intf )
  *****************************************************************************/
 static picture_t *AllocatePicture( video_format_t *p_fmt )
 {
-    picture_t *p_picture = picture_New( p_fmt->i_chroma,
-                                        p_fmt->i_width, p_fmt->i_height,
-                                        p_fmt->i_aspect );
+    picture_t *p_picture = picture_NewFromFormat( p_fmt );
     if( !p_picture )
         return NULL;
 
@@ -847,7 +844,6 @@ static picture_t *RenderText( intf_thread_t *p_intf, const char *psz_string,
 
         memset( &fmt, 0, sizeof(fmt) );
         fmt.i_chroma = VLC_CODEC_TEXT;
-        fmt.i_aspect = 0;
         fmt.i_width  = fmt.i_visible_width = 0;
         fmt.i_height = fmt.i_visible_height = 0;
         fmt.i_x_offset = 0;
@@ -864,7 +860,7 @@ static picture_t *RenderText( intf_thread_t *p_intf, const char *psz_string,
             return NULL;
         }
         p_region->p_style = text_style_Duplicate( p_style );
-        p_region->i_align = OSD_ALIGN_LEFT | OSD_ALIGN_TOP;
+        p_region->i_align = SUBPICTURE_ALIGN_LEFT | SUBPICTURE_ALIGN_TOP;
 
         if( p_sys->p_text->pf_render_text )
         {
@@ -873,7 +869,7 @@ static picture_t *RenderText( intf_thread_t *p_intf, const char *psz_string,
             memset( &fmt_out, 0, sizeof(video_format_t) );
 
             p_sys->p_text->pf_render_text( p_sys->p_text,
-                                           p_region, p_region );
+                                           p_region, p_region, NULL );
 
 #if defined(FBOSD_BLENDING)
             fmt_out = p_region->fmt;
@@ -983,12 +979,14 @@ static int Init( intf_thread_t *p_intf )
     /* Assume we have square pixels */
     if( p_sys->i_aspect < 0 )
     {
-        p_sys->fmt_out.i_aspect = ( p_sys->i_width
-                                  * VOUT_ASPECT_FACTOR ) / p_sys->i_height;
+        p_sys->fmt_out.i_sar_num = 1;
+        p_sys->fmt_out.i_sar_den = 1;
     }
-    else p_sys->fmt_out.i_aspect = p_sys->i_aspect;
-
-    p_sys->fmt_out.i_sar_num = p_sys->fmt_out.i_sar_den = 1;
+    else
+    {
+        p_sys->fmt_out.i_sar_num = p_sys->i_aspect    * p_sys->i_height;
+        p_sys->fmt_out.i_sar_den = VOUT_ASPECT_FACTOR * p_sys->i_width;
+    }
 
     /* Allocate overlay buffer */
     p_sys->p_overlay = AllocatePicture( &p_sys->fmt_out );
@@ -1054,13 +1052,13 @@ static int OpenDisplay( intf_thread_t *p_intf )
     struct fb_fix_screeninfo    fix_info;     /* framebuffer fix information */
 
     /* Open framebuffer device */
-    if( !(psz_device = config_GetPsz( p_intf, "fbosd-dev" )) )
+    if( !(psz_device = var_InheritString( p_intf, "fbosd-dev" )) )
     {
         msg_Err( p_intf, "don't know which fb osd/overlay device to open" );
         return VLC_EGENERIC;
     }
 
-    p_sys->i_fd = utf8_open( psz_device, O_RDWR );
+    p_sys->i_fd = vlc_open( psz_device, O_RDWR );
     if( p_sys->i_fd == -1 )
     {
         msg_Err( p_intf, "cannot open %s (%m)", psz_device );

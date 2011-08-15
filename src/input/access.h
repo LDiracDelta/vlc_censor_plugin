@@ -22,20 +22,16 @@
  * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston MA 02110-1301, USA.
  *****************************************************************************/
 
-#if defined(__PLUGIN__) || defined(__BUILTIN__) || !defined(__LIBVLC__)
-# error This header file can only be included from LibVLC.
-#endif
-
-#ifndef _INPUT_ACCESS_H
-#define _INPUT_ACCESS_H 1
+#ifndef LIBVLC_INPUT_ACCESS_H
+#define LIBVLC_INPUT_ACCESS_H 1
 
 #include <vlc_common.h>
 #include <vlc_access.h>
 
-#define access_New( a, b, c, d, e ) __access_New(VLC_OBJECT(a), b, c, d, e )
-access_t * __access_New( vlc_object_t *p_obj, input_thread_t *p_input,
-                         const char *psz_access, const char *psz_demux,
-                         const char *psz_path );
+access_t *access_New( vlc_object_t *p_obj, input_thread_t *p_input,
+                      const char *psz_access, const char *psz_demux,
+                      const char *psz_path );
+#define access_New( a, b, c, d, e ) access_New(VLC_OBJECT(a), b, c, d, e )
 void access_Delete( access_t * );
 
 #endif

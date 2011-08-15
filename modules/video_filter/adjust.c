@@ -30,7 +30,6 @@
 # include "config.h"
 #endif
 
-#include <errno.h>
 #include <math.h>
 
 #include <vlc_common.h>
@@ -64,7 +63,7 @@ static int AdjustCallback( vlc_object_t *p_this, char const *psz_var,
 
 #define THRES_TEXT N_("Brightness threshold")
 #define THRES_LONGTEXT N_("When this mode is enabled, pixels will be " \
-        "shown as black or white. The threshold value will be the brighness " \
+        "shown as black or white. The threshold value will be the brightness " \
         "defined below." )
 #define CONT_TEXT N_("Image contrast (0-2)")
 #define CONT_LONGTEXT N_("Set the image contrast, between 0 and 2. Defaults to 1.")
@@ -84,18 +83,18 @@ vlc_module_begin ()
     set_subcategory( SUBCAT_VIDEO_VFILTER )
     set_capability( "video filter2", 0 )
 
-    add_float_with_range( "contrast", 1.0, 0.0, 2.0, NULL,
+    add_float_with_range( "contrast", 1.0, 0.0, 2.0,
                           CONT_TEXT, CONT_LONGTEXT, false )
-    add_float_with_range( "brightness", 1.0, 0.0, 2.0, NULL,
+    add_float_with_range( "brightness", 1.0, 0.0, 2.0,
                            LUM_TEXT, LUM_LONGTEXT, false )
-    add_integer_with_range( "hue", 0, 0, 360, NULL,
+    add_integer_with_range( "hue", 0, 0, 360,
                             HUE_TEXT, HUE_LONGTEXT, false )
-    add_float_with_range( "saturation", 1.0, 0.0, 3.0, NULL,
+    add_float_with_range( "saturation", 1.0, 0.0, 3.0,
                           SAT_TEXT, SAT_LONGTEXT, false )
-    add_float_with_range( "gamma", 1.0, 0.01, 10.0, NULL,
+    add_float_with_range( "gamma", 1.0, 0.01, 10.0,
                           GAMMA_TEXT, GAMMA_LONGTEXT, false )
 
-    add_bool( "brightness-threshold", false, NULL,
+    add_bool( "brightness-threshold", false,
               THRES_TEXT, THRES_LONGTEXT, false )
 
     add_shortcut( "adjust" )
@@ -142,7 +141,7 @@ static int Create( vlc_object_t *p_this )
             break;
 
         default:
-            msg_Err( p_filter, "Unsupported input chroma (%4s)",
+            msg_Err( p_filter, "Unsupported input chroma (%4.4s)",
                      (char*)&(p_filter->fmt_in.video.i_chroma) );
             return VLC_EGENERIC;
     }
@@ -247,7 +246,7 @@ static picture_t *FilterPlanar( filter_t *p_filter, picture_t *p_pic )
     /*
      * Threshold mode drops out everything about luma, contrast and gamma.
      */
-    if( b_thres != true )
+    if( !b_thres )
     {
 
         /* Contrast is a fast but kludged function, so I put this gap to be
@@ -257,7 +256,7 @@ static picture_t *FilterPlanar( filter_t *p_filter, picture_t *p_pic )
         /* Fill the gamma lookup table */
         for( i = 0 ; i < 256 ; i++ )
         {
-          pi_gamma[ i ] = clip_uint8_vlc( pow(i / 255.0, f_gamma) * 255.0);
+            pi_gamma[ i ] = clip_uint8_vlc( pow(i / 255.0, f_gamma) * 255.0);
         }
 
         /* Fill the luma lookup table */
@@ -436,7 +435,7 @@ static picture_t *FilterPacked( filter_t *p_filter, picture_t *p_pic )
     uint8_t *p_out, *p_out_v;
     int i_y_offset, i_u_offset, i_v_offset;
 
-    int i_lines, i_visible_lines, i_pitch, i_visible_pitch;
+    int i_visible_lines, i_pitch, i_visible_pitch;
 
     bool b_thres;
     double  f_hue;
@@ -449,7 +448,6 @@ static picture_t *FilterPacked( filter_t *p_filter, picture_t *p_pic )
 
     if( !p_pic ) return NULL;
 
-    i_lines = p_pic->p->i_lines;
     i_visible_lines = p_pic->p->i_visible_lines;
     i_pitch = p_pic->p->i_pitch;
     i_visible_pitch = p_pic->p->i_visible_pitch;
@@ -457,7 +455,7 @@ static picture_t *FilterPacked( filter_t *p_filter, picture_t *p_pic )
     if( GetPackedYuvOffsets( p_pic->format.i_chroma, &i_y_offset,
                              &i_u_offset, &i_v_offset ) != VLC_SUCCESS )
     {
-        msg_Warn( p_filter, "Unsupported input chroma (%4s)",
+        msg_Warn( p_filter, "Unsupported input chroma (%4.4s)",
                   (char*)&(p_pic->format.i_chroma) );
 
         picture_Release( p_pic );
@@ -486,7 +484,7 @@ static picture_t *FilterPacked( filter_t *p_filter, picture_t *p_pic )
     /*
      * Threshold mode drops out everything about luma, contrast and gamma.
      */
-    if( b_thres != true )
+    if( !b_thres )
     {
 
         /* Contrast is a fast but kludged function, so I put this gap to be

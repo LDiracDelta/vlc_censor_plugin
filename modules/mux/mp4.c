@@ -60,13 +60,11 @@ vlc_module_begin ()
     set_subcategory( SUBCAT_SOUT_MUX )
     set_shortname( "MP4" )
 
-    add_bool( SOUT_CFG_PREFIX "faststart", true, NULL,
+    add_bool( SOUT_CFG_PREFIX "faststart", true,
               FASTSTART_TEXT, FASTSTART_LONGTEXT,
               true )
     set_capability( "sout mux", 5 )
-    add_shortcut( "mp4" )
-    add_shortcut( "mov" )
-    add_shortcut( "3gp" )
+    add_shortcut( "mp4", "mov", "3gp" )
     set_callbacks( Open, Close )
 vlc_module_end ()
 
@@ -206,11 +204,13 @@ static int Open( vlc_object_t *p_this )
     {
         /* Now add ftyp header */
         box = box_new( "ftyp" );
-        if( p_sys->b_3gp ) bo_add_fourcc( box, "3gp4" );
+        if( p_sys->b_3gp ) bo_add_fourcc( box, "3gp6" );
         else bo_add_fourcc( box, "isom" );
         bo_add_32be  ( box, 0 );
         if( p_sys->b_3gp ) bo_add_fourcc( box, "3gp4" );
         else bo_add_fourcc( box, "mp41" );
+        bo_add_fourcc( box, "avc1" );
+        bo_add_fourcc( box, "qt  " );
         box_fix( box );
 
         p_sys->i_pos += box->i_buffer;
@@ -452,44 +452,6 @@ static int DelStream( sout_mux_t *p_mux, sout_input_t *p_input )
     return VLC_SUCCESS;
 }
 
-static int MuxGetStream( sout_mux_t *p_mux, int *pi_stream, mtime_t *pi_dts )
-{
-    mtime_t i_dts;
-    int     i_stream, i;
-
-    for( i = 0, i_dts = 0, i_stream = -1; i < p_mux->i_nb_inputs; i++ )
-    {
-        block_fifo_t   *p_fifo = p_mux->pp_inputs[i]->p_fifo;
-        block_t *p_buf;
-
-        if( block_FifoCount( p_fifo ) <= 1 )
-        {
-            if( p_mux->pp_inputs[i]->p_fmt->i_cat != SPU_ES )
-            {
-                return -1; // wait that all fifo have at least 2 packets
-            }
-            /* For SPU, we wait only 1 packet */
-            continue;
-        }
-
-        p_buf = block_FifoShow( p_fifo );
-        if( i_stream < 0 || p_buf->i_dts < i_dts )
-        {
-            i_dts = p_buf->i_dts;
-            i_stream = i;
-        }
-    }
-    if( pi_stream )
-    {
-        *pi_stream = i_stream;
-    }
-    if( pi_dts )
-    {
-        *pi_dts = i_dts;
-    }
-    return i_stream;
-}
-
 /*****************************************************************************
  * Mux:
  *****************************************************************************/
@@ -500,12 +462,12 @@ static int Mux( sout_mux_t *p_mux )
     for( ;; )
     {
         sout_input_t    *p_input;
-        int             i_stream;
         mp4_stream_t    *p_stream;
         block_t         *p_data;
         mtime_t         i_dts;
 
-        if( MuxGetStream( p_mux, &i_stream, &i_dts) < 0 )
+        int i_stream = sout_MuxGetStream( p_mux, 2, &i_dts);
+        if( i_stream < 0 )
         {
             return( VLC_SUCCESS );
         }
@@ -597,13 +559,12 @@ again:
         if( p_stream->i_entry_count >= p_stream->i_entry_max - 1 )
         {
             p_stream->i_entry_max += 1000;
-            p_stream->entry =
-                realloc( p_stream->entry,
+            p_stream->entry = xrealloc( p_stream->entry,
                          p_stream->i_entry_max * sizeof( mp4_entry_t ) );
         }
 
         /* update */
-        p_stream->i_duration += p_data->i_length;
+        p_stream->i_duration = p_stream->i_last_dts - p_stream->i_dts_start + p_data->i_length;
         p_sys->i_pos += p_data->i_buffer;
 
         /* Save the DTS */
@@ -914,37 +875,44 @@ static bo_t *GetAvcCTag( mp4_stream_t *p_stream )
         uint8_t *p_buffer = p_stream->fmt.p_extra;
         int     i_buffer = p_stream->fmt.i_extra;
 
-        while( i_buffer > 4 &&
-            p_buffer[0] == 0 && p_buffer[1] == 0 &&
-            p_buffer[2] == 0 && p_buffer[3] == 1 )
+        while( i_buffer > 3 )
         {
-            const int i_nal_type = p_buffer[4]&0x1f;
+            /* seek startcode */
+            while( p_buffer[0] != 0 || p_buffer[1] != 0 ||
+                   p_buffer[2] != 1 )
+            {
+                 i_buffer--;
+                 p_buffer++;
+            }
+            const int i_nal_type = p_buffer[3]&0x1f;
             int i_offset    = 1;
             int i_size      = 0;
             int i_startcode = 0;
  
-            //msg_Dbg( p_stream, "we found a startcode for NAL with TYPE:%d", i_nal_type );
  
-            for( i_offset = 1; i_offset+3 < i_buffer ; i_offset++)
+            for( i_offset = 1; i_offset+2 < i_buffer ; i_offset++)
             {
                 if( p_buffer[i_offset] == 0 && p_buffer[i_offset+1] == 0 &&
-                    p_buffer[i_offset+2] == 0 && p_buffer[i_offset+3] == 1 )
+                    p_buffer[i_offset+2] == 1 )
                 {
                     /* we found another startcode */
                     i_startcode = i_offset;
+                    while( p_buffer[i_startcode-1] == 0 && i_startcode > 0 )
+                        i_startcode--;
                     break;
                 }
             }
             i_size = i_startcode ? i_startcode : i_buffer;
+
             if( i_nal_type == 7 )
             {
-                p_sps = &p_buffer[4];
-                i_sps_size = i_size - 4;
+                p_sps = &p_buffer[3];
+                i_sps_size = i_size - 3;
             }
             if( i_nal_type == 8 )
             {
-                p_pps = &p_buffer[4];
-                i_pps_size = i_size - 4;
+                p_pps = &p_buffer[3];
+                i_pps_size = i_size - 3;
             }
             i_buffer -= i_size;
             p_buffer += i_size;
@@ -1547,6 +1515,7 @@ static bo_t *GetMoovBox( sout_mux_t *p_mux )
 
     uint32_t        i_movie_timescale = 90000;
     int64_t         i_movie_duration  = 0;
+    int64_t         i_timestamp = get_timestamp();
 
     moov = box_new( "moov" );
 
@@ -1565,16 +1534,16 @@ static bo_t *GetMoovBox( sout_mux_t *p_mux )
     if( !p_sys->b_64_ext )
     {
         mvhd = box_full_new( "mvhd", 0, 0 );
-        bo_add_32be( mvhd, get_timestamp() );   // creation time
-        bo_add_32be( mvhd, get_timestamp() );   // modification time
+        bo_add_32be( mvhd, i_timestamp );   // creation time
+        bo_add_32be( mvhd, i_timestamp );   // modification time
         bo_add_32be( mvhd, i_movie_timescale);  // timescale
         bo_add_32be( mvhd, i_movie_duration );  // duration
     }
     else
     {
         mvhd = box_full_new( "mvhd", 1, 0 );
-        bo_add_64be( mvhd, get_timestamp() );   // creation time
-        bo_add_64be( mvhd, get_timestamp() );   // modification time
+        bo_add_64be( mvhd, i_timestamp );   // creation time
+        bo_add_64be( mvhd, i_timestamp );   // modification time
         bo_add_32be( mvhd, i_movie_timescale);  // timescale
         bo_add_64be( mvhd, i_movie_duration );  // duration
     }
@@ -1626,8 +1595,8 @@ static bo_t *GetMoovBox( sout_mux_t *p_mux )
             else
                 tkhd = box_full_new( "tkhd", 0, 1 );
 
-            bo_add_32be( tkhd, get_timestamp() );       // creation time
-            bo_add_32be( tkhd, get_timestamp() );       // modification time
+            bo_add_32be( tkhd, i_timestamp );       // creation time
+            bo_add_32be( tkhd, i_timestamp );       // modification time
             bo_add_32be( tkhd, p_stream->i_track_id );
             bo_add_32be( tkhd, 0 );                     // reserved 0
             bo_add_32be( tkhd, p_stream->i_duration *
@@ -1641,8 +1610,8 @@ static bo_t *GetMoovBox( sout_mux_t *p_mux )
             else
                 tkhd = box_full_new( "tkhd", 1, 1 );
 
-            bo_add_64be( tkhd, get_timestamp() );       // creation time
-            bo_add_64be( tkhd, get_timestamp() );       // modification time
+            bo_add_64be( tkhd, i_timestamp );       // creation time
+            bo_add_64be( tkhd, i_timestamp );       // modification time
             bo_add_32be( tkhd, p_stream->i_track_id );
             bo_add_32be( tkhd, 0 );                     // reserved 0
             bo_add_64be( tkhd, p_stream->i_duration *
@@ -1671,11 +1640,12 @@ static bo_t *GetMoovBox( sout_mux_t *p_mux )
         else if( p_stream->fmt.i_cat == VIDEO_ES )
         {
             int i_width = p_stream->fmt.video.i_width << 16;
-            if( p_stream->fmt.video.i_aspect > 0 )
+            if( p_stream->fmt.video.i_sar_num > 0 &&
+                p_stream->fmt.video.i_sar_den > 0 )
             {
-                i_width = (int64_t)p_stream->fmt.video.i_aspect *
-                          ((int64_t)p_stream->fmt.video.i_height << 16) /
-                          VOUT_ASPECT_FACTOR;
+                i_width = (int64_t)p_stream->fmt.video.i_sar_num *
+                          ((int64_t)p_stream->fmt.video.i_width << 16) /
+                          p_stream->fmt.video.i_sar_den;
             }
             // width (presentation)
             bo_add_32be( tkhd, i_width );
@@ -1692,12 +1662,14 @@ static bo_t *GetMoovBox( sout_mux_t *p_mux )
                 mp4_stream_t *tk = p_sys->pp_streams[i];
                 if( tk->fmt.i_cat == VIDEO_ES )
                 {
-                    if( p_stream->fmt.video.i_aspect )
-                        i_width = (int64_t)p_stream->fmt.video.i_aspect *
-                                   ((int64_t)p_stream->fmt.video.i_height<<16) / VOUT_ASPECT_FACTOR;
+                    if( tk->fmt.video.i_sar_num > 0 &&
+                        tk->fmt.video.i_sar_den > 0 )
+                        i_width = (int64_t)tk->fmt.video.i_sar_num *
+                                  ((int64_t)tk->fmt.video.i_width << 16) /
+                                  tk->fmt.video.i_sar_den;
                     else
-                        i_width = p_stream->fmt.video.i_width << 16;
-                    i_height = p_stream->fmt.video.i_height;
+                        i_width = tk->fmt.video.i_width << 16;
+                    i_height = tk->fmt.video.i_height;
                     break;
                 }
             }
@@ -1761,8 +1733,8 @@ static bo_t *GetMoovBox( sout_mux_t *p_mux )
         if( !p_sys->b_64_ext )
         {
             mdhd = box_full_new( "mdhd", 0, 0 );
-            bo_add_32be( mdhd, get_timestamp() );   // creation time
-            bo_add_32be( mdhd, get_timestamp() );   // modification time
+            bo_add_32be( mdhd, i_timestamp );   // creation time
+            bo_add_32be( mdhd, i_timestamp );   // modification time
             bo_add_32be( mdhd, i_timescale);        // timescale
             bo_add_32be( mdhd, p_stream->i_duration * (int64_t)i_timescale /
                                (mtime_t)1000000 );  // duration
@@ -1770,8 +1742,8 @@ static bo_t *GetMoovBox( sout_mux_t *p_mux )
         else
         {
             mdhd = box_full_new( "mdhd", 1, 0 );
-            bo_add_64be( mdhd, get_timestamp() );   // creation time
-            bo_add_64be( mdhd, get_timestamp() );   // modification time
+            bo_add_64be( mdhd, i_timestamp );   // creation time
+            bo_add_64be( mdhd, i_timestamp );   // modification time
             bo_add_32be( mdhd, i_timescale);        // timescale
             bo_add_64be( mdhd, p_stream->i_duration * (int64_t)i_timescale /
                                (mtime_t)1000000 );  // duration
@@ -1947,7 +1919,7 @@ static void bo_init( bo_t *p_bo, int i_size, uint8_t *p_buffer,
     if( !p_buffer )
     {
         p_bo->i_buffer_size = __MAX( i_size, 1024 );
-        p_bo->p_buffer = malloc( p_bo->i_buffer_size );
+        p_bo->p_buffer = xmalloc( p_bo->i_buffer_size );
     }
     else
     {
@@ -1968,8 +1940,7 @@ static void bo_add_8( bo_t *p_bo, uint8_t i )
     else if( p_bo->b_grow )
     {
         p_bo->i_buffer_size += 1024;
-        p_bo->p_buffer = realloc( p_bo->p_buffer, p_bo->i_buffer_size );
-
+        p_bo->p_buffer = xrealloc( p_bo->p_buffer, p_bo->i_buffer_size );
         p_bo->p_buffer[p_bo->i_buffer] = i;
     }
 

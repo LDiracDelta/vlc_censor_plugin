@@ -109,7 +109,7 @@ struct decoder_t
 
     /* SPU output callbacks
      * XXX use decoder_NewSubpicture and decoder_DeleteSubpicture */
-    subpicture_t   *(*pf_spu_buffer_new)( decoder_t * );
+    subpicture_t   *(*pf_spu_buffer_new)( decoder_t *, const subpicture_updater_t * );
     void            (*pf_spu_buffer_del)( decoder_t *, subpicture_t * );
 
     /* Input attachments
@@ -126,6 +126,8 @@ struct decoder_t
 
     /* Private structure for the owner of the decoder */
     decoder_owner_sys_t *p_owner;
+
+    bool                b_error;
 };
 
 /**
@@ -133,7 +135,7 @@ struct decoder_t
  */
 
 /**
- * \defgroup decoder Encoder
+ * \defgroup encoder Encoder
  *
  * The structure describing a Encoder
  *
@@ -178,67 +180,67 @@ struct encoder_t
  * buffer. You have to release it using decoder_DeletePicture or by returning
  * it to the caller as a pf_decode_video return value.
  */
-VLC_EXPORT( picture_t *, decoder_NewPicture, ( decoder_t * ) );
+VLC_API picture_t * decoder_NewPicture( decoder_t * ) VLC_USED;
 
 /**
  * This function will release a picture create by decoder_NewPicture.
  */
-VLC_EXPORT( void, decoder_DeletePicture, ( decoder_t *, picture_t *p_picture ) );
+VLC_API void decoder_DeletePicture( decoder_t *, picture_t *p_picture );
 
 /**
  * This function will increase the picture reference count.
  * (picture_Hold is not usable.)
  */
-VLC_EXPORT( void, decoder_LinkPicture, ( decoder_t *, picture_t * ) );
+VLC_API void decoder_LinkPicture( decoder_t *, picture_t * );
 
 /**
  * This function will decrease the picture reference count.
  * (picture_Release is not usable.)
  */
-VLC_EXPORT( void, decoder_UnlinkPicture, ( decoder_t *, picture_t * ) );
+VLC_API void decoder_UnlinkPicture( decoder_t *, picture_t * );
 
 /**
  * This function will return a new audio buffer usable by a decoder as an
  * output buffer. You have to release it using decoder_DeleteAudioBuffer
  * or by returning it to the caller as a pf_decode_audio return value.
  */
-VLC_EXPORT( aout_buffer_t *, decoder_NewAudioBuffer, ( decoder_t *, int i_size ) );
+VLC_API aout_buffer_t * decoder_NewAudioBuffer( decoder_t *, int i_size ) VLC_USED;
 
 /**
  * This function will release a audio buffer created by decoder_NewAudioBuffer.
  */
-VLC_EXPORT( void, decoder_DeleteAudioBuffer, ( decoder_t *, aout_buffer_t *p_buffer ) );
+VLC_API void decoder_DeleteAudioBuffer( decoder_t *, aout_buffer_t *p_buffer );
 
 /**
  * This function will return a new subpicture usable by a decoder as an output
  * buffer. You have to release it using decoder_DeleteSubpicture or by returning
  * it to the caller as a pf_decode_sub return value.
  */
-VLC_EXPORT( subpicture_t *, decoder_NewSubpicture, ( decoder_t * ) );
+VLC_API subpicture_t * decoder_NewSubpicture( decoder_t *, const subpicture_updater_t * ) VLC_USED;
 
 /**
  * This function will release a subpicture created by decoder_NewSubicture.
  */
-VLC_EXPORT( void, decoder_DeleteSubpicture, ( decoder_t *, subpicture_t *p_subpicture ) );
+VLC_API void decoder_DeleteSubpicture( decoder_t *, subpicture_t *p_subpicture );
 
 /**
  * This function gives all input attachments at once.
  *
  * You MUST release the returned values
  */
-VLC_EXPORT( int, decoder_GetInputAttachments, ( decoder_t *, input_attachment_t ***ppp_attachment, int *pi_attachment ) );
+VLC_API int decoder_GetInputAttachments( decoder_t *, input_attachment_t ***ppp_attachment, int *pi_attachment );
 
 /**
  * This function converts a decoder timestamp into a display date comparable
  * to mdate().
  * You MUST use it *only* for gathering statistics about speed.
  */
-VLC_EXPORT( mtime_t, decoder_GetDisplayDate, ( decoder_t *, mtime_t ) LIBVLC_USED );
+VLC_API mtime_t decoder_GetDisplayDate( decoder_t *, mtime_t ) VLC_USED;
 
 /**
  * This function returns the current input rate.
  * You MUST use it *only* for gathering statistics about speed.
  */
-VLC_EXPORT( int, decoder_GetDisplayRate, ( decoder_t * ) );
+VLC_API int decoder_GetDisplayRate( decoder_t * ) VLC_USED;
 
 #endif /* _VLC_CODEC_H */

@@ -59,7 +59,7 @@ vlc_module_begin ()
     set_subcategory( SUBCAT_SOUT_STREAM )
     add_shortcut( "rtmp" )
     set_callbacks( Open, Close )
-    add_bool( "rtmp-connect", false, NULL, RTMP_CONNECT_TEXT,
+    add_bool( "rtmp-connect", false, RTMP_CONNECT_TEXT,
               RTMP_CONNECT_LONGTEXT, false )
 vlc_module_end ()
 
@@ -68,7 +68,7 @@ vlc_module_end ()
  *****************************************************************************/
 static ssize_t Write( sout_access_out_t *, block_t * );
 static int     Seek ( sout_access_out_t *, off_t  );
-static void* ThreadControl( vlc_object_t * );
+static void* ThreadControl( void * );
 
 struct sout_access_out_sys_t
 {
@@ -96,8 +96,10 @@ static int Open( vlc_object_t *p_this )
     p_sys->p_thread =
         vlc_object_create( p_access, sizeof( rtmp_control_thread_t ) );
     if( !p_sys->p_thread )
+    {
+        free( p_sys );
         return VLC_ENOMEM;
-    vlc_object_attach( p_sys->p_thread, p_access );
+    }
 
     /* Parse URI - remove spaces */
     p = psz = strdup( p_access->psz_path );
@@ -140,7 +142,6 @@ static int Open( vlc_object_t *p_this )
     }
 
     /* Initialize thread variables */
-    p_sys->p_thread->b_die = 0;
     p_sys->p_thread->b_error= 0;
     p_sys->p_thread->p_fifo_input = block_FifoNew();
     p_sys->p_thread->p_empty_blocks = block_FifoNew();
@@ -216,8 +217,8 @@ static int Open( vlc_object_t *p_this )
         }
     }
 
-    if( vlc_thread_create( p_sys->p_thread, "rtmp control thread", ThreadControl,
-                           VLC_THREAD_PRIORITY_INPUT ) )
+    if( vlc_clone( &p_sys->p_thread->thread, ThreadControl, p_sys->p_thread,
+                   VLC_THREAD_PRIORITY_INPUT ) )
     {
         msg_Err( p_access, "cannot spawn rtmp control thread" );
         goto error2;
@@ -228,6 +229,8 @@ static int Open( vlc_object_t *p_this )
         if( rtmp_connect_passive( p_sys->p_thread ) < 0 )
         {
             msg_Err( p_access, "connect passive failed");
+            vlc_cancel( p_sys->p_thread->thread );
+            vlc_join( p_sys->p_thread->thread, NULL );
             goto error2;
         }
     }
@@ -247,10 +250,8 @@ error2:
     if( p_sys->p_thread->fd != -1 )
         net_Close( p_sys->p_thread->fd );
 error:
-    vlc_object_detach( p_sys->p_thread );
-    vlc_object_release( p_sys->p_thread );
-
     vlc_UrlClean( &p_sys->p_thread->url );
+    vlc_object_release( p_sys->p_thread );
     free( p_sys );
 
     return VLC_EGENERIC;
@@ -265,11 +266,8 @@ static void Close( vlc_object_t * p_this )
     sout_access_out_sys_t *p_sys = p_access->p_sys;
     int i;
 
-//    p_sys->p_thread->b_die = true;
-    vlc_object_kill( p_sys->p_thread );
-    block_FifoWake( p_sys->p_thread->p_fifo_input );
-
-    vlc_thread_join( p_sys->p_thread );
+    vlc_cancel( p_sys->p_thread->thread );
+    vlc_join( p_sys->p_thread->thread, NULL );
 
     vlc_cond_destroy( &p_sys->p_thread->wait );
     vlc_mutex_destroy( &p_sys->p_thread->lock );
@@ -288,7 +286,6 @@ static void Close( vlc_object_t * p_this )
 
     net_Close( p_sys->p_thread->fd );
 
-    vlc_object_detach( p_sys->p_thread );
     vlc_object_release( p_sys->p_thread );
 
     vlc_UrlClean( &p_sys->p_thread->url );
@@ -374,17 +371,19 @@ static int Seek( sout_access_out_t *p_access, off_t i_pos )
 /*****************************************************************************
  * ThreadControl: manage control messages and pipe media to Read
  *****************************************************************************/
-static void* ThreadControl( vlc_object_t *p_this )
+static void* ThreadControl( void *p_this )
 {
-    rtmp_control_thread_t *p_thread = (rtmp_control_thread_t *) p_this;
+    rtmp_control_thread_t *p_thread = p_this;
     rtmp_packet_t *rtmp_packet;
     int canc = vlc_savecancel ();
 
     rtmp_init_handler( p_thread->rtmp_handler );
 
-    while( vlc_object_alive (p_thread) )
+    for( ;; )
     {
+        vlc_restorecancel( canc );
         rtmp_packet = rtmp_read_net_packet( p_thread );
+        canc = vlc_savecancel( );
         if( rtmp_packet != NULL )
         {
             if( rtmp_packet->content_type < 0x01 /* RTMP_CONTENT_TYPE_CHUNK_SIZE */
@@ -402,14 +401,14 @@ static void* ThreadControl( vlc_object_t *p_this )
         else
         {
             /* Sometimes server close connection too soon */
+#warning Locking bug here.
             if( p_thread->result_connect )
             {
                 vlc_mutex_lock( &p_thread->lock );
                 vlc_cond_signal( &p_thread->wait );
                 vlc_mutex_unlock( &p_thread->lock );
             }
-
-            p_thread->b_die = 1;
+            break;
         }
     }
     vlc_restorecancel (canc);

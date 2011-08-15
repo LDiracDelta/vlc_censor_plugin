@@ -35,14 +35,18 @@
 #include <vlc_common.h>
 #include <vlc_plugin.h>
 #include <vlc_interface.h>
+#include <vlc_playlist.h>
 #include <vlc_vout.h>
 
-#ifdef HAVE_UNISTD_H
-#    include <unistd.h>
+#ifdef __APPLE__
+# include "TargetConditionals.h"
+# if !TARGET_OS_IPHONE
+#  define HAVE_MACOS_UNIMOTION
+# endif
 #endif
 
-#ifdef __APPLE__
-#include "unimotion.h"
+#ifdef HAVE_MACOS_UNIMOTION
+# include "unimotion.h"
 #endif
 
 /*****************************************************************************
@@ -52,7 +56,7 @@ struct intf_sys_t
 {
     enum { NO_SENSOR, HDAPS_SENSOR, AMS_SENSOR, APPLESMC_SENSOR,
            UNIMOTION_SENSOR } sensor;
-#ifdef __APPLE__
+#ifdef HAVE_MACOS_UNIMOTION
     enum sms_hardware unimotion_hw;
 #endif
     int i_calibrate;
@@ -82,7 +86,7 @@ vlc_module_begin ()
     set_help( N_("Use HDAPS, AMS, APPLESMC or UNIMOTION motion sensors " \
                  "to rotate the video") )
 
-    add_bool( "motion-use-rotate", false, NULL,
+    add_bool( "motion-use-rotate", false,
               USE_ROTATE_TEXT, USE_ROTATE_TEXT, false )
 
     set_capability( "interface", 0 )
@@ -96,7 +100,7 @@ int Open ( vlc_object_t *p_this )
 {
     intf_thread_t *p_intf = (intf_thread_t *)p_this;
     FILE *f;
-    int i_x, i_y;
+    int i_x = 0, i_y = 0;
 
     p_intf->p_sys = malloc( sizeof( intf_sys_t ) );
     if( p_intf->p_sys == NULL )
@@ -110,10 +114,8 @@ int Open ( vlc_object_t *p_this )
         f = fopen( "/sys/devices/platform/hdaps/calibrate", "r" );
         if( f )
         {
-            i_x = i_y = 0;
-            fscanf( f, "(%d,%d)", &i_x, &i_y );
+            p_intf->p_sys->i_calibrate = fscanf( f, "(%d,%d)", &i_x, &i_y ) == 2 ? i_x: 0;
             fclose( f );
-            p_intf->p_sys->i_calibrate = i_x;
             p_intf->p_sys->sensor = HDAPS_SENSOR;
         }
         else
@@ -133,10 +135,8 @@ int Open ( vlc_object_t *p_this )
         f = fopen( "/sys/devices/applesmc.768/calibrate", "r" );
         if( f )
         {
-            i_x = i_y = 0;
-            fscanf( f, "(%d,%d)", &i_x, &i_y );
+            p_intf->p_sys->i_calibrate = fscanf( f, "(%d,%d)", &i_x, &i_y ) == 2 ? i_x: 0;
             fclose( f );
-            p_intf->p_sys->i_calibrate = i_x;
             p_intf->p_sys->sensor = APPLESMC_SENSOR;
         }
         else
@@ -144,8 +144,8 @@ int Open ( vlc_object_t *p_this )
             p_intf->p_sys->sensor = NO_SENSOR;
         }
     }
-#ifdef __APPLE__
-    else if((p_intf->p_sys->unimotion_hw = detect_sms()))
+#ifdef HAVE_MACOS_UNIMOTION
+    else if( (p_intf->p_sys->unimotion_hw = detect_sms()) )
         p_intf->p_sys->sensor = UNIMOTION_SENSOR;
 #endif
     else
@@ -156,8 +156,9 @@ int Open ( vlc_object_t *p_this )
 
     p_intf->pf_run = RunIntf;
 
-    p_intf->p_sys->b_use_rotate = config_GetInt( p_intf, "motion-use-rotate" );
+    p_intf->p_sys->b_use_rotate = var_InheritBool( p_intf, "motion-use-rotate" );
 
+    msg_Dbg( p_intf, "Motion detection correctly loaded" );
     return VLC_SUCCESS;
 }
 
@@ -185,11 +186,11 @@ static void RunIntf( intf_thread_t *p_intf )
 
     for( ;; )
     {
-        vout_thread_t *p_vout;
         const char *psz_filter, *psz_type;
         bool b_change = false;
 
         /* Wait a bit, get orientation, change filter if necessary */
+#warning FIXME: check once (or less) per picture, not once per interval
         msleep( INTF_IDLE_SLEEP );
 
         int canc = vlc_savecancel();
@@ -205,7 +206,7 @@ static void RunIntf( intf_thread_t *p_intf )
             {
                 /* TODO: cache object pointer */
                 vlc_object_t *p_obj =
-                vlc_object_find_name( p_intf->p_libvlc, "rotate", FIND_CHILD );
+                vlc_object_find_name( p_intf->p_libvlc, "rotate" );
                 if( p_obj )
                 {
                     var_SetInteger( p_obj, "rotate-deciangle",
@@ -239,14 +240,24 @@ static void RunIntf( intf_thread_t *p_intf )
 
         if( b_change )
         {
-            p_vout = (vout_thread_t *)
-                vlc_object_find( p_intf, VLC_OBJECT_VOUT, FIND_ANYWHERE );
-            if( p_vout )
-            {
-                config_PutPsz( p_vout, "transform-type", psz_type );
-                var_SetString( p_vout, "vout-filter", psz_filter );
-                vlc_object_release( p_vout );
+#warning FIXME: refactor this plugin as a video filter!
+            input_thread_t *p_input;
 
+            p_input = playlist_CurrentInput( pl_Get( p_intf ) );
+            if( p_input )
+            {
+                vout_thread_t *p_vout;
+
+                p_vout = input_GetVout( p_input );
+                if( p_vout )
+                {
+#warning FIXME: do not override the permanent configuration!
+#warning FIXME: transform-type does not exist anymore
+                    config_PutPsz( p_vout, "transform-type", psz_type );
+                    var_SetString( p_vout, "video-filter", psz_filter );
+                    vlc_object_release( p_vout );
+                }
+                vlc_object_release( p_input );
                 i_oldx = i_x;
             }
         }
@@ -264,7 +275,8 @@ loop:
 static int GetOrientation( intf_thread_t *p_intf )
 {
     FILE *f;
-    int i_x, i_y, i_z = 0;
+    int i_x = 0, i_y = 0, i_z = 0;
+    int i_ret;
 
     switch( p_intf->p_sys->sensor )
     {
@@ -275,11 +287,13 @@ static int GetOrientation( intf_thread_t *p_intf )
             return 0;
         }
 
-        i_x = i_y = 0;
-        fscanf( f, "(%d,%d)", &i_x, &i_y );
+        i_ret = fscanf( f, "(%d,%d)", &i_x, &i_y );
         fclose( f );
 
-        return ( i_x - p_intf->p_sys->i_calibrate ) * 10;
+        if( i_ret < 2 )
+            return 0;
+        else
+            return ( i_x - p_intf->p_sys->i_calibrate ) * 10;
 
     case AMS_SENSOR:
         f = fopen( "/sys/devices/ams/x", "r" );
@@ -288,10 +302,13 @@ static int GetOrientation( intf_thread_t *p_intf )
             return 0;
         }
 
-        fscanf( f, "%d", &i_x);
+        i_ret = fscanf( f, "%d", &i_x);
         fclose( f );
 
-        return - i_x * 30; /* FIXME: arbitrary */
+        if( i_ret < 1 )
+            return 0;
+        else
+            return - i_x * 30; /* FIXME: arbitrary */
 
     case APPLESMC_SENSOR:
         f = fopen( "/sys/devices/applesmc.768/position", "r" );
@@ -300,13 +317,15 @@ static int GetOrientation( intf_thread_t *p_intf )
             return 0;
         }
 
-        i_x = i_y = i_z = 0;
-        fscanf( f, "(%d,%d,%d)", &i_x, &i_y, &i_z );
+        i_ret = fscanf( f, "(%d,%d,%d)", &i_x, &i_y, &i_z );
         fclose( f );
 
-        return ( i_x - p_intf->p_sys->i_calibrate ) * 10;
+        if( i_ret < 3 )
+            return 0;
+        else
+            return ( i_x - p_intf->p_sys->i_calibrate ) * 10;
 
-#ifdef __APPLE__
+#ifdef HAVE_MACOS_UNIMOTION
     case UNIMOTION_SENSOR:
         if( read_sms_raw( p_intf->p_sys->unimotion_hw, &i_x, &i_y, &i_z ) )
         {
@@ -322,6 +341,7 @@ static int GetOrientation( intf_thread_t *p_intf )
         else
             return 0;
 #endif
+    case NO_SENSOR:
     default:
         return 0;
     }

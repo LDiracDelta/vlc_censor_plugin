@@ -27,11 +27,9 @@
 #endif
 
 #include <vlc_common.h>
-
-
 #include <vlc_demux.h>
+#include <vlc_charset.h>
 
-#include <vlc_codecs.h>                   /* BITMAPINFOHEADER, WAVEFORMATEX */
 #include "libasf.h"
 
 #define ASF_DEBUG 1
@@ -215,10 +213,9 @@ static int  ASF_ReadObject_Header( stream_t *s, asf_object_t *p_obj )
 {
     asf_object_header_t *p_hdr = &p_obj->header;
     asf_object_t        *p_subobj;
-    int                 i_peek;
     const uint8_t       *p_peek;
 
-    if( ( i_peek = stream_Peek( s, &p_peek, 30 ) ) < 30 )
+    if( stream_Peek( s, &p_peek, 30 ) < 30 )
        return VLC_EGENERIC;
 
     p_hdr->i_sub_object_count = GetDWLE( p_peek + 24 );
@@ -257,10 +254,9 @@ static int  ASF_ReadObject_Header( stream_t *s, asf_object_t *p_obj )
 static int ASF_ReadObject_Data( stream_t *s, asf_object_t *p_obj )
 {
     asf_object_data_t *p_data = &p_obj->data;
-    int               i_peek;
     const uint8_t     *p_peek;
 
-    if( ( i_peek = stream_Peek( s, &p_peek, 50 ) ) < 50 )
+    if( stream_Peek( s, &p_peek, 50 ) < 50 )
        return VLC_EGENERIC;
 
     ASF_GetGUID( &p_data->i_file_id, p_peek + 24 );
@@ -319,7 +315,7 @@ static int ASF_ReadObject_Index( stream_t *s, asf_object_t *p_obj )
     for( i = 0, p_peek += 56; i < p_index->i_index_entry_count; i++, p_peek += 6 )
     {
         p_index->index_entry[i].i_packet_number = GetDWLE( p_peek );
-        p_index->index_entry[i].i_packet_count = GetDWLE( p_peek + 4 );
+        p_index->index_entry[i].i_packet_count = GetWLE( p_peek + 4 );
     }
 
     return VLC_SUCCESS;
@@ -335,10 +331,9 @@ static void ASF_FreeObject_Index( asf_object_t *p_obj )
 static int ASF_ReadObject_file_properties( stream_t *s, asf_object_t *p_obj )
 {
     asf_object_file_properties_t *p_fp = &p_obj->file_properties;
-    int           i_peek;
     const uint8_t *p_peek;
 
-    if( ( i_peek = stream_Peek( s, &p_peek,  104 ) ) < 104 )
+    if( stream_Peek( s, &p_peek,  104 ) < 104 )
        return VLC_EGENERIC;
 
     ASF_GetGUID( &p_fp->i_file_id, p_peek + 24 );
@@ -655,7 +650,7 @@ static int ASF_ReadObject_codec_list( stream_t *s, asf_object_t *p_obj )
        return VLC_EGENERIC;
 
     ASF_GetGUID( &p_cl->i_reserved, p_peek + 24 );
-    p_cl->i_codec_entries_count = GetWLE( p_peek + 40 );
+    p_cl->i_codec_entries_count = GetDWLE( p_peek + 40 );
 
     p_data = p_peek + 44;
 
@@ -745,30 +740,14 @@ static int ASF_ReadObject_content_description(stream_t *s, asf_object_t *p_obj)
     asf_object_content_description_t *p_cd = &p_obj->content_description;
     const uint8_t *p_peek, *p_data;
     int i_peek, i_title, i_artist, i_copyright, i_description, i_rating;
-    vlc_iconv_t cd = (vlc_iconv_t)-1;
-    const char *ib = NULL;
-    char *ob = NULL;
-    size_t i_ibl, i_obl, i_len;
 
     if( ( i_peek = stream_Peek( s, &p_peek, p_cd->i_object_size ) ) < 34 )
        return VLC_EGENERIC;
 
-    cd = vlc_iconv_open("UTF-8", "UTF-16LE");
-    if( cd == (vlc_iconv_t)-1 )
-    {
-        msg_Err( s, "vlc_iconv_open failed" );
-        return VLC_EGENERIC;
-    }
-
 /* FIXME i_size*3 is the worst case. */
 #define GETSTRINGW( psz_str, i_size ) do { \
-    psz_str = calloc( i_size*3+1, sizeof(char) ); \
+    psz_str = FromCharset( "UTF-16LE", p_data, i_size ); \
     if( psz_str ) { \
-        ib = (const char *)p_data; \
-        ob = psz_str; \
-        i_ibl = i_size; \
-        i_obl = i_size*3; \
-        i_len = vlc_iconv(cd, &ib, &i_ibl, &ob, &i_obl); \
         p_data += i_size; \
     } } while(0)
 
@@ -781,10 +760,7 @@ static int ASF_ReadObject_content_description(stream_t *s, asf_object_t *p_obj)
     i_rating        = ASF_READ2();
 
     if( !ASF_HAVE( i_title+i_artist+i_copyright+i_description+i_rating ) )
-    {
-        vlc_iconv_close( cd );
         return VLC_EGENERIC;
-    }
 
     GETSTRINGW( p_cd->psz_title, i_title );
     GETSTRINGW( p_cd->psz_artist, i_artist );
@@ -804,7 +780,6 @@ static int ASF_ReadObject_content_description(stream_t *s, asf_object_t *p_obj)
              p_cd->psz_rating );
 #endif
 
-    vlc_iconv_close(cd);
     return VLC_SUCCESS;
 }
 
@@ -1487,7 +1462,7 @@ static void ASF_ObjectDumpDebug( vlc_object_t *p_obj,
     psz_name = ASF_ObjectDumpDebugInfo[i].psz_name;
 
     char str[512];
-    if( i_level * 5 + 1 >= sizeof(str) )
+    if( i_level >= (sizeof(str) - 1)/5 )
         return;
 
     memset( str, ' ', sizeof( str ) );

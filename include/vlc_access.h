@@ -80,8 +80,8 @@ struct access_t
 
     /* Access name (empty if non forced) */
     char        *psz_access;
-    /* Access path/url/filename/.... */
-    char        *psz_path;
+    char        *psz_location; /**< Location (URL with the scheme stripped) */
+    char        *psz_filepath; /**< Local file path (if applicable) */
 
     /* Access can fill this entry to force a demuxer
      * XXX: fill it once you know for sure you will succeed
@@ -95,7 +95,7 @@ struct access_t
 
     /* Called for each seek.
      * XXX can be null */
-    int         (*pf_seek) ( access_t *, int64_t );         /* can be null if can't seek */
+    int         (*pf_seek) ( access_t *, uint64_t );         /* can be null if can't seek */
 
     /* Used to retreive and configure the access
      * XXX mandatory. look at access_query_e to know what query you *have to* support */
@@ -107,8 +107,8 @@ struct access_t
         unsigned int i_update;  /* Access sets them on change,
                                    Input removes them once take into account*/
 
-        int64_t      i_size;    /* Write only for access, read only for input */
-        int64_t      i_pos;     /* idem */
+        uint64_t     i_size;    /* Write only for access, read only for input */
+        uint64_t     i_pos;     /* idem */
         bool         b_eof;     /* idem */
 
         int          i_title;    /* idem, start from 0 (could be menu) */
@@ -151,7 +151,7 @@ static inline void access_InitFields( access_t *p_a )
  * This function will return the parent input of this access.
  * It is retained. It can return NULL.
  */
-VLC_EXPORT( input_thread_t *, access_GetParentInput, ( access_t *p_access ) );
+VLC_API input_thread_t * access_GetParentInput( access_t *p_access ) VLC_USED;
 
 #define ACCESS_SET_CALLBACKS( read, block, control, seek )              \
     p_access->pf_read = read;                                           \

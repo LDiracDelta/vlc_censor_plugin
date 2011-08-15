@@ -26,8 +26,7 @@
  *****************************************************************************/
 #include "intf.h"
 #include "applescript.h"
-#include "controls.h"
-#include "open.h"
+#include "CoreInteraction.h"
 
 /*****************************************************************************
  * VLGetURLScriptCommand implementation
@@ -41,7 +40,7 @@
     if ( [o_command isEqualToString:@"GetURL"] || [o_command isEqualToString:@"OpenURL"] )
     {
         intf_thread_t * p_intf = VLCIntf;
-        playlist_t * p_playlist = pl_Hold( p_intf );
+        playlist_t * p_playlist = pl_Get( p_intf );
         if( p_playlist == NULL )
         {
             return nil;
@@ -52,8 +51,7 @@
             NSURL * o_url;
             input_item_t *p_input;
 
-            p_input = input_item_New( p_playlist,
-                                    [o_urlString fileSystemRepresentation],
+            p_input = input_item_New( [o_urlString fileSystemRepresentation],
                                     [[[NSFileManager defaultManager]
                                     displayNameAtPath: o_urlString] UTF8String] );
             /* FIXME: playlist_AddInput() can fail */
@@ -69,7 +67,6 @@
                     noteNewRecentDocumentURL: o_url];
             }
         }
-        pl_Release( p_intf );
     }
     return nil;
 }
@@ -90,50 +87,44 @@
     NSString *o_command = [[self commandDescription] commandName];
 
     intf_thread_t * p_intf = VLCIntf;
-    playlist_t * p_playlist = pl_Hold( p_intf );
+    playlist_t * p_playlist = pl_Get( p_intf );
     if( p_playlist == NULL )
     {
         return nil;
     }
  
-    VLCControls * o_controls = (VLCControls *)[[NSApp delegate] controls];
- 
-    if ( o_controls )
+    if ( [o_command isEqualToString:@"play"] )
     {
-        if ( [o_command isEqualToString:@"play"] )
-        {
-            [o_controls play:self];
-        }
-        else if ( [o_command isEqualToString:@"stop"] )
-        {
-            [o_controls stop:self];
-        }
-        else if ( [o_command isEqualToString:@"previous"] )
-        {
-            [o_controls prev:self];
-        }
-        else if ( [o_command isEqualToString:@"next"] )
-        {
-            [o_controls next:self];
-        }
-        else if ( [o_command isEqualToString:@"fullscreen"] )
-        {
-            [o_controls toogleFullscreen: self];
-        }
-        else if ( [o_command isEqualToString:@"mute"] )
-        {
-            [o_controls mute:self];
-        }
-        else if ( [o_command isEqualToString:@"volumeUp"] )
-        {
-            [o_controls volumeUp:self];
-        }
-        else if ( [o_command isEqualToString:@"volumeDown"] )
-        {
-            [o_controls volumeDown:self];
-        }
+        [[VLCCoreInteraction sharedInstance] play];
     }
-    pl_Release( p_intf );
+    else if ( [o_command isEqualToString:@"stop"] )
+    {
+        [[VLCCoreInteraction sharedInstance] stop];
+    }
+    else if ( [o_command isEqualToString:@"previous"] )
+    {
+        [[VLCCoreInteraction sharedInstance] previous];
+    }
+    else if ( [o_command isEqualToString:@"next"] )
+    {
+        [[VLCCoreInteraction sharedInstance] next];
+    }
+    else if ( [o_command isEqualToString:@"fullscreen"] )
+    {
+        [[VLCCoreInteraction sharedInstance] toggleFullscreen];
+    }
+    else if ( [o_command isEqualToString:@"mute"] )
+    {
+        [[VLCCoreInteraction sharedInstance] mute];
+    }
+    else if ( [o_command isEqualToString:@"volumeUp"] )
+    {
+        [[VLCCoreInteraction sharedInstance] volumeUp];
+    }
+    else if ( [o_command isEqualToString:@"volumeDown"] )
+    {
+        [[VLCCoreInteraction sharedInstance] volumeDown];
+    }
     return nil;
 }
 
@@ -145,14 +136,24 @@
 @implementation NSApplication(ScriptSupport)
 
 - (BOOL) scriptFullscreenMode {    
-    VLCControls * o_controls = (VLCControls *)[[self delegate] controls];
-
-    return [o_controls isFullscreen];
+    vout_thread_t * p_vout = getVout();
+    if( !p_vout )
+        return NO;
+    BOOL b_value = var_GetBool( p_vout, "fullscreen");
+    vlc_object_release( p_vout );
+    return b_value;
 }
 - (void) setScriptFullscreenMode: (BOOL) mode {
-    VLCControls * o_controls = (VLCControls *)[[self delegate] controls];
-    if (mode == [o_controls isFullscreen]) return;
-    [o_controls toogleFullscreen: self];
+    vout_thread_t * p_vout = getVout();
+    if( !p_vout )
+        return;
+    if (var_GetBool( p_vout, "fullscreen") == mode)
+    {
+        vlc_object_release( p_vout );
+        return;
+    }
+    vlc_object_release( p_vout );
+    [[VLCCoreInteraction sharedInstance] toggleFullscreen];
 }
 
 @end

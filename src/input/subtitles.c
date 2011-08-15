@@ -32,12 +32,8 @@
 #endif
 
 #include <vlc_common.h>
-#include <vlc_charset.h>
+#include <vlc_fs.h>
 #include <vlc_url.h>
-
-#ifdef HAVE_DIRENT_H
-#   include <dirent.h>
-#endif
 
 #ifdef HAVE_UNISTD_H
 #   include <unistd.h>
@@ -61,10 +57,10 @@ static const char const sub_exts[][6] = {
     "idx", "sub",  "srt",
     "ssa", "ass",  "smi",
     "utf", "utf8", "utf-8",
-    "txt", "rt",   "aqt",
+    "rt",   "aqt", "txt",
     "usf", "jss",  "cdg",
     "psb", "mpsub","mpl2",
-    "pjs", "dks",
+    "pjs", "dks", "stl",
     ""
 };
 
@@ -158,7 +154,7 @@ static int compare_sub_priority( const void *a, const void *b )
     if( p0->priority < p1->priority )
         return 1;
 
-#ifndef UNDER_CE
+#ifdef HAVE_STRCOLL
     return strcoll( p0->psz_fname, p1->psz_fname);
 #else
     return strcmp( p0->psz_fname, p1->psz_fname);
@@ -218,11 +214,9 @@ static char **paths_to_list( const char *psz_dir, char *psz_path )
         if( *psz_subdir == '\0' )
             continue;
 
-        if( asprintf( &subdirs[i++], "%s%s%c",
+        if( asprintf( &subdirs[i++], "%s%s",
                   psz_subdir[0] == '.' ? psz_dir : "",
-                  psz_subdir,
-                  psz_subdir[strlen(psz_subdir) - 1] == DIR_SEP_CHAR ?
-                                           '\0' : DIR_SEP_CHAR ) == -1 )
+                  psz_subdir ) == -1 )
             break;
     }
     subdirs[i] = NULL;
@@ -251,8 +245,7 @@ char **subtitles_Detect( input_thread_t *p_this, char *psz_path,
 {
     int i_fuzzy;
     int j, i_result2, i_sub_count, i_fname_len;
-    char *f_dir = NULL, *f_fname = NULL, *f_fname_noext = NULL, *f_fname_trim = NULL;
-    char *tmp = NULL;
+    char *f_fname_noext = NULL, *f_fname_trim = NULL;
 
     char **subdirs; /* list of subdirectories to look in */
 
@@ -262,50 +255,26 @@ char **subtitles_Detect( input_thread_t *p_this, char *psz_path,
     if( !psz_name_org )
         return NULL;
 
-    if( !strncmp( psz_name_org, "file://", 7 ) )
-    {
-        psz_name_org += 7;
-        if( !strncmp( psz_name_org, "localhost", 9 ) )
-            psz_name_org += 9;
-    }
-    char *psz_fname = decode_URI_duplicate( psz_name_org );
+    char *psz_fname = make_path( psz_name_org );
     if( !psz_fname )
         return NULL;
 
     /* extract filename & dirname from psz_fname */
-    tmp = strrchr( psz_fname, DIR_SEP_CHAR );
-    if( tmp )
+    char *f_dir = strdup( psz_fname );
+    if( f_dir == NULL )
     {
-        const int i_dirlen = strlen(psz_fname)-strlen(tmp)+1; /* include the separator */
-        f_fname = strdup( &tmp[1] );    /* skip the separator */
-        f_dir = strndup( psz_fname, i_dirlen );
+        free( psz_fname );
+        return NULL;
     }
-    else
-    {
-#if defined (HAVE_UNISTD_H) && !defined (UNDER_CE)
-        /* Get the current working directory */
-        char *psz_cwd = getcwd( NULL, 0 );
-#else
-        char *psz_cwd = NULL;
-#endif
-        if( !psz_cwd )
-        {
-            free( psz_fname );
-            return NULL;
-        }
 
-        f_fname = strdup( psz_fname );
-        if( asprintf( &f_dir, "%s%c", psz_cwd, DIR_SEP_CHAR ) == -1 )
-            f_dir = NULL; /* Assure that function will return in next test */
-        free( psz_cwd );
-    }
-    if( !f_fname || !f_dir )
+    char *f_fname = strrchr( f_dir, DIR_SEP_CHAR );
+    if( !f_fname )
     {
-        free( f_fname );
         free( f_dir );
         free( psz_fname );
         return NULL;
     }
+    *(f_fname++) = 0; /* skip dir separator */
 
     i_fname_len = strlen( f_fname );
 
@@ -313,7 +282,6 @@ char **subtitles_Detect( input_thread_t *p_this, char *psz_path,
     f_fname_trim = malloc(i_fname_len + 1 );
     if( !f_fname_noext || !f_fname_trim )
     {
-        free( f_fname );
         free( f_dir );
         free( f_fname_noext );
         free( f_fname_trim );
@@ -330,31 +298,32 @@ char **subtitles_Detect( input_thread_t *p_this, char *psz_path,
     subdirs = paths_to_list( f_dir, psz_path );
     for( j = -1, i_sub_count = 0; (j == -1) || ( j >= 0 && subdirs != NULL && subdirs[j] != NULL ); j++ )
     {
-        const char *psz_dir = j < 0 ? f_dir : subdirs[j];
-        char **ppsz_dir_content;
-        int i_dir_content;
-
+        const char *psz_dir = (j < 0) ? f_dir : subdirs[j];
         if( psz_dir == NULL || ( j >= 0 && !strcmp( psz_dir, f_dir ) ) )
             continue;
 
         /* parse psz_src dir */
-        i_dir_content = utf8_scandir( psz_dir, &ppsz_dir_content,
-                                      subtitles_Filter, NULL );
-        if( i_dir_content < 0 )
+        DIR *dir = vlc_opendir( psz_dir );
+        if( dir == NULL )
             continue;
 
         msg_Dbg( p_this, "looking for a subtitle file in %s", psz_dir );
-        for( int a = 0; a < i_dir_content && i_sub_count < MAX_SUBTITLE_FILES ; a++ )
+
+        char *psz_name;
+        while( (psz_name = vlc_readdir( dir )) && i_sub_count < MAX_SUBTITLE_FILES )
         {
-            char *psz_name = ppsz_dir_content[a];
+            if( psz_name[0] == '.' || !subtitles_Filter( psz_name ) )
+            {
+                free( psz_name );
+                continue;
+            }
+
             char tmp_fname_noext[strlen( psz_name ) + 1];
             char tmp_fname_trim[strlen( psz_name ) + 1];
             char tmp_fname_ext[strlen( psz_name ) + 1];
+            char *tmp;
 
             int i_prio;
-
-            if( psz_name == NULL || psz_name[0] == '.' )
-                continue;
 
             /* retrieve various parts of the filename */
             strcpy_strip_ext( tmp_fname_noext, psz_name );
@@ -392,14 +361,17 @@ char **subtitles_Detect( input_thread_t *p_this, char *psz_path,
             }
             if( i_prio >= i_fuzzy )
             {
-                char psz_path[strlen( psz_dir ) + strlen( psz_name ) + 1];
+                char psz_path[strlen( psz_dir ) + strlen( psz_name ) + 2];
                 struct stat st;
 
-                sprintf( psz_path, "%s%s", psz_dir, psz_name );
+                sprintf( psz_path, "%s"DIR_SEP"%s", psz_dir, psz_name );
                 if( !strcmp( psz_path, psz_fname ) )
+                {
+                    free( psz_name );
                     continue;
+                }
 
-                if( !utf8_stat( psz_path, &st ) && S_ISREG( st.st_mode ) && result )
+                if( !vlc_stat( psz_path, &st ) && S_ISREG( st.st_mode ) && result )
                 {
                     msg_Dbg( p_this,
                             "autodetected subtitle: %s with priority %d",
@@ -415,13 +387,9 @@ char **subtitles_Detect( input_thread_t *p_this, char *psz_path,
                              psz_path, i_prio );
                 }
             }
+            free( psz_name );
         }
-        if( ppsz_dir_content )
-        {
-            for( int a = 0; a < i_dir_content; a++ )
-                free( ppsz_dir_content[a] );
-            free( ppsz_dir_content );
-        }
+        closedir( dir );
     }
     if( subdirs )
     {
@@ -429,7 +397,6 @@ char **subtitles_Detect( input_thread_t *p_this, char *psz_path,
             free( subdirs[j] );
         free( subdirs );
     }
-    free( f_fname );
     free( f_dir );
     free( f_fname_trim );
     free( f_fname_noext );

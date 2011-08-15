@@ -88,7 +88,7 @@ class QVLCMenu;
 
 class DialogsProvider : public QObject
 {
-    Q_OBJECT;
+    Q_OBJECT
     friend class QVLCMenu;
 
 public:
@@ -132,6 +132,7 @@ private:
     static QFileDialog *censorFileDialog;
 
     intf_thread_t *p_intf;
+    QWidget* root;
     bool b_isDying;
 
     void openDialog( int );
@@ -160,6 +161,7 @@ public slots:
     void podcastConfigureDialog();
     void toolbarDialog();
     void pluginDialog();
+    void epgDialog();
 
     void openFileGenericDialog( intf_dialog_args_t * );
 
@@ -210,8 +212,8 @@ public:
         i_dialog = _i_dialog;
         i_arg = _i_arg;
         p_arg = _p_arg;
-    };
-    virtual ~DialogEvent() { };
+    }
+    virtual ~DialogEvent() { }
 
     int i_arg, i_dialog;
     intf_dialog_args_t *p_arg;

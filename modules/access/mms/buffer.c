@@ -30,6 +30,7 @@
 #endif
 
 #include <vlc_common.h>
+#include <vlc_charset.h>
 
 #include "asf.h"
 #include "buffer.h"
@@ -41,11 +42,8 @@ int var_buffer_initwrite( var_buffer_t *p_buf, int i_default_size )
 {
     p_buf->i_size =  ( i_default_size > 0 ) ? i_default_size : 2048;
     p_buf->i_data = 0;
-    if( !( p_buf->p_data = malloc( p_buf->i_size ) ) )
-    {
-        return( -1 );
-    }
-    return( 0 );
+    p_buf->p_data = malloc( p_buf->i_size );
+    return p_buf->p_data ? 0 : -1;
 }
 
 int var_buffer_reinitwrite( var_buffer_t *p_buf, int i_default_size )
@@ -62,11 +60,7 @@ int var_buffer_reinitwrite( var_buffer_t *p_buf, int i_default_size )
         p_buf->i_size =  ( i_default_size > 0 ) ? i_default_size : 2048;
         p_buf->p_data = malloc( p_buf->i_size );
     }
-    if( !p_buf->p_data )
-    {
-        return( -1 );
-    }
-    return( 0 );
+    return p_buf->p_data ? 0 : -1;
 }
 
 void var_buffer_add8 ( var_buffer_t *p_buf, uint8_t  i_byte )
@@ -75,7 +69,7 @@ void var_buffer_add8 ( var_buffer_t *p_buf, uint8_t  i_byte )
     if( p_buf->i_data >= p_buf->i_size )
     {
         p_buf->i_size += 1024;
-        p_buf->p_data = realloc( p_buf->p_data, p_buf->i_size );
+        p_buf->p_data = xrealloc( p_buf->p_data, p_buf->i_size );
     }
     p_buf->p_data[p_buf->i_data] = i_byte&0xff;
     p_buf->i_data++;
@@ -105,45 +99,35 @@ void var_buffer_addmemory( var_buffer_t *p_buf, void *p_mem, int i_mem )
     if( p_buf->i_data + i_mem >= p_buf->i_size )
     {
         p_buf->i_size += i_mem + 1024;
-        p_buf->p_data = realloc( p_buf->p_data, p_buf->i_size );
+        p_buf->p_data = xrealloc( p_buf->p_data, p_buf->i_size );
     }
 
-    memcpy( p_buf->p_data + p_buf->i_data,
-            p_mem,
-            i_mem );
+    memcpy( p_buf->p_data + p_buf->i_data, p_mem, i_mem );
     p_buf->i_data += i_mem;
 }
 
 void var_buffer_addUTF16( var_buffer_t *p_buf, const char *p_str )
 {
-    unsigned int i;
-    if( !p_str )
-    {
-        var_buffer_add16( p_buf, 0 );
-    }
+    uint16_t *p_out;
+    size_t i_out;
+
+    if( p_str != NULL )
+#ifdef WORDS_BIGENDIAN
+        p_out = ToCharset( "UTF-16BE", p_str, &i_out );
+#else
+        p_out = ToCharset( "UTF-16LE", p_str, &i_out );
+#endif
     else
-    {
-        vlc_iconv_t iconv_handle;
-        size_t i_in = strlen( p_str );
-        size_t i_out = i_in * 4;
-        char *psz_out, *psz_tmp;
+        p_out = NULL;
+    if( p_out == NULL )
+        i_out = 0;
 
-        psz_out = psz_tmp = malloc( i_out + 1 );
-        iconv_handle = vlc_iconv_open( "UTF-16LE", "UTF-8" );
-        vlc_iconv( iconv_handle, &p_str, &i_in, &psz_tmp, &i_out );
-        vlc_iconv_close( iconv_handle );
-        psz_tmp[0] = '\0';
-        psz_tmp[1] = '\0';
+    i_out /= 2;
+    for( size_t i = 0; i < i_out; i ++ )
+        var_buffer_add16( p_buf, p_out[i] );
+    free( p_out );
 
-        for( i = 0; ; i += 2 )
-        {
-            uint16_t v = GetWLE( &psz_out[i] );
-            var_buffer_add16( p_buf, v );
-            if( !v )
-                break;
-        }
-        free( psz_out );
-    }
+    var_buffer_add16( p_buf, 0 );
 }
 
 void var_buffer_free( var_buffer_t *p_buf )

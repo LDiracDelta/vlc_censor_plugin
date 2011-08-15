@@ -64,11 +64,11 @@ vlc_module_begin ()
     set_category( CAT_INPUT )
     set_subcategory( SUBCAT_INPUT_ACCESS )
 
-    add_integer( "rtmp-caching", DEFAULT_PTS_DELAY / 1000, NULL, CACHING_TEXT,
+    add_integer( "rtmp-caching", DEFAULT_PTS_DELAY / 1000, CACHING_TEXT,
                  CACHING_LONGTEXT, true )
-    add_string( "rtmp-swfurl", "file:///player.swf", NULL, SWFURL_TEXT,
+    add_string( "rtmp-swfurl", "file:///player.swf", SWFURL_TEXT,
                 SWFURL_LONGTEXT, true )
-    add_string( "rtmp-pageurl", "file:///player.htm", NULL, PAGEURL_TEXT,
+    add_string( "rtmp-pageurl", "file:///player.htm", PAGEURL_TEXT,
                 PAGEURL_LONGTEXT, true )
 
     set_capability( "access", 0 )
@@ -81,10 +81,10 @@ vlc_module_end ()
  * Local prototypes
  *****************************************************************************/
 static ssize_t  Read( access_t *, uint8_t *, size_t );
-static int Seek( access_t *, int64_t );
+static int Seek( access_t *, uint64_t );
 static int Control( access_t *, int, va_list );
 
-static void* ThreadControl( vlc_object_t * );
+static void* ThreadControl( void * );
 
 /*****************************************************************************
  * Open: open the rtmp connection
@@ -103,10 +103,9 @@ static int Open( vlc_object_t *p_this )
         vlc_object_create( p_access, sizeof( rtmp_control_thread_t ) );
     if( !p_sys->p_thread )
         return VLC_ENOMEM;
-    vlc_object_attach( p_sys->p_thread, p_access );
 
     /* Parse URI - remove spaces */
-    p = psz = strdup( p_access->psz_path );
+    p = psz = strdup( p_access->psz_location );
     while( (p = strchr( p, ' ' )) != NULL )
         *p = '+';
     vlc_UrlParse( &p_sys->p_thread->url, psz, 0 );
@@ -149,7 +148,6 @@ static int Open( vlc_object_t *p_this )
     }
 
     /* Initialize thread variables */
-    p_sys->p_thread->b_die = 0;
     p_sys->p_thread->b_error= 0;
     p_sys->p_thread->p_fifo_input = block_FifoNew();
     p_sys->p_thread->p_empty_blocks = block_FifoNew();
@@ -227,8 +225,8 @@ static int Open( vlc_object_t *p_this )
         p_sys->p_thread->result_publish = 0;
     }
 
-    if( vlc_thread_create( p_sys->p_thread, "rtmp control thread", ThreadControl,
-                           VLC_THREAD_PRIORITY_INPUT ) )
+    if( vlc_clone( &p_sys->p_thread->thread, ThreadControl, p_sys->p_thread,
+                   VLC_THREAD_PRIORITY_INPUT ) )
     {
         msg_Err( p_access, "cannot spawn rtmp control thread" );
         goto error2;
@@ -240,9 +238,8 @@ static int Open( vlc_object_t *p_this )
         {
             msg_Err( p_access, "connect active failed");
             /* Kill the running thread */
-            vlc_object_kill( p_sys->p_thread );
-            block_FifoWake( p_sys->p_thread->p_fifo_input );
-            vlc_thread_join( p_sys->p_thread );
+            vlc_cancel( p_sys->p_thread->thread );
+            vlc_join( p_sys->p_thread->thread, NULL );
             goto error2;
         }
     }
@@ -272,7 +269,6 @@ error2:
 error:
     vlc_UrlClean( &p_sys->p_thread->url );
 
-    vlc_object_detach( p_sys->p_thread );
     vlc_object_release( p_sys->p_thread );
 
     free( p_sys );
@@ -289,11 +285,8 @@ static void Close( vlc_object_t * p_this )
     access_sys_t *p_sys = p_access->p_sys;
     int i;
 
-/*    p_sys->p_thread->b_die = true;*/
-    vlc_object_kill( p_sys->p_thread );
-    block_FifoWake( p_sys->p_thread->p_fifo_input );
-
-    vlc_thread_join( p_sys->p_thread );
+    vlc_cancel( p_sys->p_thread->thread );
+    vlc_join( p_sys->p_thread->thread, NULL );
 
     vlc_cond_destroy( &p_sys->p_thread->wait );
     vlc_mutex_destroy( &p_sys->p_thread->lock );
@@ -320,7 +313,6 @@ static void Close( vlc_object_t * p_this )
     free( p_sys->p_thread->psz_swf_url );
     free( p_sys->p_thread->psz_page_url );
 
-    vlc_object_detach( p_sys->p_thread );
     vlc_object_release( p_sys->p_thread );
     free( p_sys );
 }
@@ -351,8 +343,10 @@ static ssize_t Read( access_t *p_access, uint8_t *p_buffer, size_t i_len )
             if( !p_sys->p_thread->metadata_received )
             {
                 /* Wait until enough data is received for extracting metadata */
+#warning This is not thread-safe (because block_FifoCount() is not)!
                 if( block_FifoCount( p_sys->p_thread->p_fifo_input ) < 10 )
                 {
+#warning This is wrong!
                     msleep(100000);
                     continue;
                 }
@@ -409,12 +403,8 @@ static ssize_t Read( access_t *p_access, uint8_t *p_buffer, size_t i_len )
             i_ret = net_Write( p_sys->p_thread, p_sys->p_thread->fd, NULL, tmp_buffer, rtmp_packet->length_encoded );
             if( i_ret != rtmp_packet->length_encoded )
             {
-                free( rtmp_packet->body->body );
-                free( rtmp_packet->body );
-                free( rtmp_packet );
-                free( tmp_buffer );
                 msg_Err( p_access, "failed send publish start" );
-                return -1;
+                goto error;
             }
             free( rtmp_packet->body->body );
             free( rtmp_packet->body );
@@ -431,12 +421,8 @@ static ssize_t Read( access_t *p_access, uint8_t *p_buffer, size_t i_len )
         i_ret = net_Write( p_sys->p_thread, p_sys->p_thread->fd, NULL, tmp_buffer, rtmp_packet->length_encoded );
         if( i_ret != rtmp_packet->length_encoded )
         {
-            free( rtmp_packet->body->body );
-            free( rtmp_packet->body );
-            free( rtmp_packet );
-            free( tmp_buffer );
             msg_Err( p_access, "failed send bytes read" );
-            return -1;
+            goto error;
         }
         free( rtmp_packet->body->body );
         free( rtmp_packet->body );
@@ -445,12 +431,19 @@ static ssize_t Read( access_t *p_access, uint8_t *p_buffer, size_t i_len )
     }
 
     return i_len_tmp;
+
+error:
+    free( rtmp_packet->body->body );
+    free( rtmp_packet->body );
+    free( rtmp_packet );
+    free( tmp_buffer );
+    return -1;
 }
 
 /*****************************************************************************
  * Seek: seek to a specific location in a file
  *****************************************************************************/
-static int Seek( access_t *p_access, int64_t i_pos )
+static int Seek( access_t *p_access, uint64_t i_pos )
 {
     VLC_UNUSED( p_access );
     VLC_UNUSED( i_pos );
@@ -526,17 +519,19 @@ static int Control( access_t *p_access, int i_query, va_list args )
 /*****************************************************************************
  * ThreadControl: manage control messages and pipe media to Read
  *****************************************************************************/
-static void* ThreadControl( vlc_object_t *p_this )
+static void* ThreadControl( void *p_this )
 {
-    rtmp_control_thread_t *p_thread = (rtmp_control_thread_t *) p_this;
+    rtmp_control_thread_t *p_thread = p_this;
     rtmp_packet_t *rtmp_packet;
     int canc = vlc_savecancel ();
 
     rtmp_init_handler( p_thread->rtmp_handler );
 
-    while( vlc_object_alive (p_thread) )
+    for( ;; )
     {
+        vlc_restorecancel( canc );
         rtmp_packet = rtmp_read_net_packet( p_thread );
+        canc = vlc_savecancel( );
         if( rtmp_packet != NULL )
         {
             if( rtmp_packet->content_type < 0x01 /* RTMP_CONTENT_TYPE_CHUNK_SIZE */
@@ -556,15 +551,16 @@ static void* ThreadControl( vlc_object_t *p_this )
             /* Sometimes server close connection too soon */
             if( p_thread->result_connect )
             {
+#warning There must be a bug here!
                 vlc_mutex_lock( &p_thread->lock );
                 vlc_cond_signal( &p_thread->wait );
                 vlc_mutex_unlock( &p_thread->lock );
             }
 
-            p_thread->b_die = 1;
+#warning info cannot be accessed outside input thread!
             ((access_t *) p_thread->p_base_object)->info.b_eof = true;
-
             block_FifoWake( p_thread->p_fifo_input );
+            break;
         }
     }
     vlc_restorecancel (canc);

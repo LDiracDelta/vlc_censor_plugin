@@ -26,7 +26,8 @@
 #include <assert.h>
 
 #include <vlc_common.h>
-#include "vlc_playlist.h"
+#include <vlc_playlist.h>
+#include <vlc_charset.h>
 #include "playlist_internal.h"
 
 /***************************************************************************
@@ -107,7 +108,7 @@ static void playlist_LiveSearchClean( playlist_item_t *p_root )
  * @return true if an item match
  */
 static bool playlist_LiveSearchUpdateInternal( playlist_item_t *p_root,
-                                               const char *psz_string )
+                                               const char *psz_string, bool b_recursive )
 {
     int i;
     bool b_match = false;
@@ -116,8 +117,8 @@ static bool playlist_LiveSearchUpdateInternal( playlist_item_t *p_root,
         bool b_enable = false;
         playlist_item_t *p_item = p_root->pp_children[i];
         // Go recurssively if their is some children
-        if( p_item->i_children >= 0 &&
-            playlist_LiveSearchUpdateInternal( p_item, psz_string ) )
+        if( b_recursive && p_item->i_children >= 0 &&
+            playlist_LiveSearchUpdateInternal( p_item, psz_string, true ) )
         {
             b_enable = true;
         }
@@ -134,12 +135,12 @@ static bool playlist_LiveSearchUpdateInternal( playlist_item_t *p_root,
                     psz_title = p_item->p_input->psz_name;
                 const char *psz_album = vlc_meta_Get( p_item->p_input->p_meta, vlc_meta_Album );
                 const char *psz_artist = vlc_meta_Get( p_item->p_input->p_meta, vlc_meta_Artist );
-                b_enable = ( psz_title && strcasestr( psz_title, psz_string ) ) ||
-                           ( psz_album && strcasestr( psz_album, psz_string ) ) ||
-                           ( psz_artist && strcasestr( psz_artist, psz_string ) );
+                b_enable = ( psz_title && vlc_strcasestr( psz_title, psz_string ) ) ||
+                           ( psz_album && vlc_strcasestr( psz_album, psz_string ) ) ||
+                           ( psz_artist && vlc_strcasestr( psz_artist, psz_string ) );
             }
             else
-                b_enable = p_item->p_input->psz_name && strcasestr( p_item->p_input->psz_name, psz_string );
+                b_enable = p_item->p_input->psz_name && vlc_strcasestr( p_item->p_input->psz_name, psz_string );
             vlc_mutex_unlock( &p_item->p_input->lock );
         }
 
@@ -163,12 +164,12 @@ static bool playlist_LiveSearchUpdateInternal( playlist_item_t *p_root,
  * @return VLC_SUCCESS
  */
 int playlist_LiveSearchUpdate( playlist_t *p_playlist, playlist_item_t *p_root,
-                               const char *psz_string )
+                               const char *psz_string, bool b_recursive )
 {
     PL_ASSERT_LOCKED;
     pl_priv(p_playlist)->b_reset_currently_playing = true;
     if( *psz_string )
-        playlist_LiveSearchUpdateInternal( p_root, psz_string );
+        playlist_LiveSearchUpdateInternal( p_root, psz_string, b_recursive );
     else
         playlist_LiveSearchClean( p_root );
     vlc_cond_signal( &pl_priv(p_playlist)->signal );

@@ -7,9 +7,13 @@ libavcodec_plugin_la_SOURCES = \
 	deinterlace.c \
 	avutil.h \
 	fourcc.c \
+	chroma.h \
 	chroma.c \
 	vaapi.c \
-	vaapi.h \
+	dxva2.c \
+	copy.c \
+	copy.h \
+	va.h \
 	$(NULL)
 if ENABLE_SOUT
 libavcodec_plugin_la_SOURCES += \
@@ -21,7 +25,8 @@ libavcodec_plugin_la_DEPENDENCIES =
 
 if MERGE_FFMPEG
 libavcodec_plugin_la_SOURCES += \
-	../../demux/avformat/demux.c
+	../../demux/avformat/demux.c \
+	../../access/avio.c
 if ENABLE_SOUT
 libavcodec_plugin_la_SOURCES += \
 	../../demux/avformat/mux.c
@@ -34,19 +39,3 @@ libvlc_LTLIBRARIES += \
 
 EXTRA_LTLIBRARIES += \
 	libavcodec_plugin.la
-
-# FIXME SOURCES_ffmpegaltivec = \
-# FIXME 	ffmpeg.c \
-# FIXME 	ffmpeg.h \
-# FIXME 	video.c \
-# FIXME 	audio.c \
-# FIXME 	video_filter.c \
-# FIXME 	deinterlace.c \
-# FIXME 	chroma.c \
-# FIXME 	encoder.c \
-# FIXME 	postprocess.c \
-# FIXME 	demux.c \
-# FIXME 	mux.c \
-# FIXME 	scale.c \
-# FIXME 	$(NULL)
-

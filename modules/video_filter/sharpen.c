@@ -56,18 +56,20 @@ static picture_t *Filter( filter_t *, picture_t * );
 static int SharpenCallback( vlc_object_t *, char const *,
                             vlc_value_t, vlc_value_t, void * );
 
+#define SHARPEN_HELP N_("Augment contrast between contours.")
 #define FILTER_PREFIX "sharpen-"
 
 /*****************************************************************************
  * Module descriptor
  *****************************************************************************/
 vlc_module_begin ()
-    set_description( N_("Augment contrast between contours.") )
-    set_shortname( N_("Sharpen video filter") )
+    set_description( N_("Sharpen video filter") )
+    set_shortname( N_("Sharpen") )
+    set_help(SHARPEN_HELP)
     set_category( CAT_VIDEO )
     set_subcategory( SUBCAT_VIDEO_VFILTER )
     set_capability( "video filter2", 0 )
-    add_float_with_range( "sharpen-sigma", 0.05, 0.0, 2.0, NULL,
+    add_float_with_range( "sharpen-sigma", 0.05, 0.0, 2.0,
         SIG_TEXT, SIG_LONGTEXT, false )
     add_shortcut( "sharpen" )
     set_callbacks( Create, Destroy )
@@ -182,8 +184,8 @@ static picture_t *Filter( filter_t *p_filter, picture_t *p_pic )
     /* process the Y plane */
     p_src = p_pic->p[Y_PLANE].p_pixels;
     p_out = p_outpic->p[Y_PLANE].p_pixels;
-    i_src_pitch = p_pic->p[Y_PLANE].i_visible_pitch;
-    i_out_pitch = p_outpic->p[Y_PLANE].i_visible_pitch;
+    i_src_pitch = p_pic->p[Y_PLANE].i_pitch;
+    i_out_pitch = p_outpic->p[Y_PLANE].i_pitch;
 
     /* perform convolution only on Y plane. Avoid border line. */
     vlc_mutex_lock( &p_filter->p_sys->lock );

@@ -27,32 +27,38 @@
 #include "dialogs/bookmarks.hpp"
 #include "input_manager.hpp"
 
-#include <QGridLayout>
+#include <QHBoxLayout>
 #include <QSpacerItem>
 #include <QPushButton>
-
-BookmarksDialog *BookmarksDialog::instance = NULL;
+#include <QDialogButtonBox>
 
 BookmarksDialog::BookmarksDialog( intf_thread_t *_p_intf ):QVLCFrame( _p_intf )
 {
     setWindowFlags( Qt::Tool );
-    setWindowOpacity( config_GetFloat( p_intf, "qt-opacity" ) );
+    setWindowOpacity( var_InheritFloat( p_intf, "qt-opacity" ) );
     setWindowTitle( qtr( "Edit Bookmarks" ) );
     setWindowRole( "vlc-bookmarks" );
 
-    QGridLayout *layout = new QGridLayout( this );
+    QHBoxLayout *layout = new QHBoxLayout( this );
 
+    QDialogButtonBox *buttonsBox = new QDialogButtonBox( Qt::Vertical );
     QPushButton *addButton = new QPushButton( qtr( "Create" ) );
     addButton->setToolTip( qtr( "Create a new bookmark" ) );
+    buttonsBox->addButton( addButton, QDialogButtonBox::ActionRole );
     QPushButton *delButton = new QPushButton( qtr( "Delete" ) );
     delButton->setToolTip( qtr( "Delete the selected item" ) );
+    buttonsBox->addButton( delButton, QDialogButtonBox::ActionRole );
     QPushButton *clearButton = new QPushButton( qtr( "Clear" ) );
     clearButton->setToolTip( qtr( "Delete all the bookmarks" ) );
+    buttonsBox->addButton( clearButton, QDialogButtonBox::ResetRole );
 #if 0
     QPushButton *extractButton = new QPushButton( qtr( "Extract" ) );
     extractButton->setToolTip( qtr() );
+    buttonsBox->addButton( extractButton, QDialogButtonBox::ActionRole );
 #endif
-    QPushButton *closeButton = new QPushButton( qtr( "&Close" ) );
+    /* ?? Feels strange as Qt guidelines will put reject on top */
+    buttonsBox->addButton( new QPushButton( qtr( "&Close" ) ),
+                          QDialogButtonBox::RejectRole);
 
     bookmarksList = new QTreeWidget( this );
     bookmarksList->setRootIsDecorated( false );
@@ -69,17 +75,8 @@ BookmarksDialog::BookmarksDialog( intf_thread_t *_p_intf ):QVLCFrame( _p_intf )
     headerLabels << qtr( "Time" );
     bookmarksList->setHeaderLabels( headerLabels );
 
-
-    layout->addWidget( addButton, 0, 0 );
-    layout->addWidget( delButton, 1, 0 );
-    layout->addWidget( clearButton, 2, 0 );
-    layout->addItem( new QSpacerItem( 20, 20, QSizePolicy::Expanding ), 4, 0 );
-#if 0
-    layout->addWidget( extractButton, 5, 0 );
-#endif
-    layout->addWidget( bookmarksList, 0, 1, 6, 2);
-    layout->setColumnStretch( 1, 1 );
-    layout->addWidget( closeButton, 7, 2 );
+    layout->addWidget( buttonsBox );
+    layout->addWidget( bookmarksList );
 
     CONNECT( THEMIM->getIM(), bookmarksChanged(),
              this, update() );
@@ -95,7 +92,7 @@ BookmarksDialog::BookmarksDialog( intf_thread_t *_p_intf ):QVLCFrame( _p_intf )
 #if 0
     BUTTONACT( extractButton, extract() );
 #endif
-    BUTTONACT( closeButton, close() );
+    CONNECT( buttonsBox, rejected(), this, close() );
 
     readSettings( "Bookmarks", QSize( 435, 280 ) );
     updateGeometry();
@@ -153,8 +150,9 @@ void BookmarksDialog::add()
 
     if( !input_Control( p_input, INPUT_GET_BOOKMARK, &bookmark ) )
     {
-        bookmark.psz_name = const_cast<char *>qtu( THEMIM->getIM()->getName() +
-                   QString::number( bookmarksList->topLevelItemCount() ) );
+        QString name = THEMIM->getIM()->getName()
+                     + QString::number( bookmarksList->topLevelItemCount() );
+        bookmark.psz_name = const_cast<char *>qtu( name );
 
         input_Control( p_input, INPUT_ADD_BOOKMARK, &bookmark );
     }

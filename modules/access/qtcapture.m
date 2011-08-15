@@ -1,7 +1,7 @@
 /*****************************************************************************
 * qtcapture.m: qtkit (Mac OS X) based capture module
 *****************************************************************************
-* Copyright (C) 2008 the VideoLAN team
+* Copyright (C) 2008-2011 the VideoLAN team
 *
 * Authors: Pierre d'Herbemont <pdherbemont@videolan.org>
 *
@@ -36,9 +36,15 @@
 #include <vlc_demux.h>
 #include <vlc_interface.h>
 #include <vlc_dialog.h>
+#include <vlc_access.h>
 
 #import <QTKit/QTKit.h>
 #import <CoreAudio/CoreAudio.h>
+
+#define QTKIT_WIDTH_TEXT N_("Video Capture width")
+#define QTKIT_WIDTH_LONGTEXT N_("Video Capture width in pixel")
+#define QTKIT_HEIGHT_TEXT N_("Video Capture height")
+#define QTKIT_HEIGHT_LONGTEXT N_("Video Capture height in pixel")
 
 /*****************************************************************************
 * Local prototypes
@@ -59,6 +65,10 @@ vlc_module_begin ()
    add_shortcut( "qtcapture" )
    set_capability( "access_demux", 10 )
    set_callbacks( Open, Close )
+   add_integer("qtcapture-width", 640, QTKIT_WIDTH_TEXT, QTKIT_WIDTH_LONGTEXT, true)
+      change_integer_range (80, 1280)
+   add_integer("qtcapture-height", 480, QTKIT_HEIGHT_TEXT, QTKIT_HEIGHT_LONGTEXT, true)
+      change_integer_range (60, 480)
 vlc_module_end ()
 
 
@@ -111,7 +121,7 @@ vlc_module_end ()
         imageBufferToRelease = currentImageBuffer;
         currentImageBuffer = videoFrame;
         currentPts = (mtime_t)(1000000L / [sampleBuffer presentationTime].timeScale * [sampleBuffer presentationTime].timeValue);
-        
+
         /* Try to use hosttime of the sample if available, because iSight Pts seems broken */
         NSNumber *hosttime = (NSNumber *)[sampleBuffer attributeForKey:QTSampleBufferHostTimeAttribute];
         if( hosttime ) currentPts = (mtime_t)AudioConvertHostTimeToNanos([hosttime unsignedLongLongValue])/1000;
@@ -123,6 +133,7 @@ vlc_module_end ()
 {
     CVImageBufferRef imageBuffer;
     mtime_t pts;
+	void * pixels;
 
     if(!currentImageBuffer || currentPts == previousPts )
         return 0;
@@ -130,17 +141,22 @@ vlc_module_end ()
     @synchronized (self)
     {
         imageBuffer = CVBufferRetain(currentImageBuffer);
-        pts = previousPts = currentPts;
-
-        CVPixelBufferLockBaseAddress(imageBuffer, 0);
-        void * pixels = CVPixelBufferGetBaseAddress(imageBuffer);
-        memcpy( buffer, pixels, CVPixelBufferGetBytesPerRow(imageBuffer) * CVPixelBufferGetHeight(imageBuffer) );
-        CVPixelBufferUnlockBaseAddress(imageBuffer, 0);
+        if(imageBuffer){
+            pts = previousPts = currentPts;
+            CVPixelBufferLockBaseAddress(imageBuffer, 0);
+            pixels = CVPixelBufferGetBaseAddress(imageBuffer);
+            if(pixels)
+                memcpy( buffer, pixels, CVPixelBufferGetBytesPerRow(imageBuffer) * CVPixelBufferGetHeight(imageBuffer));
+            CVPixelBufferUnlockBaseAddress(imageBuffer, 0);
+        }
+            
     }
-
     CVBufferRelease(imageBuffer);
 
-    return currentPts;
+	if(pixels)
+		return currentPts;
+	else
+		return 0;
 }
 
 @end
@@ -170,9 +186,9 @@ static int qtchroma_to_fourcc( int i_qt )
     } qtchroma_to_fourcc[] =
     {
         /* Raw data types */
-        { k422YpCbCr8CodecType,    VLC_CODEC_UYVY },
-        { kComponentVideoCodecType,VLC_CODEC_YUYV },
-        { kComponentVideoUnsigned, VLC_CODEC_YUYV },
+        { '2vuy',    VLC_CODEC_UYVY },
+        { 'yuv2',VLC_CODEC_YUYV },
+        { 'yuvs', VLC_CODEC_YUYV },
         { 0, 0 }
     };
     int i;
@@ -195,14 +211,19 @@ static int Open( vlc_object_t *p_this )
     int i;
     int i_width;
     int i_height;
-    int i_aspect;
     int result = 0;
+    char *psz_uid = NULL;
 
     /* Only when selected */
     if( *p_demux->psz_access == '\0' )
         return VLC_EGENERIC;
-    
+
     NSAutoreleasePool * pool = [[NSAutoreleasePool alloc] init];
+
+    if( p_demux->psz_location && *p_demux->psz_location )
+        psz_uid = strdup(p_demux->psz_location);
+    msg_Dbg( p_demux, "qtcapture uid = %s", psz_uid );
+    NSString *qtk_currdevice_uid = [[NSString alloc] initWithFormat:@"%s", psz_uid];
 
     /* Set up p_demux */
     p_demux->pf_demux = Demux;
@@ -210,24 +231,50 @@ static int Open( vlc_object_t *p_this )
     p_demux->info.i_update = 0;
     p_demux->info.i_title = 0;
     p_demux->info.i_seekpoint = 0;
-    
+
     p_demux->p_sys = p_sys = calloc( 1, sizeof( demux_sys_t ) );
     if( !p_sys )
         return VLC_ENOMEM;
-    
-    memset( &fmt, 0, sizeof( es_format_t ) );    
-    
+
+    NSArray *myVideoDevices = [[[QTCaptureDevice inputDevicesWithMediaType:QTMediaTypeVideo] arrayByAddingObjectsFromArray:[QTCaptureDevice inputDevicesWithMediaType:QTMediaTypeMuxed]] retain];
+    if([myVideoDevices count] == 0)
+    {
+        dialog_FatalWait( p_demux, _("No Input device found"),
+                         _("Your Mac does not seem to be equipped with a suitable input device. "
+                           "Please check your connectors and drivers.") );
+        msg_Err( p_demux, "Can't find any Video device" );
+
+        goto error;
+    }
+    int ivideo;
+    for(ivideo = 0; ivideo < [myVideoDevices count]; ivideo++){
+        QTCaptureDevice *qtk_device;
+        qtk_device = [myVideoDevices objectAtIndex:ivideo];
+        msg_Dbg( p_demux, "qtcapture %d/%lu %s %s", ivideo, [myVideoDevices count], [[qtk_device localizedDisplayName] UTF8String], [[qtk_device uniqueID] UTF8String]);
+        if([[[qtk_device uniqueID]stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceCharacterSet]] isEqualToString:qtk_currdevice_uid]){
+            break;
+        }
+    }
+
+    memset( &fmt, 0, sizeof( es_format_t ) );
+
     QTCaptureDeviceInput * input = nil;
     NSError *o_returnedError;
-
-    p_sys->device = [QTCaptureDevice defaultInputDeviceWithMediaType: QTMediaTypeVideo];
+    if( ivideo < [myVideoDevices count] )
+        p_sys->device = [myVideoDevices objectAtIndex:ivideo];
+    else
+    {
+        /* cannot found designated device, fall back to open default device */
+        msg_Dbg(p_demux, "Cannot find designated uid device as %s, falling back to default.", [qtk_currdevice_uid UTF8String]);
+        p_sys->device = [QTCaptureDevice defaultInputDeviceWithMediaType: QTMediaTypeVideo];
+    }
     if( !p_sys->device )
     {
         dialog_FatalWait( p_demux, _("No Input device found"),
                         _("Your Mac does not seem to be equipped with a suitable input device. "
                           "Please check your connectors and drivers.") );
         msg_Err( p_demux, "Can't find any Video device" );
-        
+
         goto error;
     }
 
@@ -255,24 +302,19 @@ static int Open( vlc_object_t *p_this )
     /* Get the formats */
     NSArray *format_array = [p_sys->device formatDescriptions];
     QTFormatDescription* camera_format = NULL;
-    for( int k=0; k < [format_array count]; k++ )
+    for( int k = 0; k < [format_array count]; k++ )
     {
         camera_format = [format_array objectAtIndex: k];
 
-        NSLog( [camera_format localizedFormatSummary] );
-        NSLog( [[camera_format formatDescriptionAttributes] description] );
+        msg_Dbg(p_demux, "localized Format: %s", [[camera_format localizedFormatSummary] UTF8String] );
+        msg_Dbg(p_demux, "format description: %s", [[[camera_format formatDescriptionAttributes] description] UTF8String] );
     }
     if( [format_array count] )
         camera_format = [format_array objectAtIndex: 0];
     else goto error;
 
     int qtchroma = [camera_format formatType];
-    int chroma = qtchroma_to_fourcc( qtchroma );
-    if( !chroma )
-    {
-        msg_Err( p_demux, "Unknown qt chroma %4.4s provided by camera", (char*)&qtchroma );
-        goto error;
-    }
+    int chroma = VLC_CODEC_UYVY;
 
     /* Now we can init */
     es_format_Init( &fmt, VIDEO_ES, chroma );
@@ -281,18 +323,25 @@ static int Open( vlc_object_t *p_this )
     NSSize display_size = [[camera_format attributeForKey:QTFormatDescriptionVideoCleanApertureDisplaySizeAttribute] sizeValue];
     NSSize par_size = [[camera_format attributeForKey:QTFormatDescriptionVideoProductionApertureDisplaySizeAttribute] sizeValue];
 
+    par_size.width = display_size.width = encoded_size.width
+        = var_InheritInteger (p_this, "qtcapture-width");
+    par_size.height = display_size.height = encoded_size.height
+        = var_InheritInteger (p_this, "qtcapture-height");
+
     fmt.video.i_width = p_sys->width = encoded_size.width;
     fmt.video.i_height = p_sys->height = encoded_size.height;
     if( par_size.width != encoded_size.width )
     {
-        fmt.video.i_aspect = par_size.width * VOUT_ASPECT_FACTOR / encoded_size.width ;
+        fmt.video.i_sar_num = (int64_t)encoded_size.height * par_size.width / encoded_size.width;
+        fmt.video.i_sar_den = encoded_size.width;
     }
 
-    NSLog( @"encoded_size %d %d", (int)encoded_size.width, (int)encoded_size.height );
-    NSLog( @"display_size %d %d", (int)display_size.width, (int)display_size.height );
-    NSLog( @"PAR size %d %d", (int)par_size.width, (int)par_size.height );
-    
+    msg_Dbg(p_demux, "encoded_size %i %i", (int)encoded_size.width, (int)encoded_size.height );
+    msg_Dbg(p_demux, "display_size %i %i", (int)display_size.width, (int)display_size.height );
+    msg_Dbg(p_demux, "PAR size %i %i", (int)par_size.width, (int)par_size.height );
+
     [p_sys->output setPixelBufferAttributes: [NSDictionary dictionaryWithObjectsAndKeys:
+        [NSNumber numberWithUnsignedInt:kCVPixelFormatType_422YpCbCr8], (id)kCVPixelBufferPixelFormatTypeKey,
         [NSNumber numberWithInt: p_sys->height], kCVPixelBufferHeightKey,
         [NSNumber numberWithInt: p_sys->width], kCVPixelBufferWidthKey,
         [NSNumber numberWithBool:YES], (id)kCVPixelBufferOpenGLCompatibilityKey,
@@ -351,9 +400,11 @@ static void Close( vlc_object_t *p_this )
      * Else we dead lock. */
     if( vlc_object_alive(p_this->p_libvlc))
     {
-        [p_sys->session stopRunning];
-        [p_sys->output release];
-        [p_sys->session release];
+        // Perform this on main thread, as the framework itself will sometimes try to synchronously
+        // work on main thread. And this will create a dead lock.
+        [p_sys->session performSelectorOnMainThread:@selector(stopRunning) withObject:nil waitUntilDone:NO];
+        [p_sys->output performSelectorOnMainThread:@selector(release) withObject:nil waitUntilDone:NO];
+        [p_sys->session performSelectorOnMainThread:@selector(release) withObject:nil waitUntilDone:NO];
     }
     free( p_sys );
 

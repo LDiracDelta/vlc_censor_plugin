@@ -22,17 +22,16 @@
  * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston MA 02110-1301, USA.
  *****************************************************************************/
 
-#if defined(__PLUGIN__) || defined(__BUILTIN__) || !defined(__LIBVLC__)
-# error This header file can only be included from LibVLC.
-#endif
-
-#ifndef _INPUT_DECODER_H
-#define _INPUT_DECODER_H 1
+#ifndef LIBVLC_INPUT_DECODER_H
+#define LIBVLC_INPUT_DECODER_H 1
 
 #include <vlc_common.h>
 #include <vlc_codec.h>
 
 #define BLOCK_FLAG_CORE_FLUSH (1 <<BLOCK_FLAG_CORE_PRIVATE_SHIFT)
+
+decoder_t *input_DecoderNew( input_thread_t *, es_format_t *, input_clock_t *,
+                             sout_instance_t * ) VLC_USED;
 
 /**
  * This function changes the pause state.
@@ -103,5 +102,12 @@ bool input_DecoderHasFormatChanged( decoder_t *p_dec, es_format_t *p_fmt, vlc_me
  * This function returns the current size in bytes of the decoder fifo
  */
 size_t input_DecoderGetFifoSize( decoder_t *p_dec );
+
+/**
+ * This function returns the objects associated to a decoder
+ *
+ * They must be released using vlc_object_release().
+ */
+void input_DecoderGetObjects( decoder_t *, vout_thread_t **, audio_output_t ** );
 
 #endif

@@ -22,7 +22,6 @@
  * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston MA 02110-1301, USA.
  *****************************************************************************/
 
-#import <Cocoa/Cocoa.h>
 #import "VLCMediaDiscoverer.h"
 #import "VLCLibrary.h"
 #import "VLCLibVLCBridging.h"
@@ -52,23 +51,23 @@ static void HandleMediaDiscovererStarted(const libvlc_event_t * event, void * us
 {
     NSAutoreleasePool * pool = [[NSAutoreleasePool alloc] init];
     id self = user_data;
-    [[VLCEventManager sharedManager] callOnMainThreadObject:self 
-                                                 withMethod:@selector(mediaDiscovererStarted) 
+    [[VLCEventManager sharedManager] callOnMainThreadObject:self
+                                                 withMethod:@selector(mediaDiscovererStarted)
                                        withArgumentAsObject:nil];
-    [pool release];
+    [pool drain];
 }
 
 static void HandleMediaDiscovererEnded( const libvlc_event_t * event, void * user_data)
 {
     NSAutoreleasePool * pool = [[NSAutoreleasePool alloc] init];
     id self = user_data;
-    [[VLCEventManager sharedManager] callOnMainThreadObject:self 
-                                                 withMethod:@selector(mediaDiscovererEnded) 
+    [[VLCEventManager sharedManager] callOnMainThreadObject:self
+                                                 withMethod:@selector(mediaDiscovererEnded)
                                        withArgumentAsObject:nil];
-    [pool release];
+    [pool drain];
 }
 
- 
+
 @implementation VLCMediaDiscoverer
 + (NSArray *)availableMediaDiscoverer
 {
@@ -76,9 +75,9 @@ static void HandleMediaDiscovererEnded( const libvlc_event_t * event, void * use
     {
         availableMediaDiscoverer = [[NSArray arrayWithObjects:
                                 [[[VLCMediaDiscoverer alloc] initWithName:@"sap"] autorelease],
+                                [[[VLCMediaDiscoverer alloc] initWithName:@"upnp"] autorelease],
                                 [[[VLCMediaDiscoverer alloc] initWithName:@"freebox"] autorelease],
-                                [[[VLCMediaDiscoverer alloc] initWithName:@"shoutcast"] autorelease],
-                                [[[VLCMediaDiscoverer alloc] initWithName:@"shoutcasttv"] autorelease], nil] retain];
+                                [[[VLCMediaDiscoverer alloc] initWithName:@"video_dir"] autorelease], nil] retain];
     }
     return availableMediaDiscoverer;
 }
@@ -87,42 +86,27 @@ static void HandleMediaDiscovererEnded( const libvlc_event_t * event, void * use
 {
     if (self = [super init])
     {
-        libvlc_exception_t ex;
-        libvlc_exception_init( &ex );
         localizedName = nil;
         discoveredMedia = nil;
-        mdis = libvlc_media_discoverer_new_from_name( [VLCLibrary sharedInstance],
-                                                      [aServiceName UTF8String],
-                                                      &ex );
-        catch_exception( &ex );       
-
+        mdis = libvlc_media_discoverer_new_from_name([VLCLibrary sharedInstance],
+                                                     [aServiceName UTF8String]);
+        NSAssert(mdis, @"No such media discoverer");
         libvlc_event_manager_t * p_em = libvlc_media_discoverer_event_manager(mdis);
-        libvlc_event_attach(p_em, libvlc_MediaDiscovererStarted, HandleMediaDiscovererStarted, self, NULL);
-        libvlc_event_attach(p_em, libvlc_MediaDiscovererEnded,   HandleMediaDiscovererEnded,   self, NULL);
+        libvlc_event_attach(p_em, libvlc_MediaDiscovererStarted, HandleMediaDiscovererStarted, self);
+        libvlc_event_attach(p_em, libvlc_MediaDiscovererEnded,   HandleMediaDiscovererEnded,   self);
+
         running = libvlc_media_discoverer_is_running(mdis);
     }
     return self;
 }
 
-- (void)release
-{
-    @synchronized(self)
-    {
-        if([self retainCount] <= 1)
-        {
-            /* We must make sure we won't receive new event after an upcoming dealloc
-             * We also may receive a -retain in some event callback that may occcur
-             * Before libvlc_event_detach. So this can't happen in dealloc */
-            libvlc_event_manager_t * p_em = libvlc_media_list_event_manager(mdis, NULL);
-            libvlc_event_detach(p_em, libvlc_MediaDiscovererStarted, HandleMediaDiscovererStarted, self, NULL);
-            libvlc_event_detach(p_em, libvlc_MediaDiscovererEnded,   HandleMediaDiscovererEnded,   self, NULL);
-        }
-        [super release];
-    }
-}
-
 - (void)dealloc
 {
+    libvlc_event_manager_t *em = libvlc_media_list_event_manager(mdis);
+    libvlc_event_detach(em, libvlc_MediaDiscovererStarted, HandleMediaDiscovererStarted, self);
+    libvlc_event_detach(em, libvlc_MediaDiscovererEnded,   HandleMediaDiscovererEnded,   self);
+    [[VLCEventManager sharedManager] cancelCallToObject:self];
+
     [localizedName release];
     [discoveredMedia release];
     libvlc_media_discoverer_release( mdis );
@@ -146,7 +130,7 @@ static void HandleMediaDiscovererEnded( const libvlc_event_t * event, void * use
 {
     if ( localizedName )
         return localizedName;
-    
+
     char * name = libvlc_media_discoverer_localized_name( mdis );
     if (name)
     {

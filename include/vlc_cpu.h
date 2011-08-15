@@ -34,7 +34,9 @@
 #  define CPU_CAPABILITY_SSE2    (1<<7)
 #  define CPU_CAPABILITY_SSE3    (1<<8)
 #  define CPU_CAPABILITY_SSSE3   (1<<9)
-#  define CPU_CAPABILITY_SSE4    (1<<10)
+#  define CPU_CAPABILITY_SSE4_1  (1<<10)
+#  define CPU_CAPABILITY_SSE4_2  (1<<11)
+#  define CPU_CAPABILITY_SSE4A   (1<<12)
 # else
 #  define CPU_CAPABILITY_MMX     (0)
 #  define CPU_CAPABILITY_3DNOW   (0)
@@ -43,7 +45,9 @@
 #  define CPU_CAPABILITY_SSE2    (0)
 #  define CPU_CAPABILITY_SSE3    (0)
 #  define CPU_CAPABILITY_SSSE3   (0)
-#  define CPU_CAPABILITY_SSE4    (0)
+#  define CPU_CAPABILITY_SSE4_1  (0)
+#  define CPU_CAPABILITY_SSE4_2  (0)
+#  define CPU_CAPABILITY_SSE4A   (0)
 # endif
 
 # if defined (__ppc__) || defined (__ppc64__) || defined (__powerpc__)
@@ -58,7 +62,7 @@
 #  define CPU_CAPABILITY_NEON    (0)
 # endif
 
-VLC_EXPORT( unsigned, vlc_CPU, ( void ) );
+VLC_API unsigned vlc_CPU( void );
 
 /** Are floating point operations fast?
  * If this bit is not set, you should try to use fixed-point instead.
@@ -66,7 +70,7 @@ VLC_EXPORT( unsigned, vlc_CPU, ( void ) );
 # if defined (__i386__) || defined (__x86_64__)
 #  define HAVE_FPU 1
 
-# elif defined (__powerpc__) || defined (__ppc__) || defined (__pc64__)
+# elif defined (__powerpc__) || defined (__ppc__) || defined (__ppc64__)
 #  define HAVE_FPU 1
 
 # elif defined (__arm__)
@@ -81,9 +85,8 @@ VLC_EXPORT( unsigned, vlc_CPU, ( void ) );
 # endif
 
 typedef void *(*vlc_memcpy_t) (void *tgt, const void *src, size_t n);
-typedef void *(*vlc_memset_t) (void *tgt, int c, size_t n);
 
-VLC_EXPORT( void, vlc_fastmem_register, (vlc_memcpy_t cpy, vlc_memset_t set) );
+VLC_API void vlc_fastmem_register(vlc_memcpy_t cpy);
 
 #endif /* !VLC_CPU_H */
 

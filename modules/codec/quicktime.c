@@ -582,7 +582,7 @@ static aout_buffer_t *DecodeAudio( decoder_t *p_dec, block_t **pp_block )
         if( p_sys->i_buffer_size < p_sys->i_buffer + p_block->i_buffer )
         {
             p_sys->i_buffer_size = p_sys->i_buffer + p_block->i_buffer + 1024;
-            p_sys->p_buffer = realloc( p_sys->p_buffer, p_sys->i_buffer_size );
+            p_sys->p_buffer = xrealloc( p_sys->p_buffer, p_sys->i_buffer_size );
         }
         memcpy( &p_sys->p_buffer[p_sys->i_buffer], p_block->p_buffer,
                 p_block->i_buffer );
@@ -618,7 +618,7 @@ static aout_buffer_t *DecodeAudio( decoder_t *p_dec, block_t **pp_block )
                          p_sys->i_buffer );
             }
 
-            if( p_sys->pts != 0 &&
+            if( p_sys->pts > VLC_TS_INVALID &&
                 p_sys->pts != date_Get( &p_sys->date ) )
             {
                 date_Set( &p_sys->date, p_sys->pts );
@@ -844,7 +844,8 @@ static int OpenVideo( decoder_t *p_dec )
     es_format_Init( &p_dec->fmt_out, VIDEO_ES, VLC_CODEC_YUYV);
     p_dec->fmt_out.video.i_width = p_dec->fmt_in.video.i_width;
     p_dec->fmt_out.video.i_height= p_dec->fmt_in.video.i_height;
-    p_dec->fmt_out.video.i_aspect = VOUT_ASPECT_FACTOR * p_dec->fmt_in.video.i_width / p_dec->fmt_in.video.i_height;
+    p_dec->fmt_out.video.i_sar_num = 1;
+    p_dec->fmt_out.video.i_sar_den = 1;
 
     vlc_mutex_unlock( &qt_mutex );
     return VLC_SUCCESS;
@@ -897,7 +898,7 @@ static picture_t *DecodeVideo( decoder_t *p_dec, block_t **pp_block )
     p_block = *pp_block;
     *pp_block = NULL;
  
-    i_pts = p_block->i_pts ? p_block->i_pts : p_block->i_dts;
+    i_pts = p_block->i_pts > VLC_TS_INVALID ? p_block->i_pts : p_block->i_dts;
 
     mtime_t i_display_date = 0;
     if( !(p_block->i_flags & BLOCK_FLAG_PREROLL) )

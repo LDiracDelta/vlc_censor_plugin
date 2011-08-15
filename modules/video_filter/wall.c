@@ -68,11 +68,11 @@ vlc_module_begin()
     set_category( CAT_VIDEO )
     set_subcategory( SUBCAT_VIDEO_VFILTER )
 
-    add_integer( CFG_PREFIX "cols", 3, NULL, COLS_TEXT, COLS_LONGTEXT, false )
-    add_integer( CFG_PREFIX "rows", 3, NULL, ROWS_TEXT, ROWS_LONGTEXT, false )
-    add_string( CFG_PREFIX "active", NULL, NULL, ACTIVE_TEXT, ACTIVE_LONGTEXT,
+    add_integer( CFG_PREFIX "cols", 3, COLS_TEXT, COLS_LONGTEXT, false )
+    add_integer( CFG_PREFIX "rows", 3, ROWS_TEXT, ROWS_LONGTEXT, false )
+    add_string( CFG_PREFIX "active", NULL, ACTIVE_TEXT, ACTIVE_LONGTEXT,
                  true )
-    add_string( CFG_PREFIX "element-aspect", "4:3", NULL, ASPECT_TEXT, ASPECT_LONGTEXT, false )
+    add_string( CFG_PREFIX "element-aspect", "4:3", ASPECT_TEXT, ASPECT_LONGTEXT, false )
 
     add_shortcut( "wall" )
     set_callbacks( Open, Close )
@@ -351,8 +351,8 @@ static int Open( vlc_object_t *p_this )
             p_cfg->fmt.i_width          = p_output->i_width;
             p_cfg->fmt.i_visible_height =
             p_cfg->fmt.i_height         = p_output->i_height;
-            p_cfg->fmt.i_aspect         = (int64_t)i_aspect * i_target_height * p_output->i_width / i_target_width / p_output->i_height;
-
+            p_cfg->fmt.i_sar_num        = (int64_t)i_aspect * i_target_height;
+            p_cfg->fmt.i_sar_den        = VOUT_ASPECT_FACTOR * i_target_width;
             p_cfg->window.i_x     = p_output->i_left; /* FIXME relative to video-x/y (TODO in wrapper.c) ? */
             p_cfg->window.i_y     = p_output->i_top;
             p_cfg->window.i_align = p_output->i_align;

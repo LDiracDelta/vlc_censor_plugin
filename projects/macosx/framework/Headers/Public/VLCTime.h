@@ -22,20 +22,20 @@
  * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston MA 02110-1301, USA.
  *****************************************************************************/
 
-#import <Cocoa/Cocoa.h>
+#import <Foundation/Foundation.h>
 
 /**
  * Provides an object to define VLCMedia's time.
  */
 @interface VLCTime : NSObject <NSCopying>
 {
-    NSNumber * value;       //< Holds, in seconds, the VLCTime value
+    NSNumber * value;       //< Holds, in milliseconds, the VLCTime value
 }
 
 /* Factories */
 + (VLCTime *)nullTime;
 + (VLCTime *)timeWithNumber:(NSNumber *)aNumber;
-+ (VLCTime *)timeWithInt:(int)aInt;
++ (VLCTime *)timeWithInt:(NSInteger)aInt;
 
 /* Initializers */
 - (id)initWithNumber:(NSNumber *)aNumber;
@@ -44,6 +44,7 @@
 /* Properties */
 @property (readonly) NSNumber * numberValue;
 @property (readonly) NSString * stringValue;
+@property (readonly) NSString * verboseStringValue;
 @property (readonly) int intValue;
 
 /* Comparitors */

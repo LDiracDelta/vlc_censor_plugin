@@ -31,26 +31,15 @@
 #include <vlc_common.h>
 
 /*****************************************************************************
- * VLC_Version: return the libvlc version.
- *****************************************************************************
- * This function returns full version string (numeric version and codename).
- *****************************************************************************/
-char const * VLC_Version( void )
-{
-    return VERSION_MESSAGE;
-}
-
-/*****************************************************************************
- * VLC_CompileBy, VLC_CompileHost, VLC_CompileDomain,
+ * VLC_CompileBy, VLC_CompileHost
  * VLC_Compiler, VLC_Changeset
  *****************************************************************************/
 #define DECLARE_VLC_VERSION( func, var )                                    \
-char const * VLC_##func ( void )                                            \
+const char * VLC_##func ( void )                                            \
 {                                                                           \
     return VLC_##var ;                                                      \
 }
 
-DECLARE_VLC_VERSION( CompileBy, COMPILE_BY );
-DECLARE_VLC_VERSION( CompileHost, COMPILE_HOST );
-DECLARE_VLC_VERSION( CompileDomain, COMPILE_DOMAIN );
-DECLARE_VLC_VERSION( Compiler, COMPILER );
+DECLARE_VLC_VERSION( CompileBy, COMPILE_BY )
+DECLARE_VLC_VERSION( CompileHost, COMPILE_HOST )
+DECLARE_VLC_VERSION( Compiler, COMPILER )

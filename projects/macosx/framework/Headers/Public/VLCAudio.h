@@ -22,7 +22,7 @@
  * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston MA 02110-1301, USA.
  *****************************************************************************/
 
-#import <Cocoa/Cocoa.h>
+#import <Foundation/Foundation.h>
 
 /* Notification Messages */
 /**
@@ -30,21 +30,21 @@
  */
 extern NSString * VLCMediaPlayerVolumeChanged;
 
-@class VLCLibrary;
+@class VLCMediaPlayer;
 
 /**
  * TODO: Documentation VLCAudio
  */
-@interface VLCAudio : NSObject 
+@interface VLCAudio : NSObject
 {
-    VLCLibrary * library;   //< Library to control audio for
+    void *instance;
 }
 
 /* Properties */
 - (void)setMute:(BOOL)value;
 
 @property (setter=setMute:) BOOL isMuted;
-@property (assign) int volume;
+@property (assign) NSUInteger volume;
 
 - (void)volumeDown;
 - (void)volumeUp;

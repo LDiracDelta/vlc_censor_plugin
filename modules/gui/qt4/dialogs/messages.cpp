@@ -26,8 +26,6 @@
 
 #include "dialogs/messages.hpp"
 
-#include <QSpinBox>
-#include <QLabel>
 #include <QTextEdit>
 #include <QTextCursor>
 #include <QFileDialog>
@@ -36,12 +34,11 @@
 #include <QTabWidget>
 #include <QTreeWidget>
 #include <QTreeWidgetItem>
-#include <QHeaderView>
 #include <QMutex>
+#include <QLineEdit>
+#include <QScrollBar>
 
 #include <assert.h>
-
-MessagesDialog *MessagesDialog::instance = NULL;
 
 enum {
     MsgEvent_Type = QEvent::User + MsgEventType + 1,
@@ -50,99 +47,82 @@ enum {
 class MsgEvent : public QEvent
 {
 public:
-    MsgEvent( msg_item_t *msg )
-        : QEvent( (QEvent::Type)MsgEvent_Type ), msg(msg)
-    {
-        msg_Hold( msg );
-    }
-    virtual ~MsgEvent()
-    {
-        msg_Release( msg );
-    }
+    MsgEvent( const msg_item_t * );
 
-    msg_item_t *msg;
+    int priority;
+    uintptr_t object_id;
+    QString object_type;
+    QString header;
+    QString module;
+    QString text;
 };
+
+MsgEvent::MsgEvent( const msg_item_t *msg )
+    : QEvent( (QEvent::Type)MsgEvent_Type ),
+      priority( msg->i_type ),
+      object_id( msg->i_object_id ),
+      object_type( qfu(msg->psz_object_type) ),
+      header( qfu(msg->psz_header) ),
+      module( qfu(msg->psz_module) ),
+      text( qfu(msg->psz_msg) )
+{
+}
 
 struct msg_cb_data_t
 {
     MessagesDialog *self;
 };
-static void MsgCallback( msg_cb_data_t *, msg_item_t *, unsigned );
+
+static void MsgCallback( msg_cb_data_t *, const msg_item_t * );
 
 MessagesDialog::MessagesDialog( intf_thread_t *_p_intf)
                : QVLCFrame( _p_intf )
 {
     setWindowTitle( qtr( "Messages" ) );
     setWindowRole( "vlc-messages" );
-
-    /* General widgets */
-    QGridLayout *mainLayout = new QGridLayout( this );
-    mainTab = new QTabWidget( this );
-    mainTab->setTabPosition( QTabWidget::North );
-
-
-    /* Messages */
-    QWidget     *msgWidget = new QWidget;
-    QGridLayout *msgLayout = new QGridLayout( msgWidget );
-
-    messages = new QTextEdit();
-    messages->setReadOnly( true );
-    messages->setGeometry( 0, 0, 440, 600 );
-    messages->setHorizontalScrollBarPolicy( Qt::ScrollBarAlwaysOff );
-    messages->setTextInteractionFlags( Qt::TextSelectableByMouse );
-
-    msgLayout->addWidget( messages, 0, 0, 1, 0 );
-    mainTab->addTab( msgWidget, qtr( "Messages" ) );
-
+    /* Build Ui */
+    ui.setupUi( this );
+    ui.bottomButtonsBox->addButton( new QPushButton( qtr("&Close"), this ),
+                                         QDialogButtonBox::RejectRole );
+    updateTree();
 
     /* Modules tree */
-    QWidget     *treeWidget = new QWidget;
-    QGridLayout *treeLayout = new QGridLayout( treeWidget );
-
-    modulesTree = new QTreeWidget();
-    modulesTree->header()->hide();
-
-    treeLayout->addWidget( modulesTree, 0, 0, 1, 0 );
-    mainTab->addTab( treeWidget, qtr( "Modules tree" ) );
-
+    ui.modulesTree->setHeaderHidden( true );
 
     /* Buttons and general layout */
-    QPushButton *closeButton = new QPushButton( qtr( "&Close" ) );
-    closeButton->setDefault( true );
-    clearUpdateButton = new QPushButton( qtr( "C&lear" ) );
-    saveLogButton = new QPushButton( qtr( "&Save as..." ) );
-    saveLogButton->setToolTip( qtr( "Saves all the displayed logs to a file" ) );
+    ui.saveLogButton->setToolTip( qtr( "Saves all the displayed logs to a file" ) );
 
-    verbosityBox = new QSpinBox();
-    verbosityBox->setRange( 0, 2 );
-    verbosityBox->setValue( config_GetInt( p_intf, "verbose" ) );
-    verbosityBox->setWrapping( true );
-    verbosityBox->setMaximumWidth( 50 );
+    ui.verbosityBox->setValue( var_InheritInteger( p_intf, "verbose" ) );
 
-    verbosityLabel = new QLabel( qtr( "Verbosity Level" ) );
+    ui.vbobjectsEdit->setText(config_GetPsz( p_intf, "verbose-objects"));
+    ui.vbobjectsEdit->setToolTip( "verbose-objects usage: \n"
+                            "--verbose-objects=+printthatobject,-dontprintthatone\n"
+                            "(keyword 'all' to applies to all objects)");
 
-    mainLayout->addWidget( mainTab, 0, 0, 1, 0 );
-    mainLayout->addWidget( verbosityLabel, 1, 0, 1, 1 );
-    mainLayout->addWidget( verbosityBox, 1, 1 );
-    mainLayout->setColumnStretch( 2, 10 );
-    mainLayout->addWidget( saveLogButton, 1, 3 );
-    mainLayout->addWidget( clearUpdateButton, 1, 4 );
-    mainLayout->addWidget( closeButton, 1, 5 );
+    updateButton = new QPushButton( QIcon(":/update"), "" );
+    updateButton->setToolTip( qtr("Update the tree") );
+    ui.mainTab->setCornerWidget( updateButton );
+    updateButton->setVisible( false );
+    updateButton->setFlat( true );
 
-    BUTTONACT( closeButton, hide() );
-    BUTTONACT( clearUpdateButton, clearOrUpdate() );
-    BUTTONACT( saveLogButton, save() );
-    CONNECT( mainTab, currentChanged( int ),
-             this, updateTab( int ) );
+    BUTTONACT( ui.clearButton, clear() );
+    BUTTONACT( updateButton, updateTree() );
+    BUTTONACT( ui.saveLogButton, save() );
+    CONNECT( ui.vbobjectsEdit, editingFinished(), this, updateConfig());
+    CONNECT( ui.bottomButtonsBox, rejected(), this, hide() );
+    CONNECT( ui.verbosityBox, valueChanged( int ),
+             this, changeVerbosity( int ) );
+
+    CONNECT( ui.mainTab, currentChanged( int ), this, tabChanged( int ) );
 
     /* General action */
     readSettings( "Messages", QSize( 600, 450 ) );
-
 
     /* Hook up to LibVLC messaging */
     cbData = new msg_cb_data_t;
     cbData->self = this;
     sub = msg_Subscribe( p_intf->p_libvlc, MsgCallback, cbData );
+    changeVerbosity( ui.verbosityBox->value() );
 }
 
 MessagesDialog::~MessagesDialog()
@@ -152,32 +132,50 @@ MessagesDialog::~MessagesDialog()
     delete cbData;
 };
 
-void MessagesDialog::updateTab( int index )
+void MessagesDialog::changeVerbosity( int verbosity )
 {
-    /* Second tab : modules tree */
-    if( index == 1 )
+    msg_SubscriptionSetVerbosity( sub , verbosity );
+}
+
+void MessagesDialog::updateConfig()
+{
+    config_PutPsz(p_intf, "verbose-objects", qtu(ui.vbobjectsEdit->text()));
+    //vbobjectsEdit->setText("vbEdit changed!");
+
+    if( !ui.vbobjectsEdit->text().isEmpty() )
     {
-        verbosityLabel->hide();
-        verbosityBox->hide();
-        clearUpdateButton->setText( qtr( "&Update" ) );
-        saveLogButton->hide();
-        updateTree();
+        /* if user sets filter, go with the idea that user just wants that to be shown,
+           so disable all by default and enable those that user wants */
+        msg_DisableObjectPrinting( p_intf, "all");
+        char * psz_verbose_objects = strdup(qtu(ui.vbobjectsEdit->text()));
+        char * psz_object, * iter =  psz_verbose_objects;
+        while( (psz_object = strsep( &iter, "," )) )
+        {
+            switch( psz_object[0] )
+            {
+                printf("%s\n", psz_object+1);
+                case '+': msg_EnableObjectPrinting(p_intf, psz_object+1); break;
+                case '-': msg_DisableObjectPrinting(p_intf, psz_object+1); break;
+                /* user can but just 'lua,playlist' on filter */
+                default: msg_EnableObjectPrinting(p_intf, psz_object); break;
+             }
+        }
+        free( psz_verbose_objects );
     }
-    /* First tab : messages */
     else
     {
-        verbosityLabel->show();
-        verbosityBox->show();
-        clearUpdateButton->setText( qtr( "&Clear" ) );
-        saveLogButton->show();
+        msg_EnableObjectPrinting( p_intf, "all");
     }
 }
 
-void MessagesDialog::sinkMessage( msg_item_t *item )
+void MessagesDialog::sinkMessage( MsgEvent *msg )
 {
-    if ((item->i_type == VLC_MSG_WARN && verbosityBox->value() < 1)
-     || (item->i_type == VLC_MSG_DBG && verbosityBox->value() < 2 ))
-        return;
+    QTextEdit *messages = ui.messages;
+    /* Only scroll if the viewport is at the end.
+       Don't bug user by auto-changing/loosing viewport on insert(). */
+    bool b_autoscroll = ( messages->verticalScrollBar()->value()
+                          + messages->verticalScrollBar()->pageStep()
+                          >= messages->verticalScrollBar()->maximum() );
 
     /* Copy selected text to the clipboard */
     if( messages->textCursor().hasSelection() )
@@ -190,9 +188,9 @@ void MessagesDialog::sinkMessage( msg_item_t *item )
 
     messages->setFontItalic( true );
     messages->setTextColor( "darkBlue" );
-    messages->insertPlainText( qfu( item->psz_module ) );
+    messages->insertPlainText( msg->module );
 
-    switch (item->i_type)
+    switch (msg->priority)
     {
         case VLC_MSG_INFO:
             messages->setTextColor( "blue" );
@@ -216,9 +214,9 @@ void MessagesDialog::sinkMessage( msg_item_t *item )
     /* Add message Regular black Font */
     messages->setFontItalic( false );
     messages->setTextColor( "black" );
-    messages->insertPlainText( qfu(item->psz_msg) );
+    messages->insertPlainText( msg->text );
     messages->insertPlainText( "\n" );
-    messages->ensureCursorVisible();
+    if ( b_autoscroll ) messages->ensureCursorVisible();
 }
 
 void MessagesDialog::customEvent( QEvent *event )
@@ -226,20 +224,12 @@ void MessagesDialog::customEvent( QEvent *event )
     MsgEvent *msge = static_cast<MsgEvent *>(event);
 
     assert( msge );
-    sinkMessage( msge->msg );
-}
-
-void MessagesDialog::clearOrUpdate()
-{
-    if( mainTab->currentIndex() )
-        updateTree();
-    else
-        clear();
+    sinkMessage( msge );
 }
 
 void MessagesDialog::clear()
 {
-    messages->clear();
+    ui.messages->clear();
 }
 
 bool MessagesDialog::save()
@@ -261,7 +251,7 @@ bool MessagesDialog::save()
         }
 
         QTextStream out( &file );
-        out << messages->toPlainText() << "\n";
+        out << ui.messages->toPlainText() << "\n";
 
         return true;
     }
@@ -276,20 +266,17 @@ void MessagesDialog::buildTree( QTreeWidgetItem *parentItem,
     if( parentItem )
         item = new QTreeWidgetItem( parentItem );
     else
-        item = new QTreeWidgetItem( modulesTree );
+        item = new QTreeWidgetItem( ui.modulesTree );
 
     char *name = vlc_object_get_name( p_obj );
-    if( name != NULL )
-    {
-        item->setText( 0, qfu( p_obj->psz_object_type ) + " \"" +
-                       qfu( name ) + "\" (" +
-                       QString::number((uintptr_t)p_obj) + ")" );
-        free( name );
-    }
-    else
-        item->setText( 0, qfu( p_obj->psz_object_type ) + " (" +
-                       QString::number((uintptr_t)p_obj) + ")" );
-
+    item->setText( 0, QString("%1%2 (0x%3)")
+                   .arg( qfu( p_obj->psz_object_type ) )
+                   .arg( ( name != NULL )
+                         ? QString( " \"%1\"" ).arg( qfu( name ) )
+                             : "" )
+                   .arg( (uintptr_t)p_obj, 0, 16 )
+                 );
+    free( name );
     item->setExpanded( true );
 
     vlc_list_t *l = vlc_list_children( p_obj );
@@ -300,11 +287,16 @@ void MessagesDialog::buildTree( QTreeWidgetItem *parentItem,
 
 void MessagesDialog::updateTree()
 {
-    modulesTree->clear();
+    ui.modulesTree->clear();
     buildTree( NULL, VLC_OBJECT( p_intf->p_libvlc ) );
 }
 
-static void MsgCallback( msg_cb_data_t *data, msg_item_t *item, unsigned )
+void MessagesDialog::tabChanged( int i )
+{
+    updateButton->setVisible( i == 1 );
+}
+
+static void MsgCallback( msg_cb_data_t *data, const msg_item_t *item )
 {
     int canc = vlc_savecancel();
 
@@ -312,4 +304,3 @@ static void MsgCallback( msg_cb_data_t *data, msg_item_t *item, unsigned )
 
     vlc_restorecancel( canc );
 }
-

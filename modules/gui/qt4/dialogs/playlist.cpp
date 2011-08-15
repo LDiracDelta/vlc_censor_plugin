@@ -33,8 +33,6 @@
 #include <QUrl>
 #include <QHBoxLayout>
 
-PlaylistDialog *PlaylistDialog::instance = NULL;
-
 PlaylistDialog::PlaylistDialog( intf_thread_t *_p_intf )
                 : QVLCMW( _p_intf )
 {
@@ -42,13 +40,13 @@ PlaylistDialog::PlaylistDialog( intf_thread_t *_p_intf )
     setCentralWidget( main );
     setWindowTitle( qtr( "Playlist" ) );
     setWindowRole( "vlc-playlist" );
-    setWindowOpacity( config_GetFloat( p_intf, "qt-opacity" ) );
+    setWindowOpacity( var_InheritFloat( p_intf, "qt-opacity" ) );
 
     QHBoxLayout *l = new QHBoxLayout( centralWidget() );
 
     getSettings()->beginGroup("playlistdialog");
 
-    playlistWidget = new PlaylistWidget( p_intf );
+    playlistWidget = new PlaylistWidget( p_intf, this );
     l->addWidget( playlistWidget );
 
     readSettings( getSettings(), QSize( 600,700 ) );

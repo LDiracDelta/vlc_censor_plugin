@@ -47,5 +47,6 @@ static inline QString colon_unescape( QString s )
 {
     return s.replace( "\\:", ":" ).trimmed();
 }
-#endif
 
+QString toURI( const QString& s );
+#endif

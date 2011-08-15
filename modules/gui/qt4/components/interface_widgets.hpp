@@ -35,6 +35,8 @@
 
 #include "components/controller.hpp"
 #include "components/controller_widget.hpp"
+#include "dialogs_provider.hpp"
+#include "components/info_panels.hpp"
 
 #include <QWidget>
 #include <QFrame>
@@ -45,24 +47,20 @@ class ResizeEvent;
 class QPixmap;
 class QHBoxLayout;
 class QMenu;
-class ReparentableWidget;
+class QSlider;
 
 /******************** Video Widget ****************/
 class VideoWidget : public QFrame
 {
     Q_OBJECT
-friend class ReparentableWidget;
-
 public:
     VideoWidget( intf_thread_t * );
     virtual ~VideoWidget();
 
-    WId request( int *, int *,
-                 unsigned int *, unsigned int *, bool );
+    WId request( int *, int *, unsigned int *, unsigned int *, bool );
     void  release( void );
     int   control( void *, int, va_list );
-
-    virtual QSize sizeHint() const;
+    void  sync( void );
 
 protected:
     virtual QPaintEngine *paintEngine() const
@@ -73,16 +71,13 @@ protected:
 private:
     intf_thread_t *p_intf;
 
-    QSize videoSize;
-    QWidget *reparentable;
+    QWidget *stable;
     QLayout *layout;
-
 signals:
-    void keyPressed( QKeyEvent * );
+    void sizeChanged( int, int );
 
 public slots:
     void SetSizing( unsigned int, unsigned int );
-    void SetFullScreen( bool );
 };
 
 /******************** Background Widget ****************/
@@ -91,14 +86,17 @@ class BackgroundWidget : public QWidget
     Q_OBJECT
 public:
     BackgroundWidget( intf_thread_t * );
-    virtual ~BackgroundWidget();
-
+    void setExpandstoHeight( bool b_expand ) { b_expandPixmap = b_expand; }
+    void setWithArt( bool b_withart_ ) { b_withart = b_withart_; };
 private:
-    QLabel *label;
-    virtual void contextMenuEvent( QContextMenuEvent *event );
     intf_thread_t *p_intf;
-    virtual void resizeEvent( QResizeEvent * event );
-
+    QString pixmapUrl;
+    bool b_expandPixmap;
+    bool b_withart;
+    virtual void contextMenuEvent( QContextMenuEvent *event );
+protected:
+    void paintEvent( QPaintEvent *e );
+    static const int MARGIN = 5;
 public slots:
     void toggle(){ TOGGLEV( this ); }
     void updateArt( const QString& );
@@ -140,19 +138,31 @@ protected:
 private:
     intf_thread_t *p_intf;
     bool b_remainingTime;
+    int cachedLength;
+    QTimer *bufTimer;
+
+    bool buffering;
+    bool showBuffering;
+    float bufVal;
+
+    char psz_length[MSTRTIME_MAX_SIZE];
+    char psz_time[MSTRTIME_MAX_SIZE];
     void toggleTimeDisplay();
+    void paintEvent( QPaintEvent* );
 signals:
     void timeLabelDoubleClicked();
 private slots:
-    void setDisplayPosition( float pos, int time, int length );
-    void setCaching( float );
+    void setDisplayPosition( float pos, int64_t time, int length );
+    void setDisplayPosition( float pos );
+    void updateBuffering( float );
+    void updateBuffering();
 };
 
 class SpeedLabel : public QLabel
 {
     Q_OBJECT
 public:
-    SpeedLabel( intf_thread_t *, const QString&, QWidget * );
+    SpeedLabel( intf_thread_t *, QWidget * );
     virtual ~SpeedLabel();
 
 protected:
@@ -162,10 +172,11 @@ protected:
     }
 private slots:
     void showSpeedMenu( QPoint );
-    void setRate( int );
+    void setRate( float );
 private:
     intf_thread_t *p_intf;
     QMenu *speedControlMenu;
+    QString tooltipStringPattern;
     SpeedControlWidget *speedControl;
 };
 
@@ -175,10 +186,11 @@ class SpeedControlWidget : public QFrame
     Q_OBJECT
 public:
     SpeedControlWidget( intf_thread_t *, QWidget * );
-    void updateControls( int );
+    void updateControls( float );
 private:
     intf_thread_t *p_intf;
     QSlider *speedSlider;
+    int lastValue;
 
 public slots:
     void activateOnState();
@@ -195,11 +207,20 @@ public:
     CoverArtLabel( QWidget *parent, intf_thread_t * );
     virtual ~CoverArtLabel();
 
+protected:
+    virtual void mouseDoubleClickEvent( QMouseEvent *event )
+    {
+        if( qobject_cast<MetaPanel *>(this->window()) == NULL )
+        {
+            THEDP->mediaInfoDialog();
+        }
+        event->accept();
+    }
 private:
     intf_thread_t *p_intf;
 
 public slots:
-    void requestUpdate() { emit updateRequested(); };
+    void requestUpdate() { emit updateRequested(); }
     void update( )
     {
         requestUpdate();

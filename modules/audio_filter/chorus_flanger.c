@@ -75,25 +75,26 @@ struct filter_sys_t
 
 vlc_module_begin ()
     set_description( N_("Sound Delay") )
-    set_shortname( N_("delay") )
+    set_shortname( N_("Delay") )
+    set_help( N_("Add a delay effect to the sound") )
     set_category( CAT_AUDIO )
     set_subcategory( SUBCAT_AUDIO_AFILTER )
     add_shortcut( "delay" )
-    add_float( "delay-time", 40, NULL, N_("Delay time"),
+    add_float( "delay-time", 40, N_("Delay time"),
         N_("Time in milliseconds of the average delay. Note average"), true )
-    add_float( "sweep-depth", 6, NULL, N_("Sweep Depth"),
+    add_float( "sweep-depth", 6, N_("Sweep Depth"),
         N_("Time in milliseconds of the maximum sweep depth. Thus, the sweep "
             "range will be delay-time +/- sweep-depth."), true )
-    add_float( "sweep-rate", 6, NULL, N_("Sweep Rate"),
+    add_float( "sweep-rate", 6, N_("Sweep Rate"),
         N_("Rate of change of sweep depth in milliseconds shift per second "
            "of play"), true )
-    add_float_with_range( "feedback-gain", 0.5, -0.9, 0.9, NULL,
+    add_float_with_range( "feedback-gain", 0.5, -0.9, 0.9,
         N_("Feedback Gain"), N_("Gain on Feedback loop"), true )
-    add_float_with_range( "wet-mix", 0.4, -0.999, 0.999, NULL,
+    add_float_with_range( "wet-mix", 0.4, -0.999, 0.999,
         N_("Wet mix"), N_("Level of delayed signal"), true )
-    add_float_with_range( "dry-mix", 0.4, -0.999, 0.999, NULL,
+    add_float_with_range( "dry-mix", 0.4, -0.999, 0.999,
         N_("Dry Mix"), N_("Level of input signal"), true )
-    set_capability( "audio filter2", 0 )
+    set_capability( "audio filter", 0 )
     set_callbacks( Open, Close )
 vlc_module_end ()
 

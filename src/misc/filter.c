@@ -28,12 +28,12 @@
 #include <vlc_common.h>
 #include <libvlc.h>
 #include <vlc_filter.h>
+#include <vlc_modules.h>
 
 filter_t *filter_NewBlend( vlc_object_t *p_this,
                            const video_format_t *p_dst_chroma )
 {
-    filter_t *p_blend = vlc_custom_create( p_this, sizeof(*p_blend),
-                                           VLC_OBJECT_GENERIC, "blend" );
+    filter_t *p_blend = vlc_custom_create( p_this, sizeof(*p_blend), "blend" );
     if( !p_blend )
         return NULL;
 
@@ -56,9 +56,6 @@ filter_t *filter_NewBlend( vlc_object_t *p_this,
     /* The blend module will be loaded when needed with the real
     * input format */
     p_blend->p_module = NULL;
-
-    /* */
-    vlc_object_attach( p_blend, p_this );
 
     return p_blend;
 }
@@ -111,7 +108,6 @@ void filter_DeleteBlend( filter_t *p_blend )
     if( p_blend->p_module )
         module_unneed( p_blend, p_blend->p_module );
 
-    vlc_object_detach( p_blend );
     vlc_object_release( p_blend );
 }
 
@@ -122,16 +118,14 @@ video_splitter_t *video_splitter_New( vlc_object_t *p_this,
                                       const char *psz_name,
                                       const video_format_t *p_fmt )
 {
-    video_splitter_t *p_splitter = vlc_custom_create( p_this, sizeof(*p_splitter),
-                                           VLC_OBJECT_GENERIC, "video splitter" );
+    video_splitter_t *p_splitter = vlc_custom_create( p_this,
+                                       sizeof(*p_splitter), "video splitter" );
     if( !p_splitter )
         return NULL;
 
     video_format_Copy( &p_splitter->fmt, p_fmt );
 
     /* */
-    vlc_object_attach( p_splitter, p_this );
-
     p_splitter->p_module = module_need( p_splitter, "video splitter", psz_name, true );
     if( ! p_splitter->p_module )
     {
@@ -149,7 +143,6 @@ void video_splitter_Delete( video_splitter_t *p_splitter )
 
     video_format_Clean( &p_splitter->fmt );
 
-    vlc_object_detach( p_splitter );
     vlc_object_release( p_splitter );
 }
 

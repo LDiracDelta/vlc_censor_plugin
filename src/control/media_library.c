@@ -57,22 +57,28 @@ struct libvlc_media_library_t
  *       new (Public)
  **************************************************************************/
 libvlc_media_library_t *
-libvlc_media_library_new( libvlc_instance_t * p_inst,
-                          libvlc_exception_t * p_e )
+libvlc_media_library_new( libvlc_instance_t * p_inst )
 {
-    (void)p_e;
     libvlc_media_library_t * p_mlib;
 
     p_mlib = malloc(sizeof(libvlc_media_library_t));
 
     if( !p_mlib )
+    {
+        libvlc_printerr( "Not enough memory" );
         return NULL;
+    }
 
     p_mlib->p_libvlc_instance = p_inst;
     p_mlib->i_refcount = 1;
     p_mlib->p_mlist = NULL;
 
-    p_mlib->p_event_manager = libvlc_event_manager_new( p_mlib, p_inst, p_e );
+    p_mlib->p_event_manager = libvlc_event_manager_new( p_mlib, p_inst );
+    if( unlikely(p_mlib->p_event_manager == NULL) )
+    {
+        free(p_mlib);
+        return NULL;
+    }
 
     return p_mlib;
 }
@@ -104,9 +110,7 @@ void libvlc_media_library_retain( libvlc_media_library_t * p_mlib )
  *
  * It doesn't yet load the playlists
  **************************************************************************/
-void
-libvlc_media_library_load( libvlc_media_library_t * p_mlib,
-                           libvlc_exception_t * p_e )
+int libvlc_media_library_load( libvlc_media_library_t * p_mlib )
 {
     char *psz_datadir = config_GetUserDir( VLC_DATA_DIR );
     char * psz_uri;
@@ -119,43 +123,26 @@ libvlc_media_library_load( libvlc_media_library_t * p_mlib,
 
     if( psz_uri == NULL )
     {
-        libvlc_exception_raise( p_e );
         libvlc_printerr( "Not enough memory" );
-        return;
+        return -1;
     }
 
     if( p_mlib->p_mlist )
         libvlc_media_list_release( p_mlib->p_mlist );
 
-    p_mlib->p_mlist = libvlc_media_list_new(
-                        p_mlib->p_libvlc_instance,
-                        p_e );
+    p_mlib->p_mlist = libvlc_media_list_new( p_mlib->p_libvlc_instance );
 
-    libvlc_media_list_add_file_content( p_mlib->p_mlist, psz_uri, p_e );
+    int ret = libvlc_media_list_add_file_content( p_mlib->p_mlist, psz_uri );
     free( psz_uri );
-    return;
-}
-
-/**************************************************************************
- *       save (Public)
- **************************************************************************/
-void
-libvlc_media_library_save( libvlc_media_library_t * p_mlib,
-                           libvlc_exception_t * p_e )
-{
-    (void)p_mlib;
-    libvlc_exception_raise( p_e );
-    libvlc_printerr( "Function not implemented" );
+    return ret;
 }
 
 /**************************************************************************
  *        media_list (Public)
  **************************************************************************/
 libvlc_media_list_t *
-libvlc_media_library_media_list( libvlc_media_library_t * p_mlib,
-                                     libvlc_exception_t * p_e )
+libvlc_media_library_media_list( libvlc_media_library_t * p_mlib )
 {
-    (void)p_e;
     if( p_mlib->p_mlist )
         libvlc_media_list_retain( p_mlib->p_mlist );
     return p_mlib->p_mlist;

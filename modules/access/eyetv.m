@@ -69,13 +69,13 @@ vlc_module_begin ()
     set_category( CAT_INPUT )
     set_subcategory( SUBCAT_INPUT_ACCESS )
 
-    add_integer( "eyetv-channel", 0, NULL,
+    add_integer( "eyetv-channel", 0,
                  CHANNEL_TEXT, CHANNEL_LONGTEXT, false )
 
     set_capability( "access", 0 )
     add_shortcut( "eyetv" )
     set_callbacks( Open, Close )
-    add_integer( "eyetv-caching", DEFAULT_PTS_DELAY / 1000, NULL,
+    add_integer( "eyetv-caching", DEFAULT_PTS_DELAY / 1000,
                  CACHING_TEXT, CACHING_LONGTEXT, true);
 vlc_module_end ()
 
@@ -167,13 +167,10 @@ static int Open( vlc_object_t *p_this )
     if( !p_sys )
         return VLC_ENOMEM;
 
-    p_sys->i_pts_delay = var_CreateGetInteger( p_access, "eyetv-caching" );
-
-    int val = var_CreateGetInteger( p_access, "eyetv-channel" );
+    p_sys->i_pts_delay = var_InheritInteger( p_access, "eyetv-caching" );
 
     msg_Dbg( p_access, "coming up" );
-
-    selectChannel( p_this, val );
+    selectChannel( p_this, var_InheritInteger( p_access, "eyetv-channel" ) );
 
     /* socket */
     memset(&publicAddr, 0, sizeof(publicAddr));

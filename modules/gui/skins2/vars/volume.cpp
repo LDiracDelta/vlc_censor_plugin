@@ -27,17 +27,27 @@
 #endif
 
 #include <vlc_common.h>
-#include <vlc_aout.h>
+#include <vlc_aout_intf.h>
 #include <vlc_playlist.h>
 #include "volume.hpp"
 
 Volume::Volume( intf_thread_t *pIntf ): VarPercent( pIntf )
 {
-    // Initial value
-    audio_volume_t val;
+    m_step = (float)config_GetInt( pIntf, "volume-step" ) / AOUT_VOLUME_MAX;
+    if( var_InheritBool( pIntf, "qt-volume-complete" ) )
+    {
+        m_max = AOUT_VOLUME_MAX * 100 / AOUT_VOLUME_DEFAULT;
+        m_volumeMax = AOUT_VOLUME_MAX;
+    }
+    else
+    {
+        m_max = 200;
+        m_volumeMax = AOUT_VOLUME_DEFAULT * 2;
+    }
 
-    aout_VolumeGet( getIntf()->p_sys->p_playlist, &val );
-    VarPercent::set( val * 2.0 / AOUT_VOLUME_MAX );
+    // Initial value
+    audio_volume_t val = aout_VolumeGet( getIntf()->p_sys->p_playlist );
+    set( val, false );
 }
 
 
@@ -48,23 +58,25 @@ void Volume::set( float percentage, bool updateVLC )
         (int)(percentage * AOUT_VOLUME_MAX) )
     {
         VarPercent::set( percentage );
-
         if( updateVLC )
             aout_VolumeSet( getIntf()->p_sys->p_playlist,
-                            (int)(get() * AOUT_VOLUME_MAX / 2.0) );
+                            (int)(get() * m_volumeMax) );
     }
+}
+
+
+void Volume::set( int val, bool updateVLC )
+{
+    set( (float)val / m_volumeMax, updateVLC );
 }
 
 
 string Volume::getAsStringPercent() const
 {
-    int value = (int)(100. * VarPercent::get());
-    // 0 <= value <= 100, so we need 4 chars
-    char *str = new char[4];
+    int value = (int)(m_max * VarPercent::get());
+    // 0 <= value <= 400, so we need 4 chars
+    char str[4];
     snprintf( str, 4, "%d", value );
-    string ret = str;
-    delete[] str;
-
-    return ret;
+    return string(str);
 }
 

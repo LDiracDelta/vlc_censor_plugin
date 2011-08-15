@@ -78,7 +78,7 @@ int osd_ShowTextAbsolute( spu_t *p_spu_channel, int i_channel,
 
     if( !psz_string ) return VLC_EGENERIC;
 
-    p_spu = subpicture_New();
+    p_spu = subpicture_New( NULL );
     if( !p_spu )
         return VLC_EGENERIC;
 
@@ -91,7 +91,6 @@ int osd_ShowTextAbsolute( spu_t *p_spu_channel, int i_channel,
     /* Create a new subpicture region */
     memset( &fmt, 0, sizeof(video_format_t) );
     fmt.i_chroma = VLC_CODEC_TEXT;
-    fmt.i_aspect = 0;
     fmt.i_width = fmt.i_height = 0;
     fmt.i_x_offset = fmt.i_y_offset = 0;
     p_spu->p_region = subpicture_region_New( &fmt );
@@ -107,7 +106,7 @@ int osd_ShowTextAbsolute( spu_t *p_spu_channel, int i_channel,
     p_spu->p_region->i_x = i_hmargin;
     p_spu->p_region->i_y = i_vmargin;
 
-    spu_DisplaySubpicture( p_spu_channel, p_spu );
+    spu_PutSubpicture( p_spu_channel, p_spu );
 
     return VLC_SUCCESS;
 }
@@ -132,7 +131,7 @@ void osd_Message( spu_t *p_spu, int i_channel,
         if( vasprintf( &psz_string, psz_format, args ) != -1 )
         {
             osd_ShowTextRelative( p_spu, i_channel, psz_string, NULL,
-                    OSD_ALIGN_TOP|OSD_ALIGN_RIGHT, 30,20,1000000 );
+                    SUBPICTURE_ALIGN_TOP|SUBPICTURE_ALIGN_RIGHT, 30,20,1000000 );
 
             free( psz_string );
         }

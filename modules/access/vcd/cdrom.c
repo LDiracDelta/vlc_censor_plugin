@@ -33,16 +33,14 @@
 #include <vlc_common.h>
 #include <vlc_access.h>
 #include <vlc_charset.h>
+#include <vlc_fs.h>
 #include <limits.h>
 
 #ifdef HAVE_UNISTD_H
 #   include <unistd.h>
 #endif
 
-#include <errno.h>
-#ifdef HAVE_SYS_TYPES_H
-#   include <sys/types.h>
-#endif
+#include <sys/types.h>
 #ifdef HAVE_SYS_STAT_H
 #   include <sys/stat.h>
 #endif
@@ -80,7 +78,6 @@
 
 #include "cdrom_internals.h"
 #include "cdrom.h"
-#include <vlc_charset.h>
 #include <vlc_meta.h>
 
 /*****************************************************************************
@@ -117,7 +114,7 @@ vcddev_t *ioctl_Open( vlc_object_t *p_this, const char *psz_dev )
     }
 
 #else
-    if( utf8_stat( psz_dev, &fileinfo ) < 0 )
+    if( vlc_stat( psz_dev, &fileinfo ) < 0 )
     {
         free( p_vcddev );
         return NULL;
@@ -142,7 +139,7 @@ vcddev_t *ioctl_Open( vlc_object_t *p_this, const char *psz_dev )
         i_ret = win32_vcd_open( p_this, psz_dev, p_vcddev );
 #else
         p_vcddev->i_device_handle = -1;
-        p_vcddev->i_device_handle = utf8_open( psz_dev, O_RDONLY | O_NONBLOCK );
+        p_vcddev->i_device_handle = vlc_open( psz_dev, O_RDONLY | O_NONBLOCK );
         i_ret = (p_vcddev->i_device_handle == -1) ? -1 : 0;
 #endif
     }
@@ -672,7 +669,7 @@ static int OpenVCDImage( vlc_object_t * p_this, const char *psz_dev,
 
     /* Open the cue file and try to parse it */
     msg_Dbg( p_this,"trying .cue file: %s", psz_cuefile );
-    cuefile = utf8_fopen( psz_cuefile, "rt" );
+    cuefile = vlc_fopen( psz_cuefile, "rt" );
     if( cuefile == NULL )
     {
         msg_Dbg( p_this, "could not find .cue file" );
@@ -680,7 +677,7 @@ static int OpenVCDImage( vlc_object_t * p_this, const char *psz_dev,
     }
 
     msg_Dbg( p_this,"guessing vcd image file: %s", psz_vcdfile );
-    p_vcddev->i_vcdimage_handle = utf8_open( psz_vcdfile,
+    p_vcddev->i_vcdimage_handle = vlc_open( psz_vcdfile,
                                     O_RDONLY | O_NONBLOCK | O_BINARY );
  
     while( fgets( line, 1024, cuefile ) && !b_found )
@@ -689,7 +686,6 @@ static int OpenVCDImage( vlc_object_t * p_this, const char *psz_dev,
         char filename[1024];
         char type[16];
         int i_temp = sscanf( line, "FILE \"%1023[^\"]\" %15s", filename, type );
-        *p_pos = 0;
         switch( i_temp )
         {
             case 2:
@@ -710,7 +706,7 @@ static int OpenVCDImage( vlc_object_t * p_this, const char *psz_dev,
                         strcpy( psz_vcdfile + (p_pos - psz_cuefile + 1), filename );
                     } else psz_vcdfile = strdup( filename );
                     msg_Dbg( p_this,"using vcd image file: %s", psz_vcdfile );
-                    p_vcddev->i_vcdimage_handle = utf8_open( psz_vcdfile,
+                    p_vcddev->i_vcdimage_handle = vlc_open( psz_vcdfile,
                                         O_RDONLY | O_NONBLOCK | O_BINARY );
                 }
                 b_found = true;

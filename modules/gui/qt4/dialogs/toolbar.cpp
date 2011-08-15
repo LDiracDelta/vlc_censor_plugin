@@ -27,19 +27,27 @@
 
 #include "dialogs/toolbar.hpp"
 
+/* Widgets */
 #include "util/input_slider.hpp"
 #include "util/customwidgets.hpp"
 #include "components/interface_widgets.hpp"
+#include "util/buttons/DeckButtonsLayout.hpp"
+#include "util/buttons/BrowseButton.hpp"
+#include "util/buttons/RoundButton.hpp"
 
 #include <QScrollArea>
 #include <QGroupBox>
 #include <QLabel>
 #include <QComboBox>
 #include <QListWidget>
+#include <QSpinBox>
+#include <QRubberBand>
 
 #include <QDragEnterEvent>
 #include <QDialogButtonBox>
 #include <QInputDialog>
+
+#include <assert.h>
 
 ToolbarEditDialog::ToolbarEditDialog( QWidget *_w, intf_thread_t *_p_intf)
                   : QVLCDialog( _w,  _p_intf )
@@ -83,7 +91,7 @@ ToolbarEditDialog::ToolbarEditDialog( QWidget *_w, intf_thread_t *_p_intf)
                 getSettings()->value( "MainWindow/ToolbarPos", 0 ).toInt() ) );
     mainTboxLayout->addWidget( positionCombo, 0, 2, 1, 1 );
 
-    QLabel *line1Label = new QLabel( "Line 1:" );
+    QLabel *line1Label = new QLabel( qtr("Line 1:") );
     QString line1 = getSettings()->value( "MainWindow/MainToolbar1",
                                           MAIN_TB1_DEFAULT ).toString();
     controller1 = new DroppingController( p_intf, line1,
@@ -91,7 +99,7 @@ ToolbarEditDialog::ToolbarEditDialog( QWidget *_w, intf_thread_t *_p_intf)
     mainTboxLayout->addWidget( line1Label, 1, 0, 1, 1 );
     mainTboxLayout->addWidget( controller1, 1, 1, 1, 2 );
 
-    QLabel *line2Label = new QLabel( "Line 2:" );
+    QLabel *line2Label = new QLabel( qtr("Line 2:") );
     QString line2 = getSettings()->value( "MainWindow/MainToolbar2",
                                           MAIN_TB2_DEFAULT ).toString();
     controller2 = new DroppingController( p_intf, line2,
@@ -144,6 +152,7 @@ ToolbarEditDialog::ToolbarEditDialog( QWidget *_w, intf_thread_t *_p_intf)
 
     QToolButton *newButton = new QToolButton;
     newButton->setIcon( QIcon( ":/new" ) );
+    newButton->setToolTip( qtr("New profile") );
     QToolButton *deleteButton = new QToolButton;
     deleteButton->setIcon( QIcon( ":/toolbar/clear" ) );
     deleteButton->setToolTip( qtr( "Delete the current profile" ) );
@@ -330,7 +339,7 @@ WidgetListing::WidgetListing( intf_thread_t *p_intf, QWidget *_parent )
             break;
         case INPUT_SLIDER:
             {
-                InputSlider *slider = new InputSlider( Qt::Horizontal, this );
+                SeekSlider *slider = new SeekSlider( Qt::Horizontal, this );
                 widget = slider;
             }
             widgetItem->setText( qtr("Time Slider") );
@@ -368,14 +377,17 @@ WidgetListing::WidgetListing( intf_thread_t *p_intf, QWidget *_parent )
 
                 QToolButton *prevSectionButton = new QToolButton( discFrame );
                 prevSectionButton->setIcon( QIcon( ":/toolbar/dvd_prev" ) );
+                prevSectionButton->setToolTip( qtr("Previous chapter") );
                 discLayout->addWidget( prevSectionButton );
 
                 QToolButton *menuButton = new QToolButton( discFrame );
                 menuButton->setIcon( QIcon( ":/toolbar/dvd_menu" ) );
+                menuButton->setToolTip( qtr("Go to the DVD menu") );
                 discLayout->addWidget( menuButton );
 
                 QToolButton *nextButton = new QToolButton( discFrame );
                 nextButton->setIcon( QIcon( ":/toolbar/dvd_next" ) );
+                nextButton->setToolTip( qtr("Next chapter") );
                 discLayout->addWidget( nextButton );
 
                 widget = discFrame;
@@ -393,7 +405,8 @@ WidgetListing::WidgetListing( intf_thread_t *p_intf, QWidget *_parent )
                 telexLayout->addWidget( telexOn );
 
                 QToolButton *telexTransparent = new QToolButton;
-                telexOn->setIcon( QIcon( ":/toolbar/tvtelx" ) );
+                telexTransparent->setIcon( QIcon( ":/toolbar/tvtelx" ) );
+                telexTransparent->setToolTip( qtr("Teletext transparency") );
                 telexLayout->addWidget( telexTransparent );
 
                 QSpinBox *telexPage = new QSpinBox;
@@ -409,6 +422,18 @@ WidgetListing::WidgetListing( intf_thread_t *p_intf, QWidget *_parent )
                 widget = advControls;
             }
             widgetItem->setText( qtr("Advanced Buttons") );
+            break;
+        case PLAYBACK_BUTTONS:
+            {
+                widget = new QWidget;
+                DeckButtonsLayout *layout = new DeckButtonsLayout( widget );
+                BrowseButton *prev = new BrowseButton( widget, BrowseButton::Backward );
+                BrowseButton *next = new BrowseButton( widget );
+                RoundButton *play = new RoundButton( widget );
+                layout->setBackwardButton( prev );
+                layout->setForwardButton( next );
+                layout->setRoundButton( play );
+            }
             break;
         default:
             msg_Warn( p_intf, "This should not happen %i", i );
@@ -669,6 +694,11 @@ void DroppingController::dropEvent( QDropEvent *event )
 {
     int i = getParentPosInLayout( event->pos() );
 
+    /* Workaround: do not let the item move to its current
+       position + 1 as it breaks the widgetList */
+    if ( i - 1 == i_dragIndex )
+        --i;
+
     QByteArray data = event->mimeData()->data( "vlc/button-bar" );
     QDataStream dataStream(&data, QIODevice::ReadOnly);
 
@@ -724,6 +754,8 @@ bool DroppingController::eventFilter( QObject *obj, QEvent *event )
             }
 
             if( i == -1 ) return true;
+            i_dragIndex = i;
+
             doubleInt *dI = widgetList.at( i );
 
             int i_type = dI->i_type;
@@ -760,4 +792,3 @@ bool DroppingController::eventFilter( QObject *obj, QEvent *event )
             return false;
     }
 }
-

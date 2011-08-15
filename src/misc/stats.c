@@ -46,6 +46,7 @@ static void TimerDump( vlc_object_t *p_this, counter_t *p_counter, bool);
  * Exported functions
  *****************************************************************************/
 
+#undef stats_CounterCreate
 /**
  * Create a statistics counter
  * \param p_this a VLC object
@@ -56,7 +57,7 @@ static void TimerDump( vlc_object_t *p_this, counter_t *p_counter, bool);
  * STATS_MAX (keep the maximum passed value), STATS_MIN, or STATS_DERIVATIVE
  * (keep a time derivative of the value)
  */
-counter_t * __stats_CounterCreate( vlc_object_t *p_this,
+counter_t * stats_CounterCreate( vlc_object_t *p_this,
                                    int i_type, int i_compute_type )
 {
     counter_t *p_counter = (counter_t*) malloc( sizeof( counter_t ) ) ;
@@ -79,16 +80,17 @@ counter_t * __stats_CounterCreate( vlc_object_t *p_this,
  * \param p_this a VLC object
  * \param p_counter the counter to update
  * \param val the vlc_value union containing the new value to aggregate. For
- * more information on how data is aggregated, \see __stats_Create
+ * more information on how data is aggregated, \see stats_Create
  * \param val_new a pointer that will be filled with new data
  */
-int __stats_Update( vlc_object_t *p_this, counter_t *p_counter,
-                    vlc_value_t val, vlc_value_t *val_new )
+int stats_Update( vlc_object_t *p_this, counter_t *p_counter,
+                  vlc_value_t val, vlc_value_t *val_new )
 {
     if( !libvlc_stats (p_this) || !p_counter ) return VLC_EGENERIC;
     return CounterUpdate( p_this, p_counter, val, val_new );
 }
 
+#undef stats_Get
 /** Get the aggregated value for a counter
  * \param p_this an object
  * \param p_counter the counter
@@ -96,11 +98,11 @@ int __stats_Update( vlc_object_t *p_this, counter_t *p_counter,
  * retrieved value
  * \return an error code
  */
-int __stats_Get( vlc_object_t *p_this, counter_t *p_counter, vlc_value_t *val )
+int stats_Get( vlc_object_t *p_this, counter_t *p_counter, vlc_value_t *val )
 {
     if( !libvlc_stats (p_this) || !p_counter || p_counter->i_samples == 0 )
     {
-        val->i_int = val->f_float = 0.0;
+        val->i_int = 0;
         return VLC_EGENERIC;
     }
 
@@ -116,7 +118,7 @@ int __stats_Get( vlc_object_t *p_this, counter_t *p_counter, vlc_value_t *val )
         /* Not ready yet */
         if( p_counter->i_samples < 2 )
         {
-            val->i_int = 0; val->f_float = 0.0;
+            val->i_int = 0;
             return VLC_EGENERIC;
         }
         if( p_counter->i_type == VLC_VAR_INTEGER )
@@ -125,7 +127,7 @@ int __stats_Get( vlc_object_t *p_this, counter_t *p_counter, vlc_value_t *val )
                         p_counter->pp_samples[1]->value.i_int ) /
                     (float)(  p_counter->pp_samples[0]->date -
                               p_counter->pp_samples[1]->date );
-            val->i_int = (int)f;
+            val->i_int = (int64_t)f;
         }
         else
         {
@@ -230,9 +232,9 @@ void stats_DumpInputStats( input_stats_t *p_stats  )
     vlc_mutex_lock( &p_stats->lock );
     /* f_bitrate is in bytes / microsecond
      * *1000 => bytes / millisecond => kbytes / seconds */
-    fprintf( stderr, "Input : %i (%i bytes) - %f kB/s - "
-                     "Demux : %i (%i bytes) - %f kB/s\n"
-                     " - Vout : %i/%i - Aout : %i/%i - Sout : %f\n",
+    fprintf( stderr, "Input : %"PRId64" (%"PRId64" bytes) - %f kB/s - "
+                     "Demux : %"PRId64" (%"PRId64" bytes) - %f kB/s\n"
+                     " - Vout : %"PRId64"/%"PRId64" - Aout : %"PRId64"/%"PRId64" - Sout : %f\n",
                     p_stats->i_read_packets, p_stats->i_read_bytes,
                     p_stats->f_input_bitrate * 1000,
                     p_stats->i_demux_read_packets, p_stats->i_demux_read_bytes,
@@ -243,8 +245,9 @@ void stats_DumpInputStats( input_stats_t *p_stats  )
     vlc_mutex_unlock( &p_stats->lock );
 }
 
-void __stats_TimerStart( vlc_object_t *p_obj, const char *psz_name,
-                         unsigned int i_id )
+#undef stats_TimerStart
+void stats_TimerStart( vlc_object_t *p_obj, const char *psz_name,
+                       unsigned int i_id )
 {
     libvlc_priv_t *priv = libvlc_priv (p_obj->p_libvlc);
     counter_t *p_counter = NULL;
@@ -265,8 +268,8 @@ void __stats_TimerStart( vlc_object_t *p_obj, const char *psz_name,
     if( !p_counter )
     {
         counter_sample_t *p_sample;
-        p_counter = stats_CounterCreate( p_obj->p_libvlc, VLC_VAR_TIME,
-                                         STATS_TIMER );
+        p_counter = stats_CounterCreate( VLC_OBJECT(p_obj->p_libvlc),
+                                         VLC_VAR_TIME, STATS_TIMER );
         if( !p_counter )
             goto out;
         p_counter->psz_name = strdup( psz_name );
@@ -286,7 +289,7 @@ void __stats_TimerStart( vlc_object_t *p_obj, const char *psz_name,
                      p_counter->i_samples, p_sample );
         p_sample->date = 0; p_sample->value.i_int = 0;
     }
-    if( p_counter->pp_samples[0]->value.b_bool == true )
+    if( p_counter->pp_samples[0]->value.b_bool )
     {
         msg_Warn( p_obj, "timer '%s' was already started !", psz_name );
         goto out;
@@ -297,7 +300,8 @@ out:
     vlc_mutex_unlock( &priv->timer_lock );
 }
 
-void __stats_TimerStop( vlc_object_t *p_obj, unsigned int i_id )
+#undef stats_TimerStop
+void stats_TimerStop( vlc_object_t *p_obj, unsigned int i_id )
 {
     counter_t *p_counter = NULL;
     libvlc_priv_t *priv = libvlc_priv (p_obj->p_libvlc);
@@ -326,7 +330,8 @@ out:
     vlc_mutex_unlock( &priv->timer_lock );
 }
 
-void __stats_TimerDump( vlc_object_t *p_obj, unsigned int i_id )
+#undef stats_TimerDump
+void stats_TimerDump( vlc_object_t *p_obj, unsigned int i_id )
 {
     counter_t *p_counter = NULL;
     libvlc_priv_t *priv = libvlc_priv (p_obj->p_libvlc);
@@ -346,7 +351,8 @@ void __stats_TimerDump( vlc_object_t *p_obj, unsigned int i_id )
     vlc_mutex_unlock( &priv->timer_lock );
 }
 
-void __stats_TimersDumpAll( vlc_object_t *p_obj )
+#undef stats_TimersDumpAll
+void stats_TimersDumpAll( vlc_object_t *p_obj )
 {
     libvlc_priv_t *priv = libvlc_priv (p_obj->p_libvlc);
 
@@ -357,7 +363,8 @@ void __stats_TimersDumpAll( vlc_object_t *p_obj )
     vlc_mutex_unlock( &priv->timer_lock );
 }
 
-void __stats_TimerClean( vlc_object_t *p_obj, unsigned int i_id )
+#undef stats_TimerClean
+void stats_TimerClean( vlc_object_t *p_obj, unsigned int i_id )
 {
     libvlc_priv_t *priv = libvlc_priv (p_obj->p_libvlc);
 
@@ -374,7 +381,8 @@ void __stats_TimerClean( vlc_object_t *p_obj, unsigned int i_id )
     vlc_mutex_unlock( &priv->timer_lock );
 }
 
-void __stats_TimersCleanAll( vlc_object_t *p_obj )
+#undef stats_TimersCleanAll
+void stats_TimersCleanAll( vlc_object_t *p_obj )
 {
     libvlc_priv_t *priv = libvlc_priv (p_obj->p_libvlc);
 
@@ -444,7 +452,7 @@ static int CounterUpdate( vlc_object_t *p_handler,
         {
             counter_sample_t *p_new = (counter_sample_t*)malloc(
                                                sizeof( counter_sample_t ) );
-            p_new->value.psz_string = NULL;
+            p_new->value.i_int = 0;
 
             INSERT_ELEM( p_counter->pp_samples, p_counter->i_samples,
                          p_counter->i_samples, p_new );
@@ -516,7 +524,7 @@ static int CounterUpdate( vlc_object_t *p_handler,
         {
             counter_sample_t *p_new = (counter_sample_t*)malloc(
                                                sizeof( counter_sample_t ) );
-            p_new->value.psz_string = NULL;
+            p_new->value.i_int = 0;
 
             INSERT_ELEM( p_counter->pp_samples, p_counter->i_samples,
                          p_counter->i_samples, p_new );
@@ -552,7 +560,7 @@ static void TimerDump( vlc_object_t *p_obj, counter_t *p_counter,
         return;
 
     mtime_t last, total;
-    int i_total;
+    int64_t i_total;
     if( p_counter->i_samples != 2 )
     {
         msg_Err( p_obj, "timer %s does not exist", p_counter->psz_name );
@@ -560,7 +568,7 @@ static void TimerDump( vlc_object_t *p_obj, counter_t *p_counter,
     }
     i_total = p_counter->pp_samples[1]->value.i_int;
     total = p_counter->pp_samples[1]->date;
-    if( p_counter->pp_samples[0]->value.b_bool == true )
+    if( p_counter->pp_samples[0]->value.b_bool )
     {
         last = mdate() - p_counter->pp_samples[0]->date;
         i_total += 1;
@@ -573,14 +581,14 @@ static void TimerDump( vlc_object_t *p_obj, counter_t *p_counter,
     if( b_total )
     {
         msg_Dbg( p_obj,
-             "TIMER %s : %.3f ms - Total %.3f ms / %i intvls (Avg %.3f ms)",
+             "TIMER %s : %.3f ms - Total %.3f ms / %"PRId64" intvls (Avg %.3f ms)",
              p_counter->psz_name, (float)last/1000, (float)total/1000, i_total,
              (float)(total)/(1000*(float)i_total ) );
     }
     else
     {
         msg_Dbg( p_obj,
-             "TIMER %s : Total %.3f ms / %i intvls (Avg %.3f ms)",
+             "TIMER %s : Total %.3f ms / %"PRId64" intvls (Avg %.3f ms)",
              p_counter->psz_name, (float)total/1000, i_total,
              (float)(total)/(1000*(float)i_total ) );
     }

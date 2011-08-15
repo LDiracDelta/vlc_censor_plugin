@@ -36,9 +36,9 @@
 #include <vlc_plugin.h>
 #include <vlc_access.h>
 #include <vlc_demux.h>
-#include <vlc_charset.h>
+#include <vlc_fs.h>
 
-#include <ctype.h>
+#include <errno.h>
 #include <fcntl.h>
 #include <unistd.h>
 #include <sys/ioctl.h>
@@ -87,11 +87,11 @@ vlc_module_begin ()
     set_capability( "access_demux", 10 )
     set_callbacks( DemuxOpen, DemuxClose )
 
-    add_bool( CFG_PREFIX "stereo", true, NULL, STEREO_TEXT, STEREO_LONGTEXT,
+    add_bool( CFG_PREFIX "stereo", true, STEREO_TEXT, STEREO_LONGTEXT,
                 true )
-    add_integer( CFG_PREFIX "samplerate", 48000, NULL, SAMPLERATE_TEXT,
+    add_integer( CFG_PREFIX "samplerate", 48000, SAMPLERATE_TEXT,
                 SAMPLERATE_LONGTEXT, true )
-    add_integer( CFG_PREFIX "caching", DEFAULT_PTS_DELAY / 1000, NULL,
+    add_integer( CFG_PREFIX "caching", DEFAULT_PTS_DELAY / 1000,
                 CACHING_TEXT, CACHING_LONGTEXT, true )
 vlc_module_end ()
 
@@ -171,16 +171,16 @@ static int DemuxOpen( vlc_object_t *p_this )
     p_demux->p_sys = p_sys = calloc( 1, sizeof( demux_sys_t ) );
     if( p_sys == NULL ) return VLC_ENOMEM;
 
-    p_sys->i_sample_rate = var_CreateGetInteger( p_demux, CFG_PREFIX "samplerate" );
-    p_sys->b_stereo = var_CreateGetBool( p_demux, CFG_PREFIX "stereo" );
-    p_sys->i_cache = var_CreateGetInteger( p_demux, CFG_PREFIX "caching" );
+    p_sys->i_sample_rate = var_InheritInteger( p_demux, CFG_PREFIX "samplerate" );
+    p_sys->b_stereo = var_InheritBool( p_demux, CFG_PREFIX "stereo" );
+    p_sys->i_cache = var_InheritInteger( p_demux, CFG_PREFIX "caching" );
     p_sys->i_fd = -1;
     p_sys->p_es = NULL;
     p_sys->p_block = NULL;
     p_sys->i_next_demux_date = -1;
 
-    if( p_demux->psz_path && *p_demux->psz_path )
-        p_sys->psz_device = p_demux->psz_path;
+    if( p_demux->psz_location && *p_demux->psz_location )
+        p_sys->psz_device = p_demux->psz_location;
     else
         p_sys->psz_device = OSS_DEFAULT;
 
@@ -273,6 +273,8 @@ static int Demux( demux_t *p_demux )
         /* Wait for data */
         if( poll( &fd, 1, 10 ) ) /* Timeout after 0.01 seconds. Bigger delays are an issue when used with/as an input-slave since all the inputs run in the same thread. */
         {
+            if( errno == EINTR )
+                continue;
             if( fd.revents & (POLLIN|POLLPRI) )
             {
                 p_block = GrabAudio( p_demux );
@@ -305,7 +307,7 @@ static block_t* GrabAudio( demux_t *p_demux )
     if( !p_block )
     {
         msg_Warn( p_demux, "cannot get block" );
-        return 0;
+        return NULL;
     }
 
     p_sys->p_block = p_block;
@@ -313,10 +315,10 @@ static block_t* GrabAudio( demux_t *p_demux )
     i_read = read( p_sys->i_fd, p_block->p_buffer,
                 p_sys->i_max_frame_size );
 
-    if( i_read <= 0 ) return 0;
+    if( i_read <= 0 ) return NULL;
 
     p_block->i_buffer = i_read;
-    p_sys->p_block = 0;
+    p_sys->p_block = NULL;
 
     /* Correct the date because of kernel buffering */
     i_correct = i_read;
@@ -341,7 +343,7 @@ static int OpenAudioDevOss( demux_t *p_demux )
     int i_fd;
     int i_format;
 
-    i_fd = utf8_open( p_demux->p_sys->psz_device, O_RDONLY | O_NONBLOCK );
+    i_fd = vlc_open( p_demux->p_sys->psz_device, O_RDONLY | O_NONBLOCK );
 
     if( i_fd < 0 )
     {
@@ -417,7 +419,7 @@ static int OpenAudioDev( demux_t *p_demux )
 static bool ProbeAudioDevOss( demux_t *p_demux, const char *psz_device )
 {
     int i_caps;
-    int i_fd = utf8_open( psz_device, O_RDONLY | O_NONBLOCK );
+    int i_fd = vlc_open( psz_device, O_RDONLY | O_NONBLOCK );
 
     if( i_fd < 0 )
     {

@@ -46,15 +46,15 @@ static block_t *DoWork( filter_t *, block_t * );
 vlc_module_begin ()
     set_description( N_("Audio tempo scaler synched with rate") )
     set_shortname( N_("Scaletempo") )
-    set_capability( "audio filter2", 0 )
+    set_capability( "audio filter", 0 )
     set_category( CAT_AUDIO )
     set_subcategory( SUBCAT_AUDIO_AFILTER )
 
-    add_integer_with_range( "scaletempo-stride", 30, 1, 2000, NULL,
+    add_integer_with_range( "scaletempo-stride", 30, 1, 2000,
         N_("Stride Length"), N_("Length in milliseconds to output each stride"), true )
-    add_float_with_range( "scaletempo-overlap", .20, 0.0, 1.0, NULL,
+    add_float_with_range( "scaletempo-overlap", .20, 0.0, 1.0,
         N_("Overlap Length"), N_("Percentage of stride to overlap"), true )
-    add_integer_with_range( "scaletempo-search", 14, 0, 200, NULL,
+    add_integer_with_range( "scaletempo-search", 14, 0, 200,
         N_("Search Length"), N_("Length in milliseconds to search for best overlap position"), true )
 
     set_callbacks( Open, Close )
@@ -425,9 +425,9 @@ static int Open( vlc_object_t *p_this )
              p_sys->bytes_per_sample,
              "fl32" );
 
-    p_sys->ms_stride       = config_GetInt(   p_this, "scaletempo-stride" );
-    p_sys->percent_overlap = config_GetFloat( p_this, "scaletempo-overlap" );
-    p_sys->ms_search       = config_GetInt(   p_this, "scaletempo-search" );
+    p_sys->ms_stride       = var_InheritInteger( p_this, "scaletempo-stride" );
+    p_sys->percent_overlap = var_InheritFloat( p_this, "scaletempo-overlap" );
+    p_sys->ms_search       = var_InheritInteger( p_this, "scaletempo-search" );
 
     msg_Dbg( p_this, "params: %i stride, %.3f overlap, %i search",
              p_sys->ms_stride, p_sys->percent_overlap, p_sys->ms_search );
@@ -495,6 +495,7 @@ static block_t *DoWork( filter_t * p_filter, block_t * p_in_buf )
 
     p_out_buf->i_buffer     = bytes_out;
     p_out_buf->i_nb_samples = bytes_out / p->bytes_per_frame;
+    p_out_buf->i_dts        = p_in_buf->i_dts;
     p_out_buf->i_pts        = p_in_buf->i_pts;
     p_out_buf->i_length     = p_in_buf->i_length;
 

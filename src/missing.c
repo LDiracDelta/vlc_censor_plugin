@@ -32,9 +32,9 @@
 #ifndef ENABLE_HTTPD
 # include <vlc_httpd.h>
 
-char *httpd_ClientIP (const httpd_client_t *cl, char *psz_ip)
+char *httpd_ClientIP (const httpd_client_t *cl, char *psz_ip, int *port)
 {
-    (void) cl; (void) psz_ip;
+    (void) cl; (void) psz_ip; (void) port
     assert (0);
 }
 
@@ -93,9 +93,22 @@ void httpd_HostDelete (httpd_host_t *h)
     assert (0);
 }
 
-httpd_host_t *httpd_HostNew (vlc_object_t *obj, const char *host, int port)
+httpd_host_t *vlc_http_HostNew (vlc_object_t *obj)
 {
-    return httpd_TLSHostNew (obj, host, port, NULL, NULL, NULL, NULL);
+    msg_Err (obj, "HTTP server not compiled-in!");
+    return NULL;
+}
+
+httpd_host_t *vlc_https_HostNew (vlc_object_t *obj)
+{
+    msg_Err (obj, "HTTPS server not compiled-in!");
+    return NULL;
+}
+
+httpd_host_t *vlc_rtsp_HostNew (vlc_object_t *obj)
+{
+    msg_Err (obj, "RTSP server not compiled-in!");
+    return NULL;
 }
 
 void httpd_MsgAdd (httpd_message_t *m, const char *name, const char *fmt, ...)
@@ -123,9 +136,9 @@ httpd_redirect_t *httpd_RedirectNew (httpd_host_t *host,
     assert (0);
 }
 
-char *httpd_ServerIP (const httpd_client_t *client, char *ip)
+char *httpd_ServerIP (const httpd_client_t *client, char *ip, int *port)
 {
-    (void) client; (void) ip;
+    (void) client; (void) ip; (void) port;
     assert (0);
 }
 
@@ -155,16 +168,6 @@ int httpd_StreamSend (httpd_stream_t *stream, uint8_t *data, int count)
 {
     (void) stream; (void) data; (void) count;
     assert (0);
-}
-
-httpd_host_t *httpd_TLSHostNew (vlc_object_t *obj, const char *host, int port,
-                                const char *cert, const char *key,
-                                const char *ca, const char *crl)
-{
-     (void) host; (void) port;
-     (void) cert; (void) key; (void) ca; (void) crl;
-     msg_Err (obj, "VLC httpd support not compiled-in!");
-     return NULL;
 }
 
 int httpd_UrlCatch (httpd_url_t *url, int request, httpd_callback_t cb,
@@ -251,11 +254,9 @@ ssize_t sout_AccessOutWrite (sout_access_out_t *out, block_t *block)
 #undef sout_AnnounceRegisterSDP
 session_descriptor_t *sout_AnnounceRegisterSDP (vlc_object_t *obj,
                                                 const char *sdp,
-                                                const char *dst,
-                                                announce_method_t *method)
+                                                const char *dst)
 {
     msg_Err (obj, "SDP export not compiled-in!");
-    assert (method == NULL);
     return NULL;
 }
 
@@ -270,11 +271,6 @@ encoder_t *sout_EncoderCreate( vlc_object_t *p_this )
 {
     msg_Err (p_this, "Encoding support not compiled-in!");
     return NULL;
-}
-
-void sout_MethodRelease (announce_method_t *method)
-{
-    (void)method;
 }
 
 sout_input_t *sout_MuxAddStream (sout_mux_t *mux, es_format_t *fmt)
@@ -292,7 +288,12 @@ void sout_MuxDeleteStream (sout_mux_t *mux, sout_input_t *input)
     assert (0);
 }
 
-sout_mux_t *sout_MuxNew (sout_instance_t *instance, char *mux,
+int sout_MuxGetStream (sout_mux_t *p_mux, int i_blocks, mtime_t *pi_dts)
+{
+    assert (0);
+}
+
+sout_mux_t *sout_MuxNew (sout_instance_t *instance, const char *mux,
                          sout_access_out_t *out)
 {
     assert (0);
@@ -303,23 +304,14 @@ void sout_MuxSendBuffer (sout_mux_t *mux, sout_input_t *input, block_t *block)
     assert (0);
 }
 
-announce_method_t *sout_SAPMethod (void)
-{
-    return NULL;
-}
-
-void sout_StreamDelete (sout_stream_t *stream)
+void sout_StreamChainDelete (sout_stream_t *p_first, sout_stream_t *p_last)
 {
     assert (0);
 }
 
-sout_stream_t *sout_StreamNew (sout_instance_t *instance, char *chain)
-{
-    assert (0);
-}
-
-void sout_UpdateStatistic (sout_instance_t *instance, sout_statistic_t stat,
-                           int value)
+sout_stream_t *sout_StreamChainNew (sout_instance_t *p_sout, char *psz_chain,
+                                    sout_stream_t *p_next,
+                                    sout_stream_t **pp_last)
 {
     assert (0);
 }
@@ -337,42 +329,146 @@ char *vlc_sdp_Start (vlc_object_t *obj, const char *cfg,
 
 int vlm_Control (vlm_t *vlm, int query, ...)
 {
+    VLC_UNUSED (vlm);
     assert (0);
 }
 
 void vlm_Delete (vlm_t *vlm)
 {
+    VLC_UNUSED (vlm);
     assert (0);
 }
 
 int vlm_ExecuteCommand (vlm_t *vlm, const char *cmd, vlm_message_t **pm)
 {
+    VLC_UNUSED (vlm);
+    VLC_UNUSED (cmd);
+    VLC_UNUSED (pm);
     assert (0);
 }
 
 vlm_message_t *vlm_MessageAdd (vlm_message_t *a, vlm_message_t *b)
 {
+    VLC_UNUSED (a);
+    VLC_UNUSED (b);
     assert (0);
 }
 
 void vlm_MessageDelete (vlm_message_t *m)
 {
+    VLC_UNUSED (m);
     assert (0);
 }
 
 vlm_message_t *vlm_MessageSimpleNew (const char *a)
 {
+    VLC_UNUSED (a);
     return NULL;
 }
 
 vlm_message_t *vlm_MessageNew (const char *a, const char *fmt, ...)
 {
+    VLC_UNUSED (a);
+    VLC_UNUSED (fmt);
     return vlm_MessageSimpleNew (a);
 }
 
-vlm_t *__vlm_New (vlc_object_t *obj)
+#undef vlm_New
+vlm_t *vlm_New (vlc_object_t *obj)
 {
      msg_Err (obj, "VLM not compiled-in!");
      return NULL;
 }
 #endif /* !ENABLE_VLM */
+
+#ifndef MEDIA_LIBRARY
+#include<vlc_media_library.h>
+
+#undef ml_Get
+media_library_t* ml_Get ( vlc_object_t* p_this )
+{
+    VLC_UNUSED( p_this );
+    return NULL;
+}
+
+media_library_t* ml_Create ( vlc_object_t *p_this, char* psz_name )
+{
+    VLC_UNUSED( p_this );
+    VLC_UNUSED( psz_name );
+    return NULL;
+}
+
+void ml_Destroy( vlc_object_t * p_this )
+{
+    VLC_UNUSED( p_this );
+    assert( 0 );
+}
+
+ml_media_t* media_New( media_library_t* p_ml, int id, ml_select_e select, bool reload )
+{
+    VLC_UNUSED( p_ml );
+    VLC_UNUSED( id );
+    VLC_UNUSED( select );
+    VLC_UNUSED( reload );
+    assert( 0 );
+    return NULL;
+}
+
+#undef ml_UpdateSimple
+int ml_UpdateSimple( media_library_t *p_media_library, ml_select_e selected_type,
+                                     const char* psz_lvalue, int id, ... )
+{
+    VLC_UNUSED( p_media_library );
+    VLC_UNUSED( selected_type );
+    VLC_UNUSED( psz_lvalue );
+    VLC_UNUSED( id );
+    assert( 0 );
+    return 0;
+}
+
+ml_ftree_t* ml_OpConnectChilds( ml_op_e op, ml_ftree_t* left, ml_ftree_t* right )
+{
+    VLC_UNUSED( op );
+    VLC_UNUSED( left );
+    VLC_UNUSED( right );
+    assert( 0 );
+    return NULL;
+}
+
+ml_ftree_t* ml_FtreeSpec( ml_ftree_t* tree, ml_select_e crit, int limit,
+                                          char* sort )
+{
+    VLC_UNUSED( tree );
+    VLC_UNUSED( crit );
+    VLC_UNUSED( limit );
+    VLC_UNUSED( sort );
+    assert( 0 );
+    return NULL;
+}
+
+void ml_PlaySmartPlaylistBasedOn( media_library_t* p_ml,
+                                                ml_ftree_t* p_tree )
+{
+    VLC_UNUSED( p_ml );
+    VLC_UNUSED( p_tree );
+    assert( 0 );
+}
+
+void ml_DeletePersonTypeFromMedia( ml_media_t* p_media, const char *psz_role )
+{
+    VLC_UNUSED( p_media );
+    VLC_UNUSED( psz_role );
+    assert( 0 );
+}
+
+ml_person_t*  ml_GetPersonsFromMedia( media_library_t* p_ml,
+                                                    ml_media_t* p_media,
+                                                    const char *psz_role )
+{
+    VLC_UNUSED( p_ml );
+    VLC_UNUSED( p_media );
+    VLC_UNUSED( psz_role );
+    assert( 0 );
+    return NULL;
+}
+#endif /* !MEDIA_LIBRARY */

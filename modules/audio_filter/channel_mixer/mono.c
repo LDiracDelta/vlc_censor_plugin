@@ -49,10 +49,10 @@ static void CloseFilter   ( vlc_object_t * );
 
 static block_t *Convert( filter_t *p_filter, block_t *p_block );
 
-static unsigned int stereo_to_mono( aout_filter_t *, aout_buffer_t *,
+static unsigned int stereo_to_mono( filter_t *, aout_buffer_t *,
                                     aout_buffer_t * );
-static unsigned int mono( aout_filter_t *, aout_buffer_t *, aout_buffer_t * );
-static void stereo2mono_downmix( aout_filter_t *, aout_buffer_t *,
+static unsigned int mono( filter_t *, aout_buffer_t *, aout_buffer_t * );
+static void stereo2mono_downmix( filter_t *, aout_buffer_t *,
                                  aout_buffer_t * );
 
 /*****************************************************************************
@@ -106,17 +106,17 @@ static const uint32_t pi_channels_out[] =
  *****************************************************************************/
 vlc_module_begin ()
     set_description( N_("Audio filter for stereo to mono conversion") )
-    set_capability( "audio filter2", 2 )
+    set_capability( "audio filter", 0 )
     set_category( CAT_AUDIO )
-    set_subcategory( SUBCAT_AUDIO_MISC )
+    set_subcategory( SUBCAT_AUDIO_AFILTER )
     set_callbacks( OpenFilter, CloseFilter )
     set_shortname( "Mono" )
 
-    add_bool( MONO_CFG "downmix", true, NULL, MONO_DOWNMIX_TEXT,
+    add_bool( MONO_CFG "downmix", true, MONO_DOWNMIX_TEXT,
               MONO_DOWNMIX_LONGTEXT, false )
-    add_integer( MONO_CFG "channel", -1, NULL, MONO_CHANNEL_TEXT,
+    add_integer( MONO_CFG "channel", -1, MONO_CHANNEL_TEXT,
         MONO_CHANNEL_LONGTEXT, false )
-        change_integer_list( pi_pos_values, ppsz_pos_descriptions, NULL )
+        change_integer_list( pi_pos_values, ppsz_pos_descriptions )
 
 vlc_module_end ()
 
@@ -205,7 +205,7 @@ static int Init( vlc_object_t *p_this, struct filter_sys_t * p_data,
                  unsigned int i_nb_channels, uint32_t i_physical_channels,
                  unsigned int i_rate )
 {
-    double d_x = config_GetInt( p_this, "headphone-dim" );
+    double d_x = var_InheritInteger( p_this, "headphone-dim" );
     double d_z = d_x;
     double d_z_rear = -d_x/3;
     double d_min = 0;
@@ -213,7 +213,7 @@ static int Init( vlc_object_t *p_this, struct filter_sys_t * p_data,
     int i_source_channel_offset;
     unsigned int i;
 
-    if( config_GetInt( p_this, "headphone-compensate" ) )
+    if( var_InheritBool( p_this, "headphone-compensate" ) )
     {
         /* minimal distance to any speaker */
         if( i_physical_channels & AOUT_CHAN_REARCENTER )
@@ -453,10 +453,7 @@ static void CloseFilter( vlc_object_t *p_this)
  *****************************************************************************/
 static block_t *Convert( filter_t *p_filter, block_t *p_block )
 {
-    aout_filter_t aout_filter;
-    aout_buffer_t in_buf, out_buf;
-    block_t *p_out = NULL;
-    unsigned int i_samples;
+    block_t *p_out;
     int i_out_size;
 
     if( !p_block || !p_block->i_nb_samples )
@@ -479,19 +476,6 @@ static block_t *Convert( filter_t *p_filter, block_t *p_block )
     p_out->i_nb_samples =
                   (p_block->i_nb_samples / p_filter->p_sys->i_nb_channels) *
                        aout_FormatNbChannels( &(p_filter->fmt_out.audio) );
-    p_out->i_dts = p_block->i_dts;
-    p_out->i_pts = p_block->i_pts;
-    p_out->i_length = p_block->i_length;
-
-    aout_filter.p_sys = (struct aout_filter_sys_t *)p_filter->p_sys;
-    aout_filter.fmt_in.audio = p_filter->fmt_in.audio;
-    aout_filter.fmt_in.audio.i_format = p_filter->fmt_in.i_codec;
-    aout_filter.fmt_out.audio = p_filter->fmt_out.audio;
-    aout_filter.fmt_out.audio.i_format = p_filter->fmt_out.i_codec;
-
-    in_buf.p_buffer = p_block->p_buffer;
-    in_buf.i_buffer = p_block->i_buffer;
-    in_buf.i_nb_samples = p_block->i_nb_samples;
 
 #if 0
     unsigned int i_in_size = in_buf.i_nb_samples  * (p_filter->p_sys->i_bitspersample/8) *
@@ -503,23 +487,16 @@ static block_t *Convert( filter_t *p_filter, block_t *p_block )
     }
 #endif
 
-    out_buf.p_buffer = p_out->p_buffer;
-    out_buf.i_buffer = p_out->i_buffer;
-    out_buf.i_nb_samples = p_out->i_nb_samples;
-
     memset( p_out->p_buffer, 0, i_out_size );
     if( p_filter->p_sys->b_downmix )
     {
-        stereo2mono_downmix( &aout_filter, &in_buf, &out_buf );
-        i_samples = mono( &aout_filter, &out_buf, &in_buf );
+        stereo2mono_downmix( p_filter, p_block, p_out );
+        mono( p_filter, p_out, p_block );
     }
     else
     {
-        i_samples = stereo_to_mono( &aout_filter, &out_buf, &in_buf );
+        stereo_to_mono( p_filter, p_out, p_block );
     }
-
-    p_out->i_buffer = out_buf.i_buffer;
-    p_out->i_nb_samples = out_buf.i_nb_samples;
 
     block_Release( p_block );
     return p_out;
@@ -530,7 +507,7 @@ static block_t *Convert( filter_t *p_filter, block_t *p_block )
  * converted from float into int16_t based downmix
  * Written by Boris Dorès <babal@via.ecp.fr>
  */
-static void stereo2mono_downmix( aout_filter_t * p_filter,
+static void stereo2mono_downmix( filter_t * p_filter,
                             aout_buffer_t * p_in_buf, aout_buffer_t * p_out_buf )
 {
     filter_sys_t *p_sys = (filter_sys_t *)p_filter->p_sys;
@@ -633,7 +610,7 @@ static void stereo2mono_downmix( aout_filter_t * p_filter,
 }
 
 /* Simple stereo to mono mixing. */
-static unsigned int mono( aout_filter_t *p_filter,
+static unsigned int mono( filter_t *p_filter,
                           aout_buffer_t *p_output, aout_buffer_t *p_input )
 {
     filter_sys_t *p_sys = (filter_sys_t *)p_filter->p_sys;
@@ -653,7 +630,7 @@ static unsigned int mono( aout_filter_t *p_filter,
 }
 
 /* Simple stereo to mono mixing. */
-static unsigned int stereo_to_mono( aout_filter_t *p_filter,
+static unsigned int stereo_to_mono( filter_t *p_filter,
                                     aout_buffer_t *p_output, aout_buffer_t *p_input )
 {
     filter_sys_t *p_sys = (filter_sys_t *)p_filter->p_sys;

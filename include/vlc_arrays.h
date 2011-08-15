@@ -48,7 +48,7 @@ static inline void *realloc_down( void *ptr, size_t size )
 #define INSERT_ELEM( p_ar, i_oldsize, i_pos, elem )                           \
     do                                                                        \
     {                                                                         \
-        if( !i_oldsize ) (p_ar) = NULL;                                       \
+        if( !(i_oldsize) ) (p_ar) = NULL;                                       \
         (p_ar) = VLCCVP realloc( p_ar, ((i_oldsize) + 1) * sizeof(*(p_ar)) ); \
         if( !(p_ar) ) abort();                                                \
         if( (i_oldsize) - (i_pos) )                                           \
@@ -56,7 +56,7 @@ static inline void *realloc_down( void *ptr, size_t size )
             memmove( (p_ar) + (i_pos) + 1, (p_ar) + (i_pos),                  \
                      ((i_oldsize) - (i_pos)) * sizeof( *(p_ar) ) );           \
         }                                                                     \
-        (p_ar)[i_pos] = elem;                                                 \
+        (p_ar)[(i_pos)] = elem;                                                 \
         (i_oldsize)++;                                                        \
     }                                                                         \
     while( 0 )
@@ -616,5 +616,21 @@ vlc_dictionary_remove_value_for_key( const vlc_dictionary_t * p_dict, const char
 
     /* No key was found */
 }
+
+#ifdef __cplusplus
+// C++ helpers
+template <typename T>
+void vlc_delete_all( T &container )
+{
+    typename T::iterator it = container.begin();
+    while ( it != container.end() )
+    {
+        delete *it;
+        ++it;
+    }
+    container.clear();
+}
+
+#endif
 
 #endif

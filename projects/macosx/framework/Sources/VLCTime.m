@@ -22,7 +22,7 @@
  * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston MA 02110-1301, USA.
  *****************************************************************************/
 
-#import <VLCTime.h>
+#import "VLCTime.h"
 
 @implementation VLCTime
 /* Factories */
@@ -39,7 +39,7 @@
     return [[[VLCTime alloc] initWithNumber:aNumber] autorelease];
 }
 
-+ (VLCTime *)timeWithInt:(int)aInt
++ (VLCTime *)timeWithInt:(NSInteger)aInt
 {
     return [[[VLCTime alloc] initWithInt:aInt] autorelease];
 }
@@ -50,7 +50,7 @@
     if (self = [super init])
     {
         if (aNumber)
-            value = [[aNumber copy] retain];
+            value = [aNumber copy];
         else
             value = nil;
     }
@@ -96,7 +96,7 @@
 {
     if (value)
     {
-        long long duration = [value longLongValue] / 1000000;
+        long long duration = [value longLongValue] / 1000;
         long long positiveDuration = llabs(duration);
         if( positiveDuration > 3600 )
             return [NSString stringWithFormat:@"%s%01d:%02d:%02d",
@@ -114,6 +114,32 @@
     {
         // Return a string that represents an undefined time.
         return @"--:--";
+    }
+}
+
+- (NSString *)verboseStringValue
+{
+    if (value)
+    {
+        long long duration = [value longLongValue] / 1000;
+        long long positiveDuration = llabs(duration);
+        long hours = positiveDuration / 3600;
+        long mins = (positiveDuration / 60) % 60;
+        long seconds = positiveDuration % 60;
+        const char * remaining = duration < 0 ? " remaining" : "";
+        if (hours > 0)
+            return [NSString stringWithFormat:@"%d hours %d minutes%s", hours, mins, remaining];
+        else if (mins > 5)
+            return [NSString stringWithFormat:@"%d minutes%s", mins, remaining];
+        else if (mins > 0)
+            return [NSString stringWithFormat:@"%d minutes %d seconds%s", mins, seconds, remaining];
+        else
+            return [NSString stringWithFormat:@"%d seconds%s", seconds, remaining];
+    }
+    else
+    {
+        // Return a string that represents an undefined time.
+        return @"";
     }
 }
 

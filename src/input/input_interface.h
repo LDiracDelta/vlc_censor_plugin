@@ -21,12 +21,8 @@
  * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston MA 02110-1301, USA.
  *****************************************************************************/
 
-#if defined(__PLUGIN__) || defined(__BUILTIN__) || !defined(__LIBVLC__)
-# error This header file can only be included from LibVLC.
-#endif
-
-#ifndef _INPUT_INTERFACE_H
-#define _INPUT_INTERFACE_H 1
+#ifndef LIBVLC_INPUT_INTERFACE_H
+#define LIBVLC_INPUT_INTERFACE_H 1
 
 #include <vlc_input.h>
 #include <libvlc.h>
@@ -50,11 +46,6 @@ input_stats_t *stats_NewInputStats( input_thread_t *p_input );
  * This function deletes the current sout in the resources.
  */
 void input_resource_TerminateSout( input_resource_t *p_resource );
-
-/**
- * This function deletes the current vout in the resources.
- */
-void input_resource_TerminateVout( input_resource_t *p_resource );
 
 /**
  * This function return true if there is at least one vout in the resources.

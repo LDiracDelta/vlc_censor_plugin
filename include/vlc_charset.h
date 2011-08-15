@@ -2,7 +2,7 @@
  * charset.h: Unicode UTF-8 wrappers function
  *****************************************************************************
  * Copyright (C) 2003-2005 the VideoLAN team
- * Copyright © 2005-2006 Rémi Denis-Courmont
+ * Copyright © 2005-2010 Rémi Denis-Courmont
  * $Id$
  *
  * Author: Rémi Denis-Courmont <rem # videolan,org>
@@ -30,44 +30,29 @@
  * This files handles locale conversions in vlc
  */
 
+/* iconv wrappers (defined in src/extras/libc.c) */
+typedef void *vlc_iconv_t;
+VLC_API vlc_iconv_t vlc_iconv_open( const char *, const char * ) VLC_USED;
+VLC_API size_t vlc_iconv( vlc_iconv_t, const char **, size_t *, char **, size_t * ) VLC_USED;
+VLC_API int vlc_iconv_close( vlc_iconv_t );
+
 #include <stdarg.h>
-#include <sys/types.h>
-#include <dirent.h>
 
-VLC_EXPORT( void, LocaleFree, ( const char * ) );
-VLC_EXPORT( char *, FromLocale, ( const char * ) LIBVLC_USED );
-VLC_EXPORT( char *, FromLocaleDup, ( const char * ) LIBVLC_USED );
-VLC_EXPORT( char *, ToLocale, ( const char * ) LIBVLC_USED );
-VLC_EXPORT( char *, ToLocaleDup, ( const char * ) LIBVLC_USED );
+VLC_API void LocaleFree( const char * );
+VLC_API char * FromLocale( const char * ) VLC_USED;
+VLC_API char * FromLocaleDup( const char * ) VLC_USED;
+VLC_API char * ToLocale( const char * ) VLC_USED;
+VLC_API char * ToLocaleDup( const char * ) VLC_USED;
 
-/* TODO: move all of this to "vlc_fs.h" or something like that */
-VLC_EXPORT( int, utf8_open, ( const char *filename, int flags, ... ) LIBVLC_USED );
-VLC_EXPORT( FILE *, utf8_fopen, ( const char *filename, const char *mode ) LIBVLC_USED );
-VLC_EXPORT( DIR *, utf8_opendir, ( const char *dirname ) LIBVLC_USED );
-VLC_EXPORT( char *, utf8_readdir, ( DIR *dir ) LIBVLC_USED );
-VLC_EXPORT( int, utf8_loaddir, ( DIR *dir, char ***namelist, int (*select)( const char * ), int (*compar)( const char **, const char ** ) ) );
-VLC_EXPORT( int, utf8_scandir, ( const char *dirname, char ***namelist, int (*select)( const char * ), int (*compar)( const char **, const char ** ) ) );
-VLC_EXPORT( int, utf8_mkdir, ( const char *filename, mode_t mode ) );
-VLC_EXPORT( int, utf8_unlink, ( const char *filename ) );
-int utf8_rename( const char *, const char * );
+VLC_API int utf8_vfprintf( FILE *stream, const char *fmt, va_list ap );
+VLC_API int utf8_fprintf( FILE *, const char *, ... ) VLC_FORMAT( 2, 3 );
+VLC_API char * vlc_strcasestr(const char *, const char *) VLC_USED;
 
-#if defined( WIN32 ) && !defined( UNDER_CE )
-# define stat _stati64
-#endif
-
-VLC_EXPORT( int, utf8_stat, ( const char *filename, struct stat *buf ) );
-VLC_EXPORT( int, utf8_lstat, ( const char *filename, struct stat *buf ) );
-
-VLC_EXPORT( int, utf8_vfprintf, ( FILE *stream, const char *fmt, va_list ap ) );
-VLC_EXPORT( int, utf8_fprintf, ( FILE *, const char *, ... ) LIBVLC_FORMAT( 2, 3 ) );
-
-VLC_EXPORT( int, utf8_mkstemp, ( char * ) );
-
-VLC_EXPORT( char *, EnsureUTF8, ( char * ) );
-VLC_EXPORT( const char *, IsUTF8, ( const char * ) LIBVLC_USED );
+VLC_API char * EnsureUTF8( char * );
+VLC_API const char * IsUTF8( const char * ) VLC_USED;
 
 #ifdef WIN32
-LIBVLC_USED
+VLC_USED
 static inline char *FromWide (const wchar_t *wide)
 {
     size_t len = WideCharToMultiByte (CP_UTF8, 0, wide, -1, NULL, 0, NULL, NULL);
@@ -76,8 +61,22 @@ static inline char *FromWide (const wchar_t *wide)
 
     char *out = (char *)malloc (len);
 
-    if (out)
+    if (likely(out))
         WideCharToMultiByte (CP_UTF8, 0, wide, -1, out, len, NULL, NULL);
+    return out;
+}
+
+VLC_USED
+static inline wchar_t *ToWide (const char *utf8)
+{
+    int len = MultiByteToWideChar (CP_UTF8, 0, utf8, -1, NULL, 0);
+    if (len == 0)
+        return NULL;
+
+    wchar_t *out = (wchar_t *)malloc (len * sizeof (wchar_t));
+
+    if (likely(out))
+        MultiByteToWideChar (CP_UTF8, 0, utf8, -1, out, len);
     return out;
 }
 #endif
@@ -109,11 +108,13 @@ static inline char *FromLatin1 (const char *latin)
     return utf8 ? utf8 : str;
 }
 
-VLC_EXPORT( const char *, GetFallbackEncoding, ( void ) LIBVLC_USED );
+VLC_API char * FromCharset( const char *charset, const void *data, size_t data_size ) VLC_USED;
+VLC_API void * ToCharset( const char *charset, const char *in, size_t *outsize ) VLC_USED;
 
-VLC_EXPORT( double, us_strtod, ( const char *, char ** ) LIBVLC_USED );
-VLC_EXPORT( float, us_strtof, ( const char *, char ** ) LIBVLC_USED );
-VLC_EXPORT( double, us_atof, ( const char * ) LIBVLC_USED );
-VLC_EXPORT( int, us_asprintf, ( char **, const char *, ... ) LIBVLC_USED );
+VLC_API double us_strtod( const char *, char ** ) VLC_USED;
+VLC_API float us_strtof( const char *, char ** ) VLC_USED;
+VLC_API double us_atof( const char * ) VLC_USED;
+VLC_API int us_vasprintf( char **, const char *, va_list );
+VLC_API int us_asprintf( char **, const char *, ... ) VLC_USED;
 
 #endif

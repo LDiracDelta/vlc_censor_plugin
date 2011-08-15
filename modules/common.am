@@ -6,22 +6,21 @@
 # Authors: Sam Hocevar <sam@zoy.org>
 
 NULL =
-SUFFIXES =
-libvlcdir = $(vlclibdir)/$(basedir)
+libvlcdir = $(vlclibdir)/plugins/$(basedir)
 EXTRA_DIST = Modules.am
 BUILT_SOURCES =
 CLEANFILES = $(BUILT_SOURCES)
 
 LTLIBVLCCORE = $(top_builddir)/src/libvlccore.la
 
+AM_CPPFLAGS = -D__PLUGIN__
 AM_CFLAGS = `$(VLC_CONFIG) --cflags plugin $@`
 AM_CXXFLAGS = `$(VLC_CONFIG) --cxxflags plugin $@`
 AM_OBJCFLAGS = `$(VLC_CONFIG) --objcflags plugin $@`
 AM_LDFLAGS = -rpath '$(libvlcdir)' \
 	-avoid-version -module \
-	-export-symbol-regex ^vlc_entry \
+	-export-symbols-regex ^vlc_entry \
 	-shrext $(LIBEXT) \
-	-rpath "$(libvlcdir)" \
 	-no-undefined \
 	 `$(VLC_CONFIG) --ldflags plugin $@`
 AM_LIBADD = `$(VLC_CONFIG) -libs plugin $@` \
@@ -31,10 +30,5 @@ include $(srcdir)/Modules.am
 
 if MAINTAINER_MODE
 $(srcdir)/Makefile.am: $(srcdir)/Modules.am $(top_srcdir)/modules/genmf
-	cd \$(top_srcdir) && \$(SHELL) modules/genmf $(dir)
+	$(AM_V_GEN)cd \$(top_srcdir) && \$(SHELL) modules/genmf $(dir)
 endif
-
-nice:
-	$(top_builddir)/compile
-
-.PHONY: nice

@@ -14,21 +14,25 @@ extra_check_verbose__0 = $(extra_check_verbose_0)
 ###############################################################################
 check_PROGRAMS = \
 	test_libvlc_core \
-	test_libvlc_events \
+	test_libvlc_media \
 	test_libvlc_media_list \
-	test_libvlc_media_list_player \
 	test_libvlc_media_player \
+	test_src_config_chain \
 	test_src_misc_variables \
         $(NULL)
+
+check_SCRIPTS = \
+    modules/lua/telnet.sh
 
 # Disabled test:
 # meta: No suitable test file
 EXTRA_PROGRAMS = \
 	test_libvlc_meta \
+	test_libvlc_media_list_player \
 	$(NULL)
 
 #check_DATA = samples/test.sample samples/meta.sample
-EXTRA_DIST = samples/empty.voc
+EXTRA_DIST = samples/empty.voc samples/image.jpg $(check_SCRIPTS)
 
 check_HEADERS = libvlc/test.h libvlc/libvlc_additions.h
 
@@ -55,10 +59,10 @@ test_libvlc_core_LDADD = $(top_builddir)/src/libvlc.la
 test_libvlc_core_CFLAGS = $(CFLAGS_tests)
 test_libvlc_core_LDFLAGS = $(LDFLAGS_tests)
 
-test_libvlc_events_SOURCES = libvlc/events.c
-test_libvlc_events_LDADD = $(top_builddir)/src/libvlc.la
-test_libvlc_events_CFLAGS = $(CFLAGS_tests)
-test_libvlc_events_LDFLAGS = $(LDFLAGS_tests)
+test_libvlc_media_SOURCES = libvlc/media.c
+test_libvlc_media_LDADD = $(top_builddir)/src/libvlc.la
+test_libvlc_media_CFLAGS = $(CFLAGS_tests)
+test_libvlc_media_LDFLAGS = $(LDFLAGS_tests)
 
 test_libvlc_media_list_player_SOURCES = libvlc/media_list_player.c
 test_libvlc_media_list_player_LDADD = $(top_builddir)/src/libvlc.la
@@ -84,6 +88,11 @@ test_src_misc_variables_SOURCES = src/misc/variables.c
 test_src_misc_variables_LDADD = $(top_builddir)/src/libvlc.la
 test_src_misc_variables_CFLAGS = $(CFLAGS_tests)
 test_src_misc_variables_LDFLAGS = $(LDFLAGS_tests)
+
+test_src_config_chain_SOURCES = src/config/chain.c
+test_src_config_chain_LDADD = $(top_builddir)/src/libvlc.la
+test_src_config_chain_CFLAGS = $(CFLAGS_tests)
+test_src_config_chain_LDFLAGS = $(LDFLAGS_tests)
 
 checkall:
 	$(MAKE) check_PROGRAMS="$(check_PROGRAMS) $(EXTRA_PROGRAMS)" check

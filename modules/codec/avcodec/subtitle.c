@@ -32,7 +32,6 @@
 #include <vlc_common.h>
 #include <vlc_codec.h>
 #include <vlc_avcodec.h>
-#include <vlc_osd.h>
 
 /* ffmpeg header */
 #ifdef HAVE_LIBAVCODEC_AVCODEC_H
@@ -40,8 +39,6 @@
 #   ifdef HAVE_AVCODEC_VAAPI
 #       include <libavcodec/vaapi.h>
 #   endif
-#elif defined(HAVE_FFMPEG_AVCODEC_H)
-#   include <ffmpeg/avcodec.h>
 #else
 #   include <avcodec.h>
 #endif
@@ -51,7 +48,7 @@
 #if LIBAVCODEC_VERSION_INT >= AV_VERSION_INT( 52, 25, 0 )
 
 struct decoder_sys_t {
-    FFMPEG_COMMON_MEMBERS
+    AVCODEC_COMMON_MEMBERS
 };
 
 static subpicture_t *ConvertSubtitle(decoder_t *, AVSubtitle *, mtime_t pts);
@@ -65,12 +62,22 @@ int InitSubtitleDec(decoder_t *dec, AVCodecContext *context,
     decoder_sys_t *sys;
 
     /* */
+    switch (codec_id) {
+    case CODEC_ID_HDMV_PGS_SUBTITLE:
+    case CODEC_ID_XSUB:
+        break;
+    default:
+        msg_Warn(dec, "refusing to decode non validated subtitle codec");
+        return VLC_EGENERIC;
+    }
+
+    /* */
     dec->p_sys = sys = malloc(sizeof(*sys));
     if (!sys)
         return VLC_ENOMEM;
 
-    codec->type = CODEC_TYPE_SUBTITLE;
-    context->codec_type = CODEC_TYPE_SUBTITLE;
+    codec->type = AVMEDIA_TYPE_SUBTITLE;
+    context->codec_type = AVMEDIA_TYPE_SUBTITLE;
     context->codec_id = codec_id;
     sys->p_context = context;
     sys->p_codec = codec;
@@ -183,11 +190,12 @@ void EndSubtitleDec(decoder_t *dec)
  */
 static subpicture_region_t *ConvertRegionRGBA(AVSubtitleRect *ffregion)
 {
-    video_format_t fmt;
+    if (ffregion->w <= 0 || ffregion->h <= 0)
+        return NULL;
 
+    video_format_t fmt;
     memset(&fmt, 0, sizeof(fmt));
     fmt.i_chroma         = VLC_FOURCC('R','G','B','A');
-    fmt.i_aspect         = 0;
     fmt.i_width          =
     fmt.i_visible_width  = ffregion->w;
     fmt.i_height         =
@@ -229,7 +237,7 @@ static subpicture_region_t *ConvertRegionRGBA(AVSubtitleRect *ffregion)
  */
 static subpicture_t *ConvertSubtitle(decoder_t *dec, AVSubtitle *ffsub, mtime_t pts)
 {
-    subpicture_t *spu = decoder_NewSubpicture(dec);
+    subpicture_t *spu = decoder_NewSubpicture(dec, NULL);
     if (!spu)
         return NULL;
 
@@ -249,10 +257,10 @@ static subpicture_t *ConvertSubtitle(decoder_t *dec, AVSubtitle *ffsub, mtime_t 
     for (unsigned i = 0; i < ffsub->num_rects; i++) {
         AVSubtitleRect *rec = ffsub->rects[i];
 
-        msg_Err(dec, "SUBS RECT[%d]: %dx%d @%dx%d",
-                 i, rec->w, rec->h, rec->x, rec->y);
+        //msg_Err(dec, "SUBS RECT[%d]: %dx%d @%dx%d",
+        //         i, rec->w, rec->h, rec->x, rec->y);
 
-        subpicture_region_t *region;
+        subpicture_region_t *region = NULL;
         switch (ffsub->format) {
         case 0:
             region = ConvertRegionRGBA(rec);
@@ -266,13 +274,11 @@ static subpicture_t *ConvertSubtitle(decoder_t *dec, AVSubtitle *ffsub, mtime_t 
             *region_next = region;
             region_next = &region->p_next;
         }
-        /* Free AVSubtitleRect
-         * FIXME isn't there an avcodec function ? */
-        free(rec->pict.data[0]); /* Plane */
-        free(rec->pict.data[1]); /* Palette */
-        free(rec);
+        /* Free AVSubtitleRect */
+        avpicture_free(&rec->pict);
+        av_free(rec);
     }
-    free(ffsub->rects);
+    av_free(ffsub->rects);
 
     return spu;
 }

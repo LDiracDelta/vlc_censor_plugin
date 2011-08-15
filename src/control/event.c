@@ -1,7 +1,7 @@
 /*****************************************************************************
  * event.c: New libvlc event control API
  *****************************************************************************
- * Copyright (C) 2007 the VideoLAN team
+ * Copyright (C) 2007-2010 the VideoLAN team
  * $Id $
  *
  * Authors: Filippo Carone <filippo@carone.org>
@@ -32,6 +32,7 @@
 #include "libvlc_internal.h"
 #include "event_internal.h"
 #include <assert.h>
+#include <errno.h>
 
 typedef struct libvlc_event_listeners_group_t
 {
@@ -67,15 +68,13 @@ group_contains_listener( libvlc_event_listeners_group_t * group,
  * Init an object's event manager.
  **************************************************************************/
 libvlc_event_manager_t *
-libvlc_event_manager_new( void * p_obj, libvlc_instance_t * p_libvlc_inst,
-                           libvlc_exception_t *p_e )
+libvlc_event_manager_new( void * p_obj, libvlc_instance_t * p_libvlc_inst )
 {
     libvlc_event_manager_t * p_em;
 
     p_em = malloc(sizeof( libvlc_event_manager_t ));
     if( !p_em )
     {
-        libvlc_exception_raise( p_e );
         libvlc_printerr( "Not enough memory" );
         return NULL;
     }
@@ -129,18 +128,10 @@ void libvlc_event_manager_release( libvlc_event_manager_t * p_em )
  **************************************************************************/
 void libvlc_event_manager_register_event_type(
         libvlc_event_manager_t * p_em,
-        libvlc_event_type_t event_type,
-        libvlc_exception_t * p_e )
+        libvlc_event_type_t event_type )
 {
     libvlc_event_listeners_group_t * listeners_group;
-    listeners_group = malloc(sizeof(libvlc_event_listeners_group_t));
-    if( !listeners_group )
-    {
-        libvlc_exception_raise( p_e );
-        libvlc_printerr( "Not enough memory" );
-        return;
-    }
-
+    listeners_group = xmalloc(sizeof(libvlc_event_listeners_group_t));
     listeners_group->event_type = event_type;
     vlc_array_init( &listeners_group->listeners );
 
@@ -221,10 +212,10 @@ void libvlc_event_send( libvlc_event_manager_t * p_em,
         else
         {
             /* The listener wants to block the emitter during event callback */
-            
+
             listener_cached->pf_callback( p_event, listener_cached->p_user_data );
             listener_cached++;
-            
+
             if( listeners_group->b_sublistener_removed )
             {
                 /* If a callback was removed, this gets called */
@@ -237,7 +228,7 @@ void libvlc_event_send( libvlc_event_manager_t * p_em,
                     listener_cached++;
                     continue;
                 }
-            }            
+            }
         }
     }
     vlc_mutex_unlock( &p_em->event_sending_lock );
@@ -249,25 +240,83 @@ void libvlc_event_send( libvlc_event_manager_t * p_em,
  * Public libvlc functions
  */
 
-/**************************************************************************
- *       libvlc_event_type_name (public) :
- *
- * Get the char * name of an event type.
- **************************************************************************/
-static const char event_type_to_name[][libvlc_num_event_types] =
+#define DEF( a ) { libvlc_##a, #a, },
+
+typedef struct
 {
-#define DEF(a) [libvlc_##a]=#a
-    DEFINE_LIBVLC_EVENT_TYPES
-#undef  DEF
+    int type;
+    const char name[40];
+} event_name_t;
+
+static const event_name_t event_list[] = {
+    DEF(MediaMetaChanged)
+    DEF(MediaSubItemAdded)
+    DEF(MediaDurationChanged)
+    DEF(MediaParsedChanged)
+    DEF(MediaFreed)
+    DEF(MediaStateChanged)
+
+    DEF(MediaPlayerMediaChanged)
+    DEF(MediaPlayerNothingSpecial)
+    DEF(MediaPlayerOpening)
+    DEF(MediaPlayerBuffering)
+    DEF(MediaPlayerPlaying)
+    DEF(MediaPlayerPaused)
+    DEF(MediaPlayerStopped)
+    DEF(MediaPlayerForward)
+    DEF(MediaPlayerBackward)
+    DEF(MediaPlayerEndReached)
+    DEF(MediaPlayerEncounteredError)
+    DEF(MediaPlayerTimeChanged)
+    DEF(MediaPlayerPositionChanged)
+    DEF(MediaPlayerSeekableChanged)
+    DEF(MediaPlayerPausableChanged)
+    DEF(MediaPlayerTitleChanged)
+    DEF(MediaPlayerSnapshotTaken)
+    DEF(MediaPlayerLengthChanged)
+
+    DEF(MediaListItemAdded)
+    DEF(MediaListWillAddItem)
+    DEF(MediaListItemDeleted)
+    DEF(MediaListWillDeleteItem)
+
+    DEF(MediaListViewItemAdded)
+    DEF(MediaListViewWillAddItem)
+    DEF(MediaListViewItemDeleted)
+    DEF(MediaListViewWillDeleteItem)
+
+    DEF(MediaListPlayerPlayed)
+    DEF(MediaListPlayerNextItemSet)
+    DEF(MediaListPlayerStopped)
+
+    DEF(MediaDiscovererStarted)
+    DEF(MediaDiscovererEnded)
+
+    DEF(VlmMediaAdded)
+    DEF(VlmMediaRemoved)
+    DEF(VlmMediaChanged)
+    DEF(VlmMediaInstanceStarted)
+    DEF(VlmMediaInstanceStopped)
+    DEF(VlmMediaInstanceStatusInit)
+    DEF(VlmMediaInstanceStatusOpening)
 };
+#undef DEF
 
 static const char unknown_event_name[] = "Unknown Event";
 
-const char * libvlc_event_type_name( libvlc_event_type_t event_type )
+static int evcmp( const void *a, const void *b )
 {
-    if( event_type >= libvlc_num_event_types )
-        return unknown_event_name;
-    return event_type_to_name[event_type];
+    return (*(const int *)a) - ((event_name_t *)b)->type;
+}
+
+const char * libvlc_event_type_name( int event_type )
+{
+    const event_name_t *p;
+
+    p = bsearch( &event_type, event_list,
+                 sizeof(event_list)/sizeof(event_list[0]), sizeof(*p),
+                 evcmp );
+    return p ? p->name : unknown_event_name;
 }
 
 /**************************************************************************
@@ -276,30 +325,24 @@ const char * libvlc_event_type_name( libvlc_event_type_t event_type )
  * Add a callback for an event.
  **************************************************************************/
 static
-void event_attach( libvlc_event_manager_t * p_event_manager,
-                         libvlc_event_type_t event_type,
-                         libvlc_callback_t pf_callback,
-                         void *p_user_data,
-                         bool is_asynchronous,
-                         libvlc_exception_t *p_e )
+int event_attach( libvlc_event_manager_t * p_event_manager,
+                  libvlc_event_type_t event_type,
+                  libvlc_callback_t pf_callback, void *p_user_data,
+                  bool is_asynchronous )
 {
     libvlc_event_listeners_group_t * listeners_group;
     libvlc_event_listener_t * listener;
     int i;
-    
+
     listener = malloc(sizeof(libvlc_event_listener_t));
-    if( !listener )
-    {
-        libvlc_exception_raise( p_e );
-        libvlc_printerr( "Not enough memory" );
-        return;
-    }
-    
+    if( unlikely(listener == NULL) )
+        return ENOMEM;
+
     listener->event_type = event_type;
     listener->p_user_data = p_user_data;
     listener->pf_callback = pf_callback;
     listener->is_asynchronous = is_asynchronous;
-    
+
     vlc_mutex_lock( &p_event_manager->object_lock );
     for( i = 0; i < vlc_array_count(&p_event_manager->listeners_groups); i++ )
     {
@@ -308,15 +351,16 @@ void event_attach( libvlc_event_manager_t * p_event_manager,
         {
             vlc_array_append( &listeners_group->listeners, listener );
             vlc_mutex_unlock( &p_event_manager->object_lock );
-            return;
+            return 0;
         }
     }
     vlc_mutex_unlock( &p_event_manager->object_lock );
-    
+
     free(listener);
     fprintf( stderr, "This object event manager doesn't know about '%s' events",
              libvlc_event_type_name(event_type) );
     assert(0);
+    return -1;
 }
 
 /**************************************************************************
@@ -324,13 +368,13 @@ void event_attach( libvlc_event_manager_t * p_event_manager,
  *
  * Add a callback for an event.
  **************************************************************************/
-void libvlc_event_attach( libvlc_event_manager_t * p_event_manager,
+int libvlc_event_attach( libvlc_event_manager_t * p_event_manager,
                          libvlc_event_type_t event_type,
                          libvlc_callback_t pf_callback,
-                         void *p_user_data,
-                         libvlc_exception_t *p_e )
+                         void *p_user_data )
 {
-    event_attach(p_event_manager, event_type, pf_callback, p_user_data, false /* synchronous */, p_e);
+    return event_attach(p_event_manager, event_type, pf_callback, p_user_data,
+                        false /* synchronous */);
 }
 
 /**************************************************************************
@@ -341,10 +385,10 @@ void libvlc_event_attach( libvlc_event_manager_t * p_event_manager,
 void libvlc_event_attach_async( libvlc_event_manager_t * p_event_manager,
                          libvlc_event_type_t event_type,
                          libvlc_callback_t pf_callback,
-                         void *p_user_data,
-                         libvlc_exception_t *p_e )
+                         void *p_user_data )
 {
-    event_attach(p_event_manager, event_type, pf_callback, p_user_data, true /* asynchronous */, p_e);
+    event_attach(p_event_manager, event_type, pf_callback, p_user_data,
+                 true /* asynchronous */);
 }
 
 /**************************************************************************
@@ -355,15 +399,13 @@ void libvlc_event_attach_async( libvlc_event_manager_t * p_event_manager,
 void libvlc_event_detach( libvlc_event_manager_t *p_event_manager,
                                      libvlc_event_type_t event_type,
                                      libvlc_callback_t pf_callback,
-                                     void *p_user_data,
-                                     libvlc_exception_t *p_e )
+                                     void *p_user_data )
 {
-    VLC_UNUSED( p_e );
     libvlc_event_listeners_group_t * listeners_group;
     libvlc_event_listener_t * listener;
     int i, j;
     bool found = false;
-    
+
     vlc_mutex_lock( &p_event_manager->event_sending_lock );
     vlc_mutex_lock( &p_event_manager->object_lock );
     for( i = 0; i < vlc_array_count(&p_event_manager->listeners_groups); i++)

@@ -18,11 +18,13 @@
  * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston MA 02110-1301, USA.
  *****************************************************************************/
 
-#if HAVE_CONFIG_H
+#ifdef HAVE_CONFIG_H
 # include <config.h>
 #endif
 
-#if !defined (WIN32) && !defined (SYS_BEOS)
+#define _XPG4_2 /* ancilliary data on Solaris */
+
+#if !defined (WIN32)
 # define ENABLE_ROOTWRAP 1
 #endif
 
@@ -54,6 +56,11 @@ int rootwrap_bind (int, int, int, const struct sockaddr *, size_t);
 #endif
 #ifndef CMSG_LEN
 # define CMSG_LEN(len) (CMSG_ALIGN(sizeof(struct cmsghdr)) + (len))
+#endif
+
+#if defined(__OS2__) && !defined(ALIGN)
+/* CMSG_NXTHDR requires this */
+# define ALIGN(p) _ALIGN(p)
 #endif
 
 /**

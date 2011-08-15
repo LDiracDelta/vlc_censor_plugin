@@ -110,7 +110,7 @@ void ConvertDialog::fileBrowse()
 {
     QString fileName = QFileDialog::getSaveFileName( this, qtr( "Save file..." ),
             "",
- qtr( "Containers (*.ps *.ts *.mpg *.ogg *.asf *.mp4 *.mov *.wav *.raw *.flv)" ) );
+ qtr( "Containers (*.ps *.ts *.mpg *.ogg *.asf *.mp4 *.mov *.wav *.raw *.flv *.webm)" ) );
     fileLine->setText( toNativeSeparators( fileName ) );
 }
 
@@ -135,10 +135,13 @@ void ConvertDialog::close()
             mrl.remove( '}' );
             mrl += ",deinterlace}";
         }
-        mrl += ":duplicate{";
-        if( displayBox->isChecked() ) mrl += "dst=display,";
-        mrl += "dst=std{access=file,mux=" + profile->getMux() +
-            ",dst='" + fileLine->text() + "'}";
+        mrl += ":";
+        if( displayBox->isChecked() )
+            mrl += "duplicate{dst=display,dst=";
+        mrl += "std{access=file,mux=" + profile->getMux()
+             + ",dst='" + fileLine->text() + "'}";
+        if( displayBox->isChecked() )
+            mrl += "}";
     }
 
     msg_Warn( p_intf, "Transcode MRL: %s", qtu( mrl ) );

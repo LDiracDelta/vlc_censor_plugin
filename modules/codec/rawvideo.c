@@ -92,9 +92,13 @@ static int OpenDecoder( vlc_object_t *p_this )
     {
         /* Planar YUV */
         case VLC_CODEC_I444:
+        case VLC_CODEC_J444:
         case VLC_CODEC_I422:
+        case VLC_CODEC_J422:
         case VLC_CODEC_I420:
+        case VLC_CODEC_J420:
         case VLC_CODEC_YV12:
+        case VLC_CODEC_YV9:
         case VLC_CODEC_I411:
         case VLC_CODEC_I410:
         case VLC_CODEC_GREY:
@@ -159,14 +163,21 @@ static int OpenDecoder( vlc_object_t *p_this )
     video_format_Setup( &p_dec->fmt_out.video, p_dec->fmt_in.i_codec,
                         p_dec->fmt_in.video.i_width,
                         p_dec->fmt_in.video.i_height,
-                        p_dec->fmt_in.video.i_aspect );
-    p_sys->i_raw_size = p_dec->fmt_out.video.i_bits_per_pixel *
-        p_dec->fmt_out.video.i_width * p_dec->fmt_out.video.i_height / 8;
+                        p_dec->fmt_in.video.i_sar_num,
+                        p_dec->fmt_in.video.i_sar_den );
+    picture_t picture;
+    picture_Setup( &picture, p_dec->fmt_out.i_codec,
+                   p_dec->fmt_in.video.i_width,
+                   p_dec->fmt_in.video.i_height, 0, 1 );
+    p_sys->i_raw_size = 0;
+    for( int i = 0; i < picture.i_planes; i++ )
+        p_sys->i_raw_size += picture.p[i].i_visible_pitch *
+                             picture.p[i].i_visible_lines;
 
-    if( !p_dec->fmt_in.video.i_aspect )
+    if( !p_dec->fmt_in.video.i_sar_num || !p_dec->fmt_in.video.i_sar_den )
     {
-        p_dec->fmt_out.video.i_aspect = VOUT_ASPECT_FACTOR *
-            p_dec->fmt_out.video.i_width / p_dec->fmt_out.video.i_height;
+        p_dec->fmt_out.video.i_sar_num = 1;
+        p_dec->fmt_out.video.i_sar_den = 1;
     }
 
     /* Set callbacks */
@@ -205,7 +216,8 @@ static void *DecodeBlock( decoder_t *p_dec, block_t **pp_block )
     p_block = *pp_block;
 
 
-    if( !p_block->i_pts && !p_block->i_dts && !date_Get( &p_sys->pts ) )
+    if( p_block->i_pts <= VLC_TS_INVALID && p_block->i_dts <= VLC_TS_INVALID &&
+        !date_Get( &p_sys->pts ) )
     {
         /* We've just started the stream, wait for the first PTS. */
         block_Release( p_block );
@@ -213,11 +225,11 @@ static void *DecodeBlock( decoder_t *p_dec, block_t **pp_block )
     }
 
     /* Date management: If there is a pts avaliable, use that. */
-    if( p_block->i_pts )
+    if( p_block->i_pts > VLC_TS_INVALID )
     {
         date_Set( &p_sys->pts, p_block->i_pts );
     }
-    else if( p_block->i_dts )
+    else if( p_block->i_dts > VLC_TS_INVALID )
     {
         /* NB, davidf doesn't quite agree with this in general, it is ok
          * for rawvideo since it is in order (ie pts=dts), however, it
@@ -332,7 +344,7 @@ static block_t *SendFrame( decoder_t *p_dec, block_t *p_block )
         /* Fill in picture_t fields */
         picture_Setup( &pic, p_dec->fmt_out.i_codec,
                        p_dec->fmt_out.video.i_width,
-                       p_dec->fmt_out.video.i_height, VOUT_ASPECT_FACTOR );
+                       p_dec->fmt_out.video.i_height, 0, 1 );
 
         if( !pic.i_planes )
         {

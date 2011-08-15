@@ -76,23 +76,19 @@ vlc_module_begin ()
     set_category( CAT_INPUT )
     set_subcategory( SUBCAT_INPUT_ACCESS )
 
-    add_integer( "mms-caching", 19 * DEFAULT_PTS_DELAY / 1000, NULL,
+    add_integer( "mms-caching", 19 * DEFAULT_PTS_DELAY / 1000,
                  CACHING_TEXT, CACHING_LONGTEXT, true )
 
-    add_integer( "mms-timeout", 5000, NULL, TIMEOUT_TEXT, TIMEOUT_LONGTEXT,
+    add_integer( "mms-timeout", 5000, TIMEOUT_TEXT, TIMEOUT_LONGTEXT,
                  true )
 
-    add_bool( "mms-all", false, NULL, ALL_TEXT, ALL_LONGTEXT, true )
-    add_integer( "mms-maxbitrate", 0, NULL, BITRATE_TEXT, BITRATE_LONGTEXT ,
+    add_bool( "mms-all", false, ALL_TEXT, ALL_LONGTEXT, true )
+    add_integer( "mms-maxbitrate", 0, BITRATE_TEXT, BITRATE_LONGTEXT ,
                  false )
-    add_string( "mmsh-proxy", NULL, NULL, PROXY_TEXT, PROXY_LONGTEXT,
+    add_string( "mmsh-proxy", NULL, PROXY_TEXT, PROXY_LONGTEXT,
                     false )
 
-    add_shortcut( "mms" )
-    add_shortcut( "mmsu" )
-    add_shortcut( "mmst" )
-    add_shortcut( "mmsh" )
-    add_shortcut( "http" )
+    add_shortcut( "mms", "mmsu", "mmst", "mmsh", "http" )
     set_callbacks( Open, Close )
 vlc_module_end ()
 
@@ -110,10 +106,6 @@ struct access_sys_t
 static int Open( vlc_object_t *p_this )
 {
     access_t *p_access = (access_t*)p_this;
-
-    /* First set ipv4/ipv6 */
-    var_Create( p_access, "ipv4", VLC_VAR_BOOL | VLC_VAR_DOINHERIT );
-    var_Create( p_access, "ipv6", VLC_VAR_BOOL | VLC_VAR_DOINHERIT );
 
     /* mms-caching */
     var_Create( p_access, "mms-caching", VLC_VAR_INTEGER | VLC_VAR_DOINHERIT );

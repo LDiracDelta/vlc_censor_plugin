@@ -213,8 +213,10 @@ static int InitVideo(decoder_t *p_dec)
 
     int  i_vide = p_dec->fmt_in.i_extra;
     unsigned int *p_vide = p_dec->fmt_in.p_extra;
-    decoder_sys_t *p_sys = malloc( sizeof( decoder_sys_t ) );
-    memset(p_sys,0,sizeof( decoder_sys_t ) );
+    decoder_sys_t *p_sys = calloc( 1, sizeof( decoder_sys_t ) );
+
+    if( !p_sys )
+        return VLC_ENOMEM;
 
     if( i_vide < 8 )
     {
@@ -353,7 +355,8 @@ static int InitVideo(decoder_t *p_dec)
      
     p_dec->fmt_out.video.i_width = p_dec->fmt_in.video.i_width;
     p_dec->fmt_out.video.i_height= p_dec->fmt_in.video.i_height;
-    p_dec->fmt_out.video.i_aspect = VOUT_ASPECT_FACTOR * p_dec->fmt_in.video.i_width / p_dec->fmt_in.video.i_height;
+    p_dec->fmt_out.video.i_sar_num = 1;
+    p_dec->fmt_out.video.i_sar_den = 1;
     p_sys->inited = 0;
 
     vlc_mutex_unlock( &rm_mutex );
@@ -369,9 +372,6 @@ static int InitVideo(decoder_t *p_dec)
 static int Open( vlc_object_t *p_this )
 {
     decoder_t *p_dec = (decoder_t*)p_this;
-
-    /* create a mutex */
-    var_Create( p_this->p_libvlc, "rm_mutex", VLC_VAR_MUTEX );
 
     switch ( p_dec->fmt_in.i_codec )
     {
@@ -454,7 +454,7 @@ static picture_t *DecodeVideo( decoder_t *p_dec, block_t **pp_block )
     p_block = *pp_block;
     *pp_block = NULL;
 
-    i_pts = p_block->i_pts ? p_block->i_pts : p_block->i_dts;
+    i_pts = (p_block->i_pts > VLC_TS_INVALID) ? p_block->i_pts : p_block->i_dts;
 
     vlc_mutex_lock( &rm_mutex );
 
@@ -525,7 +525,8 @@ static picture_t *DecodeVideo( decoder_t *p_dec, block_t **pp_block )
                     p_dec->fmt_out.video.i_visible_height = 
                     p_dec->fmt_in.video.i_height= transform_out[4];
 
-                    p_dec->fmt_out.video.i_aspect = VOUT_ASPECT_FACTOR * p_dec->fmt_in.video.i_width / p_dec->fmt_in.video.i_height;
+                    p_dec->fmt_out.video.i_sar_num = 1;
+                    p_dec->fmt_out.video.i_sar_den = 1;
                 }
                 else
                 {

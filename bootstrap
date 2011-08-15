@@ -31,21 +31,16 @@ cd "$(dirname "$0")"
 ACLOCAL_ARGS="-I m4 ${ACLOCAL_ARGS}"
 
 # Check for contrib directory
-if test -d extras/contrib/bin; then
-  PATH="`pwd`/extras/contrib/bin:$PATH"
-  if test -d extras/contrib/share/aclocal; then
-    ACLOCAL_ARGS="${ACLOCAL_ARGS} -I extras/contrib/share/aclocal"
+if test -d extras/contrib/build/bin; then
+  PATH="`pwd`/extras/contrib/build/bin:$PATH"
+  if test -d extras/contrib/build/share/aclocal; then
+    ACLOCAL_ARGS="${ACLOCAL_ARGS} -I extras/contrib/build/share/aclocal"
   fi
   if test ".`uname -s`" = ".Darwin"; then
-    LD_LIBRARY_PATH=./extras/contrib/lib:$LD_LIBRARY_PATH
-    DYLD_LIBRARY_PATH=./extras/contrib/lib:$DYLD_LIBRARY_PATH
+    LD_LIBRARY_PATH=./extras/contrib/build/lib:$LD_LIBRARY_PATH
+    DYLD_LIBRARY_PATH=./extras/contrib/build/lib:$DYLD_LIBRARY_PATH
     export LD_LIBRARY_PATH
     export DYLD_LIBRARY_PATH
-  elif test ".`uname -s`" = ".BeOS"; then
-    LIBRARY_PATH=./extras/contrib/lib:$LIBRARY_PATH
-    BELIBRARIES=./extras/contrib/lib:$BELIBRARIES
-    export LIBRARY_PATH
-    export BELIBRARIES
   fi
 elif test ".`uname -s`" = ".Darwin"; then
   set +x
@@ -97,7 +92,7 @@ AC_DEFUN([PKG_CHECK_MODULES],[ifelse([\$4], , :, [\$4])])
 EOF
 fi
 
-modules/genmf `sed -ne 's,modules/\(.*\)/Makefile,\1,p' configure.ac`
+sh modules/genmf `sed -ne 's,modules/\(.*\)/Makefile,\1,p' configure.ac`
 
 ###
 ###  classic bootstrap stuff
@@ -118,8 +113,7 @@ mv -f INSTALL.git INSTALL
 ##  files which need to be regenerated
 ##
 rm -f vlc-config.in vlc-config
-rm -f src/misc/modules_builtin.h
-rm -f stamp-builtin stamp-h* mozilla/stamp-pic
+rm -f stamp-h*
 
 # Shut up
 set +x

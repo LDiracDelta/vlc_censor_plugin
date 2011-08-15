@@ -30,15 +30,14 @@
 
 #include <vlc_common.h>
 #include <vlc_demux.h>
-#include <vlc_aout.h>
 #include <vlc_network.h>
 #include <vlc_plugin.h>
-
-#include <vlc_codecs.h>
 
 #include "rtp.h"
 #ifdef HAVE_SRTP
 # include <srtp.h>
+# include <gcrypt.h>
+# include <vlc_gcrypt.h>
 #endif
 
 #define RTP_CACHING_TEXT N_("RTP de-jitter buffer length (msec)")
@@ -77,6 +76,16 @@
     "RTP packets will be discarded if they are too far behind (i.e. in the " \
     "past) by this many packets from the last received packet." )
 
+#define RTP_DYNAMIC_PT_TEXT N_("RTP payload format assumed for dynamic " \
+                               "payloads")
+#define RTP_DYNAMIC_PT_LONGTEXT N_( \
+    "This payload format will be assumed for dynamic payload types " \
+    "(between 96 and 127) if it can't be determined otherwise with " \
+    "out-of-band mappings (SDP)" )
+
+static const char *const dynamic_pt_list[] = { "theora" };
+static const char *const dynamic_pt_list_text[] = { "Theora Encoded Video" };
+
 static int  Open (vlc_object_t *);
 static void Close (vlc_object_t *);
 
@@ -91,37 +100,40 @@ vlc_module_begin ()
     set_capability ("access_demux", 0)
     set_callbacks (Open, Close)
 
-    add_integer ("rtp-caching", 1000, NULL, RTP_CACHING_TEXT,
+    add_integer ("rtp-caching", 1000, RTP_CACHING_TEXT,
                  RTP_CACHING_LONGTEXT, true)
         change_integer_range (0, 65535)
         change_safe ()
-    add_integer ("rtcp-port", 0, NULL, RTCP_PORT_TEXT,
+    add_integer ("rtcp-port", 0, RTCP_PORT_TEXT,
                  RTCP_PORT_LONGTEXT, false)
         change_integer_range (0, 65535)
         change_safe ()
 #ifdef HAVE_SRTP
-    add_string ("srtp-key", "", NULL,
+    add_string ("srtp-key", "",
                 SRTP_KEY_TEXT, SRTP_KEY_LONGTEXT, false)
-    add_string ("srtp-salt", "", NULL,
+        change_safe ()
+    add_string ("srtp-salt", "",
                 SRTP_SALT_TEXT, SRTP_SALT_LONGTEXT, false)
+        change_safe ()
 #endif
-    add_integer ("rtp-max-src", 1, NULL, RTP_MAX_SRC_TEXT,
+    add_integer ("rtp-max-src", 1, RTP_MAX_SRC_TEXT,
                  RTP_MAX_SRC_LONGTEXT, true)
         change_integer_range (1, 255)
-    add_integer ("rtp-timeout", 5, NULL, RTP_TIMEOUT_TEXT,
+    add_integer ("rtp-timeout", 5, RTP_TIMEOUT_TEXT,
                  RTP_TIMEOUT_LONGTEXT, true)
-    add_integer ("rtp-max-dropout", 3000, NULL, RTP_MAX_DROPOUT_TEXT,
+    add_integer ("rtp-max-dropout", 3000, RTP_MAX_DROPOUT_TEXT,
                  RTP_MAX_DROPOUT_LONGTEXT, true)
         change_integer_range (0, 32767)
-    add_integer ("rtp-max-misorder", 100, NULL, RTP_MAX_MISORDER_TEXT,
+    add_integer ("rtp-max-misorder", 100, RTP_MAX_MISORDER_TEXT,
                  RTP_MAX_MISORDER_LONGTEXT, true)
         change_integer_range (0, 32767)
+    add_string ("rtp-dynamic-pt", NULL, RTP_DYNAMIC_PT_TEXT,
+                RTP_DYNAMIC_PT_LONGTEXT, true)
+        change_string_list (dynamic_pt_list, dynamic_pt_list_text, NULL)
 
-    add_shortcut ("dccp")
     /*add_shortcut ("sctp")*/
-    add_shortcut ("rtptcp") /* "tcp" is already taken :( */
-    add_shortcut ("rtp")
-    add_shortcut ("udplite")
+    add_shortcut ("dccp", "rtptcp", /* "tcp" is already taken :( */
+                  "rtp", "udplite")
 vlc_module_end ()
 
 /*
@@ -169,18 +181,27 @@ static int Open (vlc_object_t *obj)
     else
         return VLC_EGENERIC;
 
-    char *tmp = strdup (demux->psz_path);
-    char *shost = tmp;
-    if (shost == NULL)
+    char *tmp = strdup (demux->psz_location);
+    if (tmp == NULL)
         return VLC_ENOMEM;
 
-    char *dhost = strchr (shost, '@');
-    if (dhost)
-        *dhost++ = '\0';
+    char *shost;
+    char *dhost = strchr (tmp, '@');
+    if (dhost != NULL)
+    {
+        *(dhost++) = '\0';
+        shost = tmp;
+    }
+    else
+    {
+        dhost = tmp;
+        shost = NULL;
+    }
 
     /* Parses the port numbers */
     int sport = 0, dport = 0;
-    sport = extract_port (&shost);
+    if (shost != NULL)
+        sport = extract_port (&shost);
     if (dhost != NULL)
         dport = extract_port (&dhost);
     if (dport == 0)
@@ -213,14 +234,14 @@ static int Open (vlc_object_t *obj)
 #ifdef SOCK_DCCP
             var_Create (obj, "dccp-service", VLC_VAR_STRING);
             var_SetString (obj, "dccp-service", "RTPV"); /* FIXME: RTPA? */
-            fd = net_Connect (obj, shost, sport, SOCK_DCCP, tp);
+            fd = net_Connect (obj, dhost, dport, SOCK_DCCP, tp);
 #else
             msg_Err (obj, "DCCP support not included");
 #endif
             break;
 
         case IPPROTO_TCP:
-            fd = net_Connect (obj, shost, sport, SOCK_STREAM, tp);
+            fd = net_Connect (obj, dhost, dport, SOCK_STREAM, tp);
             break;
     }
 
@@ -239,7 +260,6 @@ static int Open (vlc_object_t *obj)
         return VLC_EGENERIC;
     }
 
-    vlc_mutex_init (&p_sys->lock);
 #ifdef HAVE_SRTP
     p_sys->srtp         = NULL;
 #endif
@@ -247,10 +267,12 @@ static int Open (vlc_object_t *obj)
     p_sys->rtcp_fd      = rtcp_fd;
     p_sys->caching      = var_CreateGetInteger (obj, "rtp-caching");
     p_sys->max_src      = var_CreateGetInteger (obj, "rtp-max-src");
-    p_sys->timeout      = var_CreateGetInteger (obj, "rtp-timeout");
+    p_sys->timeout      = var_CreateGetInteger (obj, "rtp-timeout")
+                        * CLOCK_FREQ;
     p_sys->max_dropout  = var_CreateGetInteger (obj, "rtp-max-dropout");
     p_sys->max_misorder = var_CreateGetInteger (obj, "rtp-max-misorder");
-    p_sys->framed_rtp   = (tp == IPPROTO_TCP);
+    p_sys->thread_ready = false;
+    p_sys->autodetect   = true;
 
     demux->pf_demux   = NULL;
     demux->pf_control = Control;
@@ -264,6 +286,7 @@ static int Open (vlc_object_t *obj)
     char *key = var_CreateGetNonEmptyString (demux, "srtp-key");
     if (key)
     {
+        vlc_gcrypt_init ();
         p_sys->srtp = srtp_create (SRTP_ENCR_AES_CM, SRTP_AUTH_HMAC_SHA1, 10,
                                    SRTP_PRF_AES_CM, SRTP_RCC_MODE1);
         if (p_sys->srtp == NULL)
@@ -284,8 +307,9 @@ static int Open (vlc_object_t *obj)
     }
 #endif
 
-    if (vlc_clone (&p_sys->thread, rtp_thread, demux,
-                   VLC_THREAD_PRIORITY_INPUT))
+    if (vlc_clone (&p_sys->thread,
+                   (tp != IPPROTO_TCP) ? rtp_dgram_thread : rtp_stream_thread,
+                   demux, VLC_THREAD_PRIORITY_INPUT))
         goto error;
     p_sys->thread_ready = true;
     return VLC_SUCCESS;
@@ -309,7 +333,6 @@ static void Close (vlc_object_t *obj)
         vlc_cancel (p_sys->thread);
         vlc_join (p_sys->thread, NULL);
     }
-    vlc_mutex_destroy (&p_sys->lock);
 
 #ifdef HAVE_SRTP
     if (p_sys->srtp)
@@ -401,30 +424,29 @@ static int Control (demux_t *demux, int i_query, va_list args)
  * Generic packet handlers
  */
 
-static void *codec_init (demux_t *demux, es_format_t *fmt)
+void *codec_init (demux_t *demux, es_format_t *fmt)
 {
     return es_out_Add (demux->out, fmt);
 }
 
-static void codec_destroy (demux_t *demux, void *data)
+void codec_destroy (demux_t *demux, void *data)
 {
     if (data)
         es_out_Del (demux->out, (es_out_id_t *)data);
 }
 
 /* Send a packet to decoder */
-static void codec_decode (demux_t *demux, void *data, block_t *block)
+void codec_decode (demux_t *demux, void *data, block_t *block)
 {
     if (data)
     {
-        block->i_dts = 0; /* RTP does not specify this */
+        block->i_dts = VLC_TS_INVALID; /* RTP does not specify this */
         es_out_Control (demux->out, ES_OUT_SET_PCR, block->i_pts );
         es_out_Send (demux->out, (es_out_id_t *)data, block);
     }
     else
         block_Release (block);
 }
-
 
 static void *stream_init (demux_t *demux, const char *name)
 {
@@ -446,6 +468,11 @@ static void stream_decode (demux_t *demux, void *data, block_t *block)
     else
         block_Release (block);
     (void)demux;
+}
+
+static void *demux_init (demux_t *demux)
+{
+    return stream_init (demux, demux->psz_demux);
 }
 
 /*
@@ -673,7 +700,44 @@ int rtp_autodetect (demux_t *demux, rtp_session_t *session,
         break;
 
       default:
-        return -1;
+        /*
+         * If the rtp payload type is unknown then check demux if it is specified
+         */
+        if ((strcmp(demux->psz_demux, "h264") == 0) || (strcmp(demux->psz_demux, "ts") == 0))
+        {
+          msg_Dbg (demux, "rtp autodetect specified demux=%s", demux->psz_demux);
+          pt.init = demux_init;
+          pt.destroy = stream_destroy;
+          pt.decode = stream_decode;
+          pt.frequency = 90000;
+          break;
+        }
+        else if (ptype >= 96)
+        {
+            char *dynamic = var_InheritString(demux, "rtp-dynamic-pt");
+            if (dynamic == NULL)
+                return -1;
+            else if (!strcmp(dynamic, "theora"))
+            {
+                msg_Dbg (demux, "assuming Theora Encoded Video");
+                pt.init = theora_init;
+                pt.destroy = xiph_destroy;
+                pt.decode = xiph_decode;
+                pt.frequency = 90000;
+            }
+            else
+            {
+                msg_Err (demux, "invalid dynamic payload format `%s' "
+                                "specified", dynamic);
+                free(dynamic);
+                return -1;
+            }
+            free(dynamic);
+        }
+        else
+        {
+          return -1;
+        }
     }
     rtp_add_type (demux, session, &pt);
     return 0;
@@ -681,5 +745,5 @@ int rtp_autodetect (demux_t *demux, rtp_session_t *session,
 
 /*
  * Dynamic payload type handlers
- * Hmm, none implemented yet.
+ * Hmm, none implemented yet apart from Xiph ones.
  */

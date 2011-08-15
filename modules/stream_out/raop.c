@@ -39,9 +39,11 @@
 #include <vlc_network.h>
 #include <vlc_strings.h>
 #include <vlc_charset.h>
+#include <vlc_fs.h>
 #include <vlc_gcrypt.h>
 #include <vlc_es.h>
 #include <vlc_http.h>
+#include <vlc_memory.h>
 
 #define RAOP_PORT 5000
 #define RAOP_USER_AGENT "VLC " VERSION
@@ -162,13 +164,13 @@ vlc_module_begin();
     add_shortcut( "raop" )
     set_category( CAT_SOUT )
     set_subcategory( SUBCAT_SOUT_STREAM )
-    add_string( SOUT_CFG_PREFIX "host", "", NULL,
+    add_string( SOUT_CFG_PREFIX "host", "",
                 HOST_TEXT, HOST_LONGTEXT, false )
-    add_password( SOUT_CFG_PREFIX "password", NULL, NULL,
+    add_password( SOUT_CFG_PREFIX "password", NULL,
                   PASSWORD_TEXT, PASSWORD_LONGTEXT, false )
-    add_file( SOUT_CFG_PREFIX "password-file", NULL, NULL,
+    add_loadfile( SOUT_CFG_PREFIX "password-file", NULL,
               PASSWORD_FILE_TEXT, PASSWORD_FILE_LONGTEXT, false )
-    add_integer_with_range( SOUT_CFG_PREFIX "volume", 100, 0, 255, NULL,
+    add_integer_with_range( SOUT_CFG_PREFIX "volume", 100, 0, 255,
                             VOLUME_TEXT, VOLUME_LONGTEXT, false )
     set_callbacks( Open, Close )
 vlc_module_end()
@@ -546,7 +548,7 @@ static char *ReadPasswordFile( vlc_object_t *p_this, const char *psz_path )
     char *psz_newline;
     char ps_buffer[256];
 
-    p_file = utf8_fopen( psz_path, "rt" );
+    p_file = vlc_fopen( psz_path, "rt" );
     if ( p_file == NULL )
     {
         msg_Err( p_this, "Unable to open password file '%s': %m", psz_path );
@@ -575,7 +577,7 @@ static char *ReadPasswordFile( vlc_object_t *p_this, const char *psz_path )
             *psz_newline = '\0';
     }
 
-    if ( strlen( ps_buffer ) == 0 ) {
+    if ( *ps_buffer == '\0' ) {
         msg_Err( p_this, "No password could be read from '%s'", psz_path );
         goto error;
     }
@@ -1299,7 +1301,7 @@ static void SendAudio( sout_stream_t *p_stream, block_t *p_buffer )
             /* Grow in blocks of 4K */
             i_realloc_len = (1 + (i_len / 4096)) * 4096;
 
-            p_sys->p_sendbuf = realloc( p_sys->p_sendbuf, i_realloc_len );
+            p_sys->p_sendbuf = realloc_or_free( p_sys->p_sendbuf, i_realloc_len );
             if ( p_sys->p_sendbuf == NULL )
                 goto error;
 

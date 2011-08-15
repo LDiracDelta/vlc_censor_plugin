@@ -85,6 +85,10 @@ enum es_out_query_e
     /* Set global meta data (The vlc_meta_t is not modified nor released) */
     ES_OUT_SET_META, /* arg1=const vlc_meta_t * */
 
+    /* PCR system clock manipulation for external clock synchronization */
+    ES_OUT_GET_PCR_SYSTEM, /* arg1=mtime_t *, arg2=mtime_t * res=can fail */
+    ES_OUT_MODIFY_PCR_SYSTEM, /* arg1=int is_absolute, arg2=mtime_t, res=can fail */
+
     /* First value usable for private control */
     ES_OUT_PRIVATE_START = 0x10000,
 };
@@ -97,12 +101,10 @@ struct es_out_t
     int          (*pf_control)( es_out_t *, int i_query, va_list );
     void         (*pf_destroy)( es_out_t * );
 
-    bool         b_sout;
-
     es_out_sys_t    *p_sys;
 };
 
-LIBVLC_USED
+VLC_USED
 static inline es_out_id_t * es_out_Add( es_out_t *out, const es_format_t *fmt )
 {
     return out->pf_add( out, fmt );
@@ -143,6 +145,15 @@ static inline void es_out_Delete( es_out_t *p_out )
 static inline int es_out_ControlSetMeta( es_out_t *out, const vlc_meta_t *p_meta )
 {
     return es_out_Control( out, ES_OUT_SET_META, p_meta );
+}
+
+static inline int es_out_ControlGetPcrSystem( es_out_t *out, mtime_t *pi_system, mtime_t *pi_delay )
+{
+    return es_out_Control( out, ES_OUT_GET_PCR_SYSTEM, pi_system, pi_delay );
+}
+static inline int es_out_ControlModifyPcrSystem( es_out_t *out, bool b_absolute, mtime_t i_system )
+{
+    return es_out_Control( out, ES_OUT_MODIFY_PCR_SYSTEM, b_absolute, i_system );
 }
 
 /**

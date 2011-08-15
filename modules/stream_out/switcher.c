@@ -39,7 +39,7 @@
 
 #include <vlc_block.h>
 
-#include <vlc_charset.h>
+#include <vlc_fs.h>
 #include <vlc_network.h>
 
 #define HAVE_MMX
@@ -118,21 +118,21 @@ vlc_module_begin ()
     add_shortcut( "switcher" )
     set_callbacks( Open, Close )
 
-    add_string( SOUT_CFG_PREFIX "files", "", NULL, FILES_TEXT,
+    add_string( SOUT_CFG_PREFIX "files", "", FILES_TEXT,
                 FILES_LONGTEXT, false )
-    add_string( SOUT_CFG_PREFIX "sizes", "", NULL, SIZES_TEXT,
+    add_string( SOUT_CFG_PREFIX "sizes", "", SIZES_TEXT,
                 SIZES_LONGTEXT, false )
-    add_string( SOUT_CFG_PREFIX "aspect-ratio", "4:3", NULL, RATIO_TEXT,
+    add_string( SOUT_CFG_PREFIX "aspect-ratio", "4:3", RATIO_TEXT,
                 RATIO_LONGTEXT, false )
-    add_integer( SOUT_CFG_PREFIX "port", 5001, NULL,
+    add_integer( SOUT_CFG_PREFIX "port", 5001,
                  PORT_TEXT, PORT_LONGTEXT, true )
-    add_integer( SOUT_CFG_PREFIX "command", 0, NULL,
+    add_integer( SOUT_CFG_PREFIX "command", 0,
                  COMMAND_TEXT, COMMAND_LONGTEXT, true )
-    add_integer( SOUT_CFG_PREFIX "gop", 8, NULL,
+    add_integer( SOUT_CFG_PREFIX "gop", 8,
                  GOP_TEXT, GOP_LONGTEXT, true )
-    add_integer( SOUT_CFG_PREFIX "qscale", 5, NULL,
+    add_integer( SOUT_CFG_PREFIX "qscale", 5,
                  QSCALE_TEXT, QSCALE_LONGTEXT, true )
-    add_bool( SOUT_CFG_PREFIX "mute-audio", true, NULL,
+    add_bool( SOUT_CFG_PREFIX "mute-audio", true,
               AUDIO_TEXT, AUDIO_LONGTEXT, true )
 vlc_module_end ()
 
@@ -143,12 +143,11 @@ static const char *const ppsz_sout_options[] = {
 
 struct sout_stream_sys_t
 {
-    sout_stream_t   *p_out;
     int             i_gop;
     int             i_qscale;
     int             i_aspect;
     sout_stream_id_t *pp_audio_ids[MAX_AUDIO];
-    bool      b_audio;
+    bool            b_audio;
 
     /* Pictures */
     picture_t       p_pictures[MAX_PICTURES];
@@ -162,8 +161,8 @@ struct sout_stream_sys_t
 struct sout_stream_id_t
 {
     void            *id;
-    bool      b_switcher_video;
-    bool      b_switcher_audio;
+    bool            b_switcher_video;
+    bool            b_switcher_audio;
     es_format_t     f_src;
     block_t         *p_queued;
 
@@ -191,8 +190,7 @@ static int Open( vlc_object_t *p_this )
     if( !p_sys )
         return VLC_ENOMEM;
 
-    p_sys->p_out = sout_StreamNew( p_stream->p_sout, p_stream->psz_next );
-    if( !p_sys->p_out )
+    if( !p_stream->p_next )
     {
         msg_Err( p_stream, "cannot create chain" );
         free( p_sys );
@@ -306,8 +304,6 @@ static void Close( vlc_object_t * p_this )
     sout_stream_t       *p_stream = (sout_stream_t *)p_this;
     sout_stream_sys_t   *p_sys = p_stream->p_sys;
 
-    sout_StreamDelete( p_sys->p_out );
-
     free( p_sys );
 }
 
@@ -323,9 +319,7 @@ static sout_stream_id_t *Add( sout_stream_t *p_stream, es_format_t *p_fmt )
     if( !id )
         return NULL;
 
-    if( p_fmt->i_cat == VIDEO_ES &&
-        ( p_fmt->i_codec == VLC_CODEC_MPGV ||
-          p_fmt->i_codec == VLC_FOURCC('f', 'a', 'k', 'e') ) )
+    if( p_fmt->i_cat == VIDEO_ES && p_fmt->i_codec == VLC_CODEC_MPGV )
     {
         id->b_switcher_video = true;
         p_fmt->i_codec = VLC_CODEC_MPGV;
@@ -427,7 +421,7 @@ static sout_stream_id_t *Add( sout_stream_t *p_stream, es_format_t *p_fmt )
     memcpy( &id->f_src, p_fmt, sizeof( es_format_t ) );
 
     /* open output stream */
-    id->id = p_sys->p_out->pf_add( p_sys->p_out, p_fmt );
+    id->id = p_stream->p_next->pf_add( p_stream->p_next, p_fmt );
 
     if( id->id != NULL )
         return id;
@@ -475,7 +469,7 @@ static int Del( sout_stream_t *p_stream, sout_stream_id_t *id )
 
     if ( id->id )
     {
-        p_sys->p_out->pf_del( p_sys->p_out, id->id );
+        p_stream->p_next->pf_del( p_stream->p_next, id->id );
     }
     free( id );
 
@@ -498,7 +492,7 @@ static int Send( sout_stream_t *p_stream, sout_stream_id_t *id,
 
     if ( !id->b_switcher_video && !id->b_switcher_audio )
     {
-        return p_sys->p_out->pf_send( p_sys->p_out, id->id, p_buffer );
+        return p_stream->p_next->pf_send( p_stream->p_next, id->id, p_buffer );
     }
 
     block_ChainAppend( &id->p_queued, p_buffer );
@@ -510,7 +504,7 @@ static int Send( sout_stream_t *p_stream, sout_stream_id_t *id,
 
         while ( id->p_queued != NULL )
         {
-            mtime_t i_dts = 0;
+            mtime_t i_dts;
             int i;
 
             if ( p_sys->i_old_cmd != p_sys->i_cmd )
@@ -557,7 +551,7 @@ static mtime_t Process( sout_stream_t *p_stream, sout_stream_id_t *id,
     {
         /* Full forward */
         if ( p_blocks != NULL )
-            p_sys->p_out->pf_send( p_sys->p_out, id->id, p_blocks );
+            p_stream->p_next->pf_send( p_stream->p_next, id->id, p_blocks );
         return i_dts;
     }
 
@@ -594,7 +588,7 @@ static mtime_t Process( sout_stream_t *p_stream, sout_stream_id_t *id,
     }
 
     if ( p_blocks_out != NULL )
-        p_sys->p_out->pf_send( p_sys->p_out, id->id, p_blocks_out );
+        p_stream->p_next->pf_send( p_stream->p_next, id->id, p_blocks_out );
     return i_dts;
 }
 
@@ -606,7 +600,7 @@ static int UnpackFromFile( sout_stream_t *p_stream, const char *psz_file,
                            picture_t *p_pic )
 {
     int i, j;
-    FILE *p_file = utf8_fopen( psz_file, "r" );
+    FILE *p_file = vlc_fopen( psz_file, "r" );
 
     if ( p_file == NULL )
     {
@@ -615,8 +609,7 @@ static int UnpackFromFile( sout_stream_t *p_stream, const char *psz_file,
     }
 
     if( picture_Setup( p_pic, VLC_CODEC_I420,
-                       i_width, i_height,
-                       i_width * VOUT_ASPECT_FACTOR / i_height ) )
+                       i_width, i_height, 1, 1 ) )
     {
         msg_Err( p_stream, "unknown chroma" );
         return -1;

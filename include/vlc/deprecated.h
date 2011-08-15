@@ -27,15 +27,8 @@
 
 /**
  * \file
- * This file defines libvlc depreceated API
+ * This file defines libvlc deprecated API
  */
-
-/**
- * This is the legacy representation of a platform-specific drawable. Because
- * it cannot accomodate a pointer on most 64-bits platforms, it should not be
- * used anymore.
- */
-typedef int libvlc_drawable_t;
 
 # ifdef __cplusplus
 extern "C" {
@@ -44,10 +37,9 @@ extern "C" {
 /*****************************************************************************
  * Playlist (Deprecated)
  *****************************************************************************/
-/** \defgroup libvlc_playlist libvlc_playlist (Deprecated)
+/** \defgroup libvlc_playlist LibVLC playlist (legacy)
  * \ingroup libvlc
- * LibVLC Playlist handling (Deprecated)
- * @deprecated Use media_list
+ * @deprecated Use @ref libvlc_media_list instead.
  * @{
  */
 
@@ -63,10 +55,10 @@ extern "C" {
  *        played
  * \param i_options the number of options to add to the item
  * \param ppsz_options the options to add to the item
- * \param p_e an initialized exception pointer
  */
-VLC_DEPRECATED_API void libvlc_playlist_play( libvlc_instance_t*, int, int,
-                                          char **, libvlc_exception_t * );
+LIBVLC_DEPRECATED void libvlc_playlist_play( libvlc_instance_t *p_instance,
+                                              int i_id, int i_options,
+                                              char **ppsz_options );
 
 /** @}*/
 

@@ -38,6 +38,7 @@
 #include <vlc_block.h>
 #include <vlc_codecs.h>
 #include <vlc_arrays.h>
+#include <vlc_rand.h>
 
 typedef GUID guid_t;
 
@@ -75,23 +76,22 @@ vlc_module_begin ()
     set_shortname( "ASF" )
 
     set_capability( "sout mux", 5 )
-    add_shortcut( "asf" )
-    add_shortcut( "asfh" )
+    add_shortcut( "asf", "asfh" )
     set_callbacks( Open, Close )
 
-    add_string( SOUT_CFG_PREFIX "title", "", NULL, TITLE_TEXT, TITLE_LONGTEXT,
+    add_string( SOUT_CFG_PREFIX "title", "", TITLE_TEXT, TITLE_LONGTEXT,
                                  true )
-    add_string( SOUT_CFG_PREFIX "author",   "", NULL, AUTHOR_TEXT,
+    add_string( SOUT_CFG_PREFIX "author",   "", AUTHOR_TEXT,
                                  AUTHOR_LONGTEXT, true )
-    add_string( SOUT_CFG_PREFIX "copyright","", NULL, COPYRIGHT_TEXT,
+    add_string( SOUT_CFG_PREFIX "copyright","", COPYRIGHT_TEXT,
                                  COPYRIGHT_LONGTEXT, true )
-    add_string( SOUT_CFG_PREFIX "comment",  "", NULL, COMMENT_TEXT,
+    add_string( SOUT_CFG_PREFIX "comment",  "", COMMENT_TEXT,
                                  COMMENT_LONGTEXT, true )
-    add_string( SOUT_CFG_PREFIX "rating",  "", NULL, RATING_TEXT,
+    add_string( SOUT_CFG_PREFIX "rating",  "", RATING_TEXT,
                                  RATING_LONGTEXT, true )
-    add_integer( SOUT_CFG_PREFIX "packet-size", 4096, NULL, PACKETSIZE_TEXT,
+    add_integer( SOUT_CFG_PREFIX "packet-size", 4096, PACKETSIZE_TEXT,
                                  PACKETSIZE_LONGTEXT, true )
-    add_integer( SOUT_CFG_PREFIX "bitrate-override", 0, NULL, BITRATE_TEXT,
+    add_integer( SOUT_CFG_PREFIX "bitrate-override", 0, BITRATE_TEXT,
                                  BITRATE_LONGTEXT, true )
 
 vlc_module_end ()
@@ -161,8 +161,6 @@ struct sout_mux_sys_t
     char            *psz_rating;
 };
 
-static int MuxGetStream( sout_mux_t *, int *pi_stream, mtime_t *pi_dts );
-
 static block_t *asf_header_create( sout_mux_t *, bool );
 static block_t *asf_packet_create( sout_mux_t *, asf_track_t *, block_t * );
 static block_t *asf_stream_end_create( sout_mux_t *);
@@ -192,8 +190,6 @@ static int Open( vlc_object_t *p_this )
 {
     sout_mux_t     *p_mux = (sout_mux_t*)p_this;
     sout_mux_sys_t *p_sys;
-    vlc_value_t    val;
-    int i;
 
     msg_Dbg( p_mux, "asf muxer opened" );
     config_ChainParse( p_mux, SOUT_CFG_PREFIX, ppsz_sout_options, p_mux->p_cfg );
@@ -214,8 +210,8 @@ static int Open( vlc_object_t *p_this )
     p_sys->pk = NULL;
     p_sys->i_pk_used    = 0;
     p_sys->i_pk_frame   = 0;
-    p_sys->i_dts_first  = -1;
-    p_sys->i_dts_last   = 0;
+    p_sys->i_dts_first  =
+    p_sys->i_dts_last   = VLC_TS_INVALID;
     p_sys->i_preroll_time = 2000;
     p_sys->i_bitrate    = 0;
     p_sys->i_bitrate_override = 0;
@@ -223,38 +219,25 @@ static int Open( vlc_object_t *p_this )
     p_sys->p_tracks     = vlc_array_new();
 
     p_sys->b_write_header = true;
-    p_sys->i_packet_size = config_GetInt( p_mux, "sout-asf-packet-size" );
-    p_sys->i_bitrate_override = config_GetInt( p_mux, "sout-asf-bitrate-override" );
+    p_sys->i_packet_size = var_InheritInteger( p_mux, "sout-asf-packet-size" );
+    p_sys->i_bitrate_override = var_InheritInteger( p_mux, "sout-asf-bitrate-override" );
     msg_Dbg( p_mux, "Packet size %d", p_sys->i_packet_size);
     if (p_sys->i_bitrate_override)
         msg_Dbg( p_mux, "Bitrate override %"PRId64, p_sys->i_bitrate_override);
     p_sys->i_packet_count= 0;
 
     /* Generate a random fid */
-    srand( mdate() & 0xffffffff );
     p_sys->fid.Data1 = 0xbabac001;
-    p_sys->fid.Data2 = ( (uint64_t)rand() << 16 ) / RAND_MAX;
-    p_sys->fid.Data3 = ( (uint64_t)rand() << 16 ) / RAND_MAX;
-    for( i = 0; i < 8; i++ )
-    {
-        p_sys->fid.Data4[i] = ( (uint64_t)rand() << 8 ) / RAND_MAX;
-    }
+    vlc_rand_bytes(&p_sys->fid.Data2, sizeof(p_sys->fid.Data2));
+    vlc_rand_bytes(&p_sys->fid.Data3, sizeof(p_sys->fid.Data3));
+    vlc_rand_bytes(p_sys->fid.Data4, sizeof(p_sys->fid.Data4));
 
     /* Meta data */
-    var_Get( p_mux, SOUT_CFG_PREFIX "title", &val );
-    p_sys->psz_title = val.psz_string;
-
-    var_Get( p_mux, SOUT_CFG_PREFIX "author", &val );
-    p_sys->psz_author = val.psz_string;
-
-    var_Get( p_mux, SOUT_CFG_PREFIX "copyright", &val );
-    p_sys->psz_copyright = val.psz_string;
-
-    var_Get( p_mux, SOUT_CFG_PREFIX "comment", &val );
-    p_sys->psz_comment = val.psz_string;
-
-    var_Get( p_mux, SOUT_CFG_PREFIX "rating", &val );
-    p_sys->psz_rating = val.psz_string;
+    p_sys->psz_title = var_GetString( p_mux, SOUT_CFG_PREFIX "title" );
+    p_sys->psz_author = var_GetString( p_mux, SOUT_CFG_PREFIX "author" );
+    p_sys->psz_copyright = var_GetString( p_mux, SOUT_CFG_PREFIX "copyright" );
+    p_sys->psz_comment = var_GetString( p_mux, SOUT_CFG_PREFIX "comment" );
+    p_sys->psz_rating = var_GetString( p_mux, SOUT_CFG_PREFIX "rating" );
 
     msg_Dbg( p_mux, "meta data: title='%s', author='%s', copyright='%s', "
              "comment='%s', rating='%s'",
@@ -272,7 +255,6 @@ static void Close( vlc_object_t * p_this )
     sout_mux_t     *p_mux = (sout_mux_t*)p_this;
     sout_mux_sys_t *p_sys = p_mux->p_sys;
     block_t  *out;
-    int i;
 
     msg_Dbg( p_mux, "Asf muxer closed" );
 
@@ -295,7 +277,7 @@ static void Close( vlc_object_t * p_this )
     }
 
 
-    for( i = 0; i < vlc_array_count( p_sys->p_tracks ); i++ )
+    for( int i = 0; i < vlc_array_count( p_sys->p_tracks ); i++ )
     {
         asf_track_t *track = (asf_track_t *)vlc_array_item_at_index( p_sys->p_tracks, i );
         free( track->p_extra );
@@ -554,6 +536,7 @@ static int AddStream( sout_mux_t *p_mux, sout_input_t *p_input )
             {
                 tk->psz_name = "Windows Media Video 9";
                 tk->i_fourcc = VLC_FOURCC( 'W', 'M', 'V', '3' );
+                tk->b_extended = true;
             }
             else if( p_input->p_fmt->i_codec == VLC_CODEC_VC1 )
             {
@@ -644,7 +627,8 @@ static int AddStream( sout_mux_t *p_mux, sout_input_t *p_input )
     tk->i_id = vlc_array_index_of_item( p_sys->p_tracks, tk ) + 1;
 
 
-    p_sys->b_write_header = true;
+    if( p_sys->b_asf_http )
+        p_sys->b_write_header = true;
 
     return VLC_SUCCESS;
 }
@@ -677,10 +661,11 @@ static int DelStream( sout_mux_t *p_mux, sout_input_t *p_input )
         }
     }
 
-    vlc_array_remove( p_sys->p_tracks, vlc_array_index_of_item( p_sys->p_tracks, (void *)tk ) );
-
-
-    p_sys->b_write_header = true;
+    if( p_sys->b_asf_http )
+    {
+        vlc_array_remove( p_sys->p_tracks, vlc_array_index_of_item( p_sys->p_tracks, (void *)tk ) );
+        p_sys->b_write_header = true;
+    }
     return VLC_SUCCESS;
 }
 
@@ -705,18 +690,18 @@ static int Mux( sout_mux_t *p_mux )
     {
         sout_input_t  *p_input;
         asf_track_t   *tk;
-        int           i_stream;
         mtime_t       i_dts;
         block_t *data;
         block_t *pk;
 
-        if( MuxGetStream( p_mux, &i_stream, &i_dts ) )
+        int i_stream = sout_MuxGetStream( p_mux, 1, &i_dts );
+        if( i_stream < 0 )
         {
             /* not enough data */
             return VLC_SUCCESS;
         }
 
-        if( p_sys->i_dts_first < 0 )
+        if( p_sys->i_dts_first <= VLC_TS_INVALID )
         {
             p_sys->i_dts_first = i_dts;
         }
@@ -753,43 +738,6 @@ static int Mux( sout_mux_t *p_mux )
             sout_AccessOutWrite( p_mux->p_access, pk );
         }
     }
-
-    return VLC_SUCCESS;
-}
-
-static int MuxGetStream( sout_mux_t *p_mux, int *pi_stream, mtime_t *pi_dts )
-{
-    mtime_t i_dts;
-    int     i_stream;
-    int     i;
-
-    for( i = 0, i_dts = 0, i_stream = -1; i < p_mux->i_nb_inputs; i++ )
-    {
-        sout_input_t  *p_input = p_mux->pp_inputs[i];
-        block_t *p_data;
-
-        if( block_FifoCount( p_input->p_fifo ) <= 0 )
-        {
-            if( p_input->p_fmt->i_cat == AUDIO_ES ||
-                p_input->p_fmt->i_cat == VIDEO_ES )
-            {
-                /* We need that audio+video fifo contain at least 1 packet */
-                return VLC_EGENERIC;
-            }
-            /* SPU */
-            continue;
-        }
-
-        p_data = block_FifoShow( p_input->p_fifo );
-        if( i_stream == -1 || p_data->i_dts < i_dts )
-        {
-            i_stream = i;
-            i_dts    = p_data->i_dts;
-        }
-    }
-
-    *pi_stream = i_stream;
-    *pi_dts = i_dts;
 
     return VLC_SUCCESS;
 }
@@ -868,11 +816,10 @@ static void bo_addle_str16_nosize( bo_t *bo, const char *str )
  ****************************************************************************/
 static void bo_add_guid( bo_t *p_bo, const guid_t *id )
 {
-    int i;
     bo_addle_u32( p_bo, id->Data1 );
     bo_addle_u16( p_bo, id->Data2 );
     bo_addle_u16( p_bo, id->Data3 );
-    for( i = 0; i < 8; i++ )
+    for( int i = 0; i < 8; i++ )
     {
         bo_add_u8( p_bo, id->Data4[i] );
     }
@@ -939,7 +886,7 @@ static block_t *asf_header_create( sout_mux_t *p_mux, bool b_broadcast )
 
     msg_Dbg( p_mux, "Asf muxer creating header" );
 
-    if( p_sys->i_dts_first > 0 )
+    if( p_sys->i_dts_first > VLC_TS_INVALID )
     {
         i_duration = p_sys->i_dts_last - p_sys->i_dts_first;
         if( i_duration < 0 ) i_duration = 0;
@@ -980,10 +927,11 @@ static block_t *asf_header_create( sout_mux_t *p_mux, bool b_broadcast )
     for( i = 0; i < vlc_array_count( p_sys->p_tracks ); i++ )
     {
         const asf_track_t *p_track = vlc_array_item_at_index( p_sys->p_tracks, i );
-        if( p_track->i_cat == VIDEO_ES && p_track->fmt.video.i_aspect != 0 )
+        if( p_track->i_cat == VIDEO_ES &&
+            p_track->fmt.video.i_sar_num != 0 &&
+            p_track->fmt.video.i_sar_den != 0 )
         {
             i_cm_size = 26 + 2 * (16 + 2 * sizeof("AspectRatio?"));
-            break;
         }
         if( p_track->b_extended )
             i_header_ext_size += 88;
@@ -1076,22 +1024,22 @@ static block_t *asf_header_create( sout_mux_t *p_mux, bool b_broadcast )
     /* metadata object (part of header extension) */
     if( i_cm_size )
     {
-        int64_t i_num, i_den;
         unsigned int i_dst_num, i_dst_den;
-        asf_track_t *tk;
-        tk=NULL;
 
+        asf_track_t *tk = NULL;
         for( i = 0; i < vlc_array_count( p_sys->p_tracks ); i++ )
         {
             tk = vlc_array_item_at_index( p_sys->p_tracks, i );
-            if( tk->i_cat == VIDEO_ES ) break;
+            if( tk->i_cat == VIDEO_ES &&
+                tk->fmt.video.i_sar_num != 0 &&
+                tk->fmt.video.i_sar_den != 0 )
+                break;
         }
         assert( tk != NULL );
 
-        i_num = tk->fmt.video.i_aspect *
-            (int64_t)tk->fmt.video.i_height;
-        i_den = VOUT_ASPECT_FACTOR * tk->fmt.video.i_width;
-        vlc_ureduce( &i_dst_num, &i_dst_den, i_num, i_den, 0 );
+        vlc_ureduce( &i_dst_num, &i_dst_den,
+                     tk->fmt.video.i_sar_num,
+                     tk->fmt.video.i_sar_den, 0 );
 
         msg_Dbg( p_mux, "pixel aspect-ratio: %i/%i", i_dst_num, i_dst_den );
 

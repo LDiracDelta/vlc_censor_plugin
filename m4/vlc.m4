@@ -6,63 +6,54 @@ dnl  Macros to add plugins or builtins and handle their flags
 m4_pattern_allow([^PKG_CONFIG(_LIBDIR)?$])
 
 
-AC_DEFUN([VLC_ADD_BUILTINS], [
-  BUILTINS="${BUILTINS} $1"
-])
-
 AC_DEFUN([VLC_ADD_PLUGIN], [
-  PLUGINS="${PLUGINS} $1"
-  AC_SUBST([LTLIB$1], ["lib$1_plugin.la"])
+  m4_foreach_w([element], [$1], [
+    [PLUGINS="${PLUGINS} ]element["]
+    AC_SUBST([LTLIB]element, [lib]element[_plugin.la])
+  ])
 ])
 
 dnl  Special cases: vlc, pics, plugins, save
 AC_DEFUN([VLC_ADD_CPPFLAGS], [
-  for element in [$1]; do
-    eval "CPPFLAGS_${element}="'"$'"{CPPFLAGS_${element}} $2"'"'
-    am_modules_with_cppflags="${am_modules_with_cppflags} ${element}"
-  done
+  m4_foreach_w([element], [$1], [
+    [eval "CPPFLAGS_]element[="'"$'"{CPPFLAGS_]element[} $2"'"']
+    [am_modules_with_cppflags="${am_modules_with_cppflags} ]element["]
+  ])
 ])
 
 AC_DEFUN([VLC_ADD_CFLAGS], [
-  for element in [$1]; do
-    eval "CFLAGS_${element}="'"$'"{CFLAGS_${element}} $2"'"'
-    am_modules_with_cflags="${am_modules_with_cflags} ${element}"
-  done
+  m4_foreach_w([element], [$1], [
+    [eval "CFLAGS_]element[="'"$'"{CFLAGS_]element[} $2"'"']
+    [am_modules_with_cflags="${am_modules_with_cflags} ]element["]
+  ])
 ])
 
 AC_DEFUN([VLC_ADD_CXXFLAGS], [
-  for element in [$1]; do
-    eval "CXXFLAGS_${element}="'"$'"{CXXFLAGS_${element}} $2"'"'
-    am_modules_with_cxxflags="${am_modules_with_cxxflags} ${element}"
-  done
+  m4_foreach_w([element], [$1], [
+    [eval "CXXFLAGS_]element[="'"$'"{CXXFLAGS_]element[} $2"'"']
+    [am_modules_with_cxxflags="${am_modules_with_cxxflags} ]element["]
+  ])
 ])
 
 AC_DEFUN([VLC_ADD_OBJCFLAGS], [
-  for element in [$1]; do
-    eval "OBJCFLAGS_${element}="'"$'"{OBJCFLAGS_${element}} $2"'"'
-    am_modules_with_objcflags="${am_modules_with_objcflags} ${element}"
-  done
+  m4_foreach_w([element], [$1], [
+    [eval "OBJCFLAGS_]element[="'"$'"{OBJCFLAGS_]element[} $2"'"']
+    [am_modules_with_objcflags="${am_modules_with_objcflags} ]element["]
+  ])
 ])
 
 AC_DEFUN([VLC_ADD_LDFLAGS], [
-  for element in [$1]; do
-    eval "LDFLAGS_${element}="'"'"$2 "'$'"{LDFLAGS_${element}} "'"'
-    am_modules_with_ldflags="${am_modules_with_ldflags} ${element}"
-  done
+  m4_foreach_w([element], [$1], [
+    [eval "LDFLAGS_]element[="'"$2 $'"{LDFLAGS_]element[}"'"']
+    [am_modules_with_ldflags="${am_modules_with_ldflags} ]element["]
+  ])
 ])
 
 AC_DEFUN([VLC_ADD_LIBS], [
-  for element in [$1]; do
-    eval "LIBS_${element}="'"'"$2 "'$'"{LIBS_${element}} "'"'
-    am_modules_with_libs="${am_modules_with_libs} ${element}"
-  done
-])
-
-AC_DEFUN([VLC_SET_CFLAGS_WERROR], [
-  for element in [$1]; do
-    eval "CFLAGS_WERROR_${element}="'"'"$2"'"'
-    am_modules_with_werror="${am_modules_with_werror} ${element}"
-  done
+  m4_foreach_w([element], [$1], [
+    [eval "LIBS_]element[="'"'"$2 "'$'"{LIBS_]element[}"'"']
+    [am_modules_with_libs="${am_modules_with_libs} ]element["]
+  ])
 ])
 
 dnl ===========================================================================
@@ -93,22 +84,15 @@ AC_DEFUN([VLC_OUTPUT_VLC_CONFIG_IN], [
 
   AC_MSG_RESULT(configure: creating ./vlc-config.in)
 
-  am_all_modules="`for x in ${am_modules_with_cppflags} ${am_modules_with_cflags} ${am_modules_with_cxxflags} ${am_modules_with_objcflags} ${am_modules_with_ldflags} ${am_modules_with_libs} ${am_modules_with_werror}; do echo $x; done | sort | uniq`"
+  am_all_modules="`for x in ${am_modules_with_cppflags} ${am_modules_with_cflags} ${am_modules_with_cxxflags} ${am_modules_with_objcflags} ${am_modules_with_ldflags} ${am_modules_with_libs}; do echo $x; done | sort | uniq`"
 
   rm -f vlc-config.in
   sed -ne '/#@1@#/q;p' < "${srcdir}/vlc-config.in.in" \
-    | sed -e "s/@gprof@/${enable_gprof}/" \
-          -e "s/@cprof@/${enable_cprof}/" \
+    | sed \
           -e "s/@optim@/${enable_optimizations}/" \
-          -e "s/@debug@/${enable_debug}/" \
-          -e "s/@release@/${enable_release}/" \
           -e "s/@PLUGINS@/${PLUGINS}/" \
           -e "s/@BUILTINS@/${BUILTINS}/" \
           -e "s/@CFLAGS_TUNING@/${CFLAGS_TUNING}/" \
-          -e "s/@CFLAGS_OPTIM_SIZE@/${CFLAGS_OPTIM_SIZE}/" \
-          -e "s/@CFLAGS_OPTIM_SPEED@/${CFLAGS_OPTIM_SPEED}/" \
-          -e "s/@CFLAGS_OPTIM_NODEBUG@/${CFLAGS_OPTIM_NODEBUG}/" \
-          -e "s/@CFLAGS_NOOPTIM@/${CFLAGS_NOOPTIM}/" \
     > vlc-config.in
 
   dnl  Switch/case loop
@@ -123,24 +107,15 @@ AC_DEFUN([VLC_OUTPUT_VLC_CONFIG_IN], [
     fi
     if test "`eval echo @'$'CXXFLAGS_${x}@`" != "@@"; then
       echo "      cxxflags=\"\${cxxflags} `eval echo '$'CXXFLAGS_${x}`\""
-      if test "${x}" != "plugin" -a "${x}" != "builtin"; then
-        echo "      linkage=\"c++\""
-      fi
     fi
     if test "`eval echo @'$'OBJCFLAGS_${x}@`" != "@@"; then
       echo "      objcflags=\"\${objcflags} `eval echo '$'OBJCFLAGS_${x}`\""
-      if test "${x}" != "plugin" -a "${x}" != "builtin"; then
-        echo "      if test \"\${linkage}\" = \"c\"; then linkage=\"objc\"; fi"
-      fi
     fi
     if test "`eval echo @'$'LDFLAGS_${x}@`" != "@@"; then
       echo "      ldflags=\"\${ldflags} `eval echo '$'LDFLAGS_${x}`\""
     fi
     if test "`eval echo @'$'LIBS_${x}@`" != "@@"; then
       echo "      libs=\"\${libs} `eval echo '$'LIBS_${x}`\""
-    fi
-    if test "`eval echo @'$'CFLAGS_WERROR_${x}@`" != "@@"; then
-      echo "      cflags_werror=\"`eval echo '$'CFLAGS_WERROR_${x}`\""
     fi
     echo "    ;;"
   ] done >> vlc-config.in
@@ -159,7 +134,7 @@ AC_DEFUN([VLC_LIBRARY_SUFFIX], [
     darwin*)
       LIBEXT=".dylib"
       ;;
-    *mingw32* | *cygwin* | *wince* | *mingwce*)
+    *mingw32* | *cygwin* | *wince* | *mingwce* | *os2*)
       LIBEXT=".dll"
       ;;
     hpux*)

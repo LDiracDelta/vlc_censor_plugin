@@ -35,6 +35,8 @@
 #include <vlc_plugin.h>
 #include <vlc_codec.h>
 #include <vlc_aout.h>
+#include <vlc_modules.h>
+#include <assert.h>
 
 #include <vlc_block_helper.h>
 
@@ -95,7 +97,7 @@ static int  OpenPacketizer( vlc_object_t * );
 static void CloseDecoder  ( vlc_object_t * );
 static void *DecodeBlock  ( decoder_t *, block_t ** );
 
-static uint8_t       *GetOutBuffer ( decoder_t *, void ** );
+static uint8_t       *GetOutBuffer ( decoder_t *, block_t ** );
 static aout_buffer_t *GetAoutBuffer( decoder_t * );
 static block_t       *GetSoutBuffer( decoder_t * );
 
@@ -148,7 +150,8 @@ static int Open( vlc_object_t *p_this )
     p_sys->b_packetizer = false;
     p_sys->i_state = STATE_NOSYNC;
     date_Set( &p_sys->end_date, 0 );
-    p_sys->bytestream = block_BytestreamInit();
+    block_BytestreamInit( &p_sys->bytestream );
+    p_sys->i_pts = VLC_TS_INVALID;
     p_sys->b_discontinuity = false;
 
     /* Set output properties */
@@ -199,7 +202,7 @@ static void *DecodeBlock( decoder_t *p_dec, block_t **pp_block )
     uint8_t p_header[MAD_BUFFER_GUARD];
     uint32_t i_header;
     uint8_t *p_buf;
-    void *p_out_buffer;
+    block_t *p_out_buffer;
 
     if( !pp_block || !*pp_block ) return NULL;
 
@@ -216,7 +219,7 @@ static void *DecodeBlock( decoder_t *p_dec, block_t **pp_block )
         return NULL;
     }
 
-    if( !date_Get( &p_sys->end_date ) && !(*pp_block)->i_pts )
+    if( !date_Get( &p_sys->end_date ) && (*pp_block)->i_pts <= VLC_TS_INVALID )
     {
         /* We've just started the stream, wait for the first PTS. */
         msg_Dbg( p_dec, "waiting for PTS" );
@@ -254,7 +257,7 @@ static void *DecodeBlock( decoder_t *p_dec, block_t **pp_block )
         case STATE_SYNC:
             /* New frame, set the Presentation Time Stamp */
             p_sys->i_pts = p_sys->bytestream.p_block->i_pts;
-            if( p_sys->i_pts != 0 &&
+            if( p_sys->i_pts > VLC_TS_INVALID &&
                 p_sys->i_pts != date_Get( &p_sys->end_date ) )
             {
                 date_Set( &p_sys->end_date, p_sys->i_pts );
@@ -283,6 +286,8 @@ static void *DecodeBlock( decoder_t *p_dec, block_t **pp_block )
                                             &p_sys->i_frame_length,
                                             &p_sys->i_max_frame_size,
                                             &p_sys->i_layer );
+
+            p_dec->fmt_in.i_profile = p_sys->i_layer;
 
             if( p_sys->i_frame_size == -1 )
             {
@@ -457,11 +462,13 @@ static void *DecodeBlock( decoder_t *p_dec, block_t **pp_block )
 
             /* Copy the whole frame into the buffer. When we reach this point
              * we already know we have enough data available. */
-            block_GetBytes( &p_sys->bytestream, p_buf, p_sys->i_frame_size );
+            block_GetBytes( &p_sys->bytestream,
+                            p_buf, __MIN( (unsigned)p_sys->i_frame_size, p_out_buffer->i_buffer ) );
 
             /* Get beginning of next frame for libmad */
             if( !p_sys->b_packetizer )
             {
+                assert( p_out_buffer->i_buffer >= (unsigned)p_sys->i_frame_size + MAD_BUFFER_GUARD );
                 memcpy( p_buf + p_sys->i_frame_size,
                         p_header, MAD_BUFFER_GUARD );
             }
@@ -470,7 +477,7 @@ static void *DecodeBlock( decoder_t *p_dec, block_t **pp_block )
 
             /* Make sure we don't reuse the same pts twice */
             if( p_sys->i_pts == p_sys->bytestream.p_block->i_pts )
-                p_sys->i_pts = p_sys->bytestream.p_block->i_pts = 0;
+                p_sys->i_pts = p_sys->bytestream.p_block->i_pts = VLC_TS_INVALID;
 
             /* So p_block doesn't get re-added several times */
             *pp_block = block_BytestreamPop( &p_sys->bytestream );
@@ -485,7 +492,7 @@ static void *DecodeBlock( decoder_t *p_dec, block_t **pp_block )
 /*****************************************************************************
  * GetOutBuffer:
  *****************************************************************************/
-static uint8_t *GetOutBuffer( decoder_t *p_dec, void **pp_out_buffer )
+static uint8_t *GetOutBuffer( decoder_t *p_dec, block_t **pp_out_buffer )
 {
     decoder_sys_t *p_sys = p_dec->p_sys;
     uint8_t *p_buf;
@@ -546,7 +553,7 @@ static aout_buffer_t *GetAoutBuffer( decoder_t *p_dec )
     p_sys->b_discontinuity = false;
 
     /* Hack for libmad filter */
-    p_buf->i_buffer = p_sys->i_frame_size + MAD_BUFFER_GUARD;
+    p_buf = block_Realloc( p_buf, 0, p_sys->i_frame_size + MAD_BUFFER_GUARD );
 
     return p_buf;
 }
@@ -626,7 +633,7 @@ static int SyncInfo( uint32_t i_header, unsigned int * pi_channels,
     };
 
     int i_version, i_mode, i_emphasis;
-    bool b_padding, b_mpeg_2_5, b_crc;
+    bool b_padding, b_mpeg_2_5;
     int i_frame_size = 0;
     int i_bitrate_index, i_samplerate_index;
     int i_max_bit_rate;
@@ -634,7 +641,7 @@ static int SyncInfo( uint32_t i_header, unsigned int * pi_channels,
     b_mpeg_2_5  = 1 - ((i_header & 0x100000) >> 20);
     i_version   = 1 - ((i_header & 0x80000) >> 19);
     *pi_layer   = 4 - ((i_header & 0x60000) >> 17);
-    b_crc = !((i_header >> 16) & 0x01);
+    //bool b_crc = !((i_header >> 16) & 0x01);
     i_bitrate_index = (i_header & 0xf000) >> 12;
     i_samplerate_index = (i_header & 0xc00) >> 10;
     b_padding   = (i_header & 0x200) >> 9;

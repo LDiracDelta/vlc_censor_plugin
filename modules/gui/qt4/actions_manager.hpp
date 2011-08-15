@@ -51,6 +51,10 @@ typedef enum actionType_e
     SKIP_BACK_ACTION,
     SKIP_FW_ACTION,
     QUIT_ACTION,
+    RANDOM_ACTION,
+    LOOP_ACTION,
+    INFO_ACTION,
+    OPEN_SUB_ACTION,
 } actionType_e;
 
 class ActionsManager : public QObject
@@ -82,11 +86,13 @@ public slots:
     void AudioUp();
     void AudioDown();
     void play();
+    void record();
+    void skipForward();
+    void skipBackward();
 protected slots:
     void fullscreen();
     void snapshot();
     void playlist();
-    void record();
     void frame();
 
     virtual void doAction( int );

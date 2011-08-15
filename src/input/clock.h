@@ -22,12 +22,8 @@
  * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston MA 02110-1301, USA.
  *****************************************************************************/
 
-#if defined(__PLUGIN__) || defined(__BUILTIN__) || !defined(__LIBVLC__)
-# error This header file can only be included from LibVLC.
-#endif
-
-#ifndef _INPUT_CLOCK_H
-#define _INPUT_CLOCK_H 1
+#ifndef LIBVLC_INPUT_CLOCK_H
+#define LIBVLC_INPUT_CLOCK_H 1
 
 #include <vlc_common.h>
 #include <vlc_input.h> /* FIXME Needed for input_clock_t */
@@ -38,6 +34,7 @@
  * XXX input_clock_GetTS can be called from any threads. All others functions
  * MUST be called from one and only one thread.
  */
+typedef struct input_clock_t input_clock_t;
 
 /**
  * This function creates a new input_clock_t.
@@ -74,21 +71,28 @@ void    input_clock_Reset( input_clock_t * );
 mtime_t input_clock_GetWakeup( input_clock_t * );
 
 /**
- * This functions allows to change the actual reading speed.
+ * This functions allows changing the actual reading speed.
  */
 void    input_clock_ChangeRate( input_clock_t *, int i_rate );
 
 /**
- * This function allows to change the pause status.
+ * This function allows changing the pause status.
  */
 void    input_clock_ChangePause( input_clock_t *, bool b_paused, mtime_t i_date );
 
 /**
- * This function allows to rebase the original system value date.
- * It can be called only imediatly after a input_clock_Update call.
- * FIXME ugly
+ * This function returns the original system value date and the delay for the current
+ * reference point (a valid reference point must have been set).
  */
-void    input_clock_ChangeSystemOrigin( input_clock_t *, mtime_t i_system );
+void    input_clock_GetSystemOrigin( input_clock_t *, mtime_t *pi_system, mtime_t *pi_delay );
+
+/**
+ * This function allows rebasing the original system value date (a valid
+ * reference point must have been set).
+ * When using the absolute mode, it will create a discontinuity unless
+ * called imediatly after a input_clock_Update.
+ */
+void    input_clock_ChangeSystemOrigin( input_clock_t *, bool b_absolute, mtime_t i_system );
 
 /**
  * This function converts a pair of timestamp from stream clock to system clock.
@@ -132,4 +136,3 @@ void input_clock_SetJitter( input_clock_t *,
 mtime_t input_clock_GetJitter( input_clock_t * );
 
 #endif
-

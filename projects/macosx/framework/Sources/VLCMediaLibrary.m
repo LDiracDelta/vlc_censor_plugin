@@ -44,14 +44,10 @@
 {
     if (self = [super init])
     {
-        libvlc_exception_t p_e;
-        libvlc_exception_init( &p_e );
-        mlib = libvlc_media_library_new( [VLCLibrary sharedInstance], &p_e );
-        catch_exception( &p_e );
-        
-        libvlc_media_library_load( mlib, &p_e );
-        catch_exception( &p_e );
-        
+        mlib = libvlc_media_library_new( [VLCLibrary sharedInstance]);
+
+        libvlc_media_library_load( mlib );
+
         allMedia = nil;
     }
     return self;
@@ -60,10 +56,10 @@
 - (void)dealloc
 {
     [allMedia release];
-    
+
     libvlc_media_library_release(mlib);
     mlib = nil;     // make sure that the pointer is dead
-    
+
     [super dealloc];
 }
 
@@ -71,7 +67,7 @@
 {
     if( !allMedia )
     {
-        libvlc_media_list_t * p_mlist = libvlc_media_library_media_list( mlib, NULL );
+        libvlc_media_list_t * p_mlist = libvlc_media_library_media_list( mlib );
         allMedia = [[VLCMediaList mediaListWithLibVLCMediaList:p_mlist] retain];
         libvlc_media_list_release(p_mlist);
     }

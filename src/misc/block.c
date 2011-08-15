@@ -288,7 +288,7 @@ static void block_heap_Release (block_t *self)
  *
  * @param ptr base address of the heap allocation (will be free()'d)
  * @param addr base address of the useful buffer data
- * @param length bytes length of the useful buffer datan
+ * @param length bytes length of the useful buffer data
  * @return NULL in case of error (ptr free()'d in that case), or a valid
  * block_t pointer.
  */
@@ -362,9 +362,10 @@ block_t *block_mmap_Alloc (void *addr, size_t length)
 
 
 #ifdef WIN32
-#ifdef UNDER_CE
-#define _get_osfhandle(a) ((long) (a))
-#endif
+# include <io.h>
+# ifdef UNDER_CE
+#  define _get_osfhandle(a) ((long) (a))
+# endif
 
 static
 ssize_t pread (int fd, void *buf, size_t count, off_t offset)
@@ -381,6 +382,28 @@ ssize_t pread (int fd, void *buf, size_t count, off_t offset)
     if (ReadFile (handle, buf, count, &written, &olap))
         return written;
     return -1;
+}
+#elif !defined( HAVE_PREAD )
+static
+ssize_t pread(int fd, const void * buf, size_t size, off_t offset) {
+    off_t offs0;
+    ssize_t rd;
+    if ((offs0 = lseek(fd, 0, SEEK_CUR)) == (off_t)-1) return -1;
+    if (lseek(fd, offset, SEEK_SET) == (off_t)-1) return -1;
+    rd = read(fd, (void *)buf, size);
+    if (lseek(fd, offs0, SEEK_SET) == (off_t)-1) return -1;
+    return rd;
+}
+
+static
+ssize_t pwrite(int fd, const void * buf, size_t size, off_t offset) {
+    off_t offs0;
+    ssize_t wr;
+    if ((offs0 = lseek(fd, 0, SEEK_CUR)) == (off_t)-1) return -1;
+    if (lseek(fd, offset, SEEK_SET) == (off_t)-1) return -1;
+    wr = write(fd, (void *)buf, size);
+    if (lseek(fd, offs0, SEEK_SET) == (off_t)-1) return -1;
+    return wr;
 }
 #endif
 
@@ -508,23 +531,27 @@ void block_FifoRelease( block_fifo_t *p_fifo )
 
 void block_FifoEmpty( block_fifo_t *p_fifo )
 {
-    block_t *b;
+    block_t *block;
 
     vlc_mutex_lock( &p_fifo->lock );
-    for( b = p_fifo->p_first; b != NULL; )
+    block = p_fifo->p_first;
+    if (block != NULL)
     {
-        block_t *p_next;
-
-        p_next = b->p_next;
-        block_Release( b );
-        b = p_next;
+        p_fifo->i_depth = p_fifo->i_size = 0;
+        p_fifo->p_first = NULL;
+        p_fifo->pp_last = &p_fifo->p_first;
     }
-
-    p_fifo->i_depth = p_fifo->i_size = 0;
-    p_fifo->p_first = NULL;
-    p_fifo->pp_last = &p_fifo->p_first;
     vlc_cond_broadcast( &p_fifo->wait_room );
     vlc_mutex_unlock( &p_fifo->lock );
+
+    while (block != NULL)
+    {
+        block_t *buf;
+
+        buf = block->p_next;
+        block_Release (block);
+        block = buf;
+    }
 }
 
 /**
@@ -562,25 +589,29 @@ void block_FifoPace (block_fifo_t *fifo, size_t max_depth, size_t max_size)
  * Immediately queue one block at the end of a FIFO.
  * @param fifo queue
  * @param block head of a block list to queue (may be NULL)
+ * @return total number of bytes appended to the queue
  */
 size_t block_FifoPut( block_fifo_t *p_fifo, block_t *p_block )
 {
-    size_t i_size = 0;
-    vlc_mutex_lock( &p_fifo->lock );
+    size_t i_size = 0, i_depth = 0;
+    block_t *p_last;
 
-    while (p_block != NULL)
+    if (p_block == NULL)
+        return 0;
+    for (p_last = p_block; ; p_last = p_last->p_next)
     {
-        i_size += p_block->i_buffer;
-
-        *p_fifo->pp_last = p_block;
-        p_fifo->pp_last = &p_block->p_next;
-        p_fifo->i_depth++;
-        p_fifo->i_size += p_block->i_buffer;
-
-        p_block = p_block->p_next;
+        i_size += p_last->i_buffer;
+        i_depth++;
+        if (!p_last->p_next)
+            break;
     }
 
-    /* We queued one block: wake up one read-waiting thread */
+    vlc_mutex_lock (&p_fifo->lock);
+    *p_fifo->pp_last = p_block;
+    p_fifo->pp_last = &p_last->p_next;
+    p_fifo->i_depth += i_depth;
+    p_fifo->i_size += i_size;
+    /* We queued at least one block: wake up one read-waiting thread */
     vlc_cond_signal( &p_fifo->wait );
     vlc_mutex_unlock( &p_fifo->lock );
 
@@ -596,6 +627,12 @@ void block_FifoWake( block_fifo_t *p_fifo )
     vlc_mutex_unlock( &p_fifo->lock );
 }
 
+/**
+ * Dequeue the first block from the FIFO. If necessary, wait until there is
+ * one block in the queue. This function is (always) cancellation point.
+ *
+ * @return a valid block, or NULL if block_FifoWake() was called.
+ */
 block_t *block_FifoGet( block_fifo_t *p_fifo )
 {
     block_t *b;
@@ -638,6 +675,17 @@ block_t *block_FifoGet( block_fifo_t *p_fifo )
     return b;
 }
 
+/**
+ * Peeks the first block in the FIFO.
+ * If necessary, wait until there is one block.
+ * This function is (always) a cancellation point.
+ *
+ * @warning This function leaves the block in the FIFO.
+ * You need to protect against concurrent threads who could dequeue the block.
+ * Preferrably, there should be only one thread reading from the FIFO.
+ *
+ * @return a valid block.
+ */
 block_t *block_FifoShow( block_fifo_t *p_fifo )
 {
     block_t *b;

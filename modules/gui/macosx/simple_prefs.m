@@ -1,7 +1,7 @@
 /*****************************************************************************
 * simple_prefs.m: Simple Preferences for Mac OS X
 *****************************************************************************
-* Copyright (C) 2008-2009 the VideoLAN team
+* Copyright (C) 2008-2011 the VideoLAN team
 * $Id$
 *
 * Authors: Felix Paul Kühne <fkuehne at videolan dot org>
@@ -26,6 +26,7 @@
 #import <vlc_keys.h>
 #import <vlc_interface.h>
 #import <vlc_dialog.h>
+#import <vlc_modules.h>
 #import "misc.h"
 #import "intf.h"
 #import "AppleRemote.h"
@@ -66,6 +67,7 @@ static VLCSimplePrefs *_o_sharedInstance = nil;
 
     [o_hotkeySettings release];
     [o_hotkeyDescriptions release];
+    [o_hotkeyNames release];
     [o_hotkeysNonUseableKeys release];
 
     [o_keyInTransition release];
@@ -73,34 +75,26 @@ static VLCSimplePrefs *_o_sharedInstance = nil;
     [super dealloc];
 }
 
-
-- (NSString *)OSXKeyToString:(int)val
+- (NSString *)OSXStringKeyToString:(NSString *)theString
 {
-    NSMutableString *o_temp_str = [[[NSMutableString alloc] init] autorelease];
-    if( val & KEY_MODIFIER_CTRL )
-        [o_temp_str appendString: [NSString stringWithUTF8String: "\xE2\x8C\x83"]];
-    if( val & KEY_MODIFIER_ALT )
-        [o_temp_str appendString: [NSString stringWithUTF8String: "\xE2\x8C\xA5"]];
-    if( val & KEY_MODIFIER_SHIFT )
-        [o_temp_str appendString: [NSString stringWithUTF8String: "\xE2\x87\xA7"]];
-    if( val & KEY_MODIFIER_COMMAND )
-        [o_temp_str appendString: [NSString stringWithUTF8String: "\xE2\x8C\x98"]];
-
-    char *base = KeyToString( val & ~KEY_MODIFIER );
-    if( base )
-    {
-        [o_temp_str appendString: [NSString stringWithUTF8String: base]];
-        free( base );
+    if (![theString isEqualToString:@""]) {
+        theString = [theString stringByReplacingOccurrencesOfString:@"Command" withString: [NSString stringWithUTF8String: "\xE2\x8C\x98"]];
+        theString = [theString stringByReplacingOccurrencesOfString:@"Alt" withString: [NSString stringWithUTF8String: "\xE2\x8C\xA5"]];
+        theString = [theString stringByReplacingOccurrencesOfString:@"Shift" withString: [NSString stringWithUTF8String: "\xE2\x87\xA7"]];
+        theString = [theString stringByReplacingOccurrencesOfString:@"Ctrl" withString: [NSString stringWithUTF8String: "\xE2\x8C\x83"]];
+        theString = [theString stringByReplacingOccurrencesOfString:@"+" withString:@""];
+        theString = [theString stringByReplacingOccurrencesOfString:@"-" withString:@""];
+        theString = [theString capitalizedString];
     }
     else
-        o_temp_str = [NSMutableString stringWithString:_NS("Not Set")];
-    return o_temp_str;
+        theString = [NSString stringWithString:_NS("Not Set")];
+    return theString;
 }
 
 - (void)awakeFromNib
 {
     [self initStrings];
-    
+
     /* setup the toolbar */
     NSToolbar * o_sprefs_toolbar = [[[NSToolbar alloc] initWithIdentifier: VLCSPrefsToolbarIdentifier] autorelease];
     [o_sprefs_toolbar setAllowsUserCustomization: NO];
@@ -109,42 +103,9 @@ static VLCSimplePrefs *_o_sharedInstance = nil;
     [o_sprefs_toolbar setSizeMode: NSToolbarSizeModeRegular];
     [o_sprefs_toolbar setDelegate: self];
     [o_sprefs_win setToolbar: o_sprefs_toolbar];
-    
+
     /* setup useful stuff */
-    o_hotkeysNonUseableKeys = [[NSArray arrayWithObjects:
-                                [NSNumber numberWithInt: KEY_MODIFIER_COMMAND|'c'],
-                                [NSNumber numberWithInt: KEY_MODIFIER_COMMAND|'x'],
-                                [NSNumber numberWithInt: KEY_MODIFIER_COMMAND|'v'],
-                                [NSNumber numberWithInt: KEY_MODIFIER_COMMAND|'a'],
-                                [NSNumber numberWithInt: KEY_MODIFIER_COMMAND|','],
-                                [NSNumber numberWithInt: KEY_MODIFIER_COMMAND|'h'],
-                                [NSNumber numberWithInt: KEY_MODIFIER_COMMAND|KEY_MODIFIER_ALT|'h'],
-                                [NSNumber numberWithInt: KEY_MODIFIER_COMMAND|KEY_MODIFIER_SHIFT|'o'],
-                                [NSNumber numberWithInt: KEY_MODIFIER_COMMAND|'o'],
-                                [NSNumber numberWithInt: KEY_MODIFIER_COMMAND|'d'],
-                                [NSNumber numberWithInt: KEY_MODIFIER_COMMAND|'n'],
-                                [NSNumber numberWithInt: KEY_MODIFIER_COMMAND|'s'],
-                                [NSNumber numberWithInt: KEY_MODIFIER_COMMAND|'z'],
-                                [NSNumber numberWithInt: KEY_MODIFIER_COMMAND|'l'],
-                                [NSNumber numberWithInt: KEY_MODIFIER_COMMAND|'r'],
-                                [NSNumber numberWithInt: KEY_MODIFIER_COMMAND|'0'],
-                                [NSNumber numberWithInt: KEY_MODIFIER_COMMAND|'1'],
-                                [NSNumber numberWithInt: KEY_MODIFIER_COMMAND|'2'],
-                                [NSNumber numberWithInt: KEY_MODIFIER_COMMAND|'3'],
-                                [NSNumber numberWithInt: KEY_MODIFIER_COMMAND|'m'],
-                                [NSNumber numberWithInt: KEY_MODIFIER_COMMAND|'w'],
-                                [NSNumber numberWithInt: KEY_MODIFIER_COMMAND|KEY_MODIFIER_SHIFT|'w'],
-                                [NSNumber numberWithInt: KEY_MODIFIER_COMMAND|KEY_MODIFIER_SHIFT|'c'],
-                                [NSNumber numberWithInt: KEY_MODIFIER_COMMAND|KEY_MODIFIER_SHIFT|'p'],
-                                [NSNumber numberWithInt: KEY_MODIFIER_COMMAND|'i'],
-                                [NSNumber numberWithInt: KEY_MODIFIER_COMMAND|'e'],
-                                [NSNumber numberWithInt: KEY_MODIFIER_COMMAND|KEY_MODIFIER_SHIFT|'e'],
-                                [NSNumber numberWithInt: KEY_MODIFIER_COMMAND|'b'],
-                                [NSNumber numberWithInt: KEY_MODIFIER_COMMAND|KEY_MODIFIER_SHIFT|'m'],
-                                [NSNumber numberWithInt: KEY_MODIFIER_COMMAND|KEY_MODIFIER_CTRL|'m'],
-                                [NSNumber numberWithInt: KEY_MODIFIER_COMMAND|'?'],
-                                [NSNumber numberWithInt: KEY_MODIFIER_COMMAND|KEY_MODIFIER_ALT|'?'],
-                                nil] retain];
+    o_hotkeysNonUseableKeys = [[NSArray arrayWithObjects: @"Command-c", @"Command-x", @"Command-v", @"Command-a", @"Command-," , @"Command-h", @"Command-Alt-h", @"Command-Shift-o", @"Command-o", @"Command-d", @"Command-n", @"Command-s", @"Command-z", @"Command-l", @"Command-r", @"Command-3", @"Command-m", @"Command-w", @"Command-Shift-w", @"Command-Shift-c", @"Command-Shift-p", @"Command-i", @"Command-e", @"Command-Shift-e", @"Command-b", @"Command-Shift-m", @"Command-Ctrl-m", @"Command-?", @"Command-Alt-?", nil] retain];
 }
 
 #define CreateToolbarItem( o_name, o_desc, o_img, sel ) \
@@ -169,8 +130,8 @@ create_toolbar_item( NSString * o_itemIdent, NSString * o_name, NSString * o_des
     return o_toolbarItem;
 }
 
-- (NSToolbarItem *) toolbar: (NSToolbar *)o_sprefs_toolbar 
-      itemForItemIdentifier: (NSString *)o_itemIdent 
+- (NSToolbarItem *) toolbar: (NSToolbar *)o_sprefs_toolbar
+      itemForItemIdentifier: (NSString *)o_itemIdent
   willBeInsertedIntoToolbar: (BOOL)b_willBeInserted
 {
     NSToolbarItem *o_toolbarItem = nil;
@@ -205,19 +166,19 @@ create_toolbar_item( NSString * o_itemIdent, NSString * o_name, NSString * o_des
 
 - (NSArray *)toolbarDefaultItemIdentifiers: (NSToolbar *)toolbar
 {
-    return [NSArray arrayWithObjects: VLCIntfSettingToolbarIdentifier, VLCAudioSettingToolbarIdentifier, VLCVideoSettingToolbarIdentifier, 
+    return [NSArray arrayWithObjects: VLCIntfSettingToolbarIdentifier, VLCAudioSettingToolbarIdentifier, VLCVideoSettingToolbarIdentifier,
         VLCOSDSettingToolbarIdentifier, VLCInputSettingToolbarIdentifier, VLCHotkeysSettingToolbarIdentifier, NSToolbarFlexibleSpaceItemIdentifier, nil];
 }
 
 - (NSArray *)toolbarAllowedItemIdentifiers: (NSToolbar *)toolbar
 {
-    return [NSArray arrayWithObjects: VLCIntfSettingToolbarIdentifier, VLCAudioSettingToolbarIdentifier, VLCVideoSettingToolbarIdentifier, 
+    return [NSArray arrayWithObjects: VLCIntfSettingToolbarIdentifier, VLCAudioSettingToolbarIdentifier, VLCVideoSettingToolbarIdentifier,
         VLCOSDSettingToolbarIdentifier, VLCInputSettingToolbarIdentifier, VLCHotkeysSettingToolbarIdentifier, NSToolbarFlexibleSpaceItemIdentifier, nil];
 }
 
 - (NSArray *)toolbarSelectableItemIdentifiers:(NSToolbar *)toolbar
 {
-    return [NSArray arrayWithObjects: VLCIntfSettingToolbarIdentifier, VLCAudioSettingToolbarIdentifier, VLCVideoSettingToolbarIdentifier, 
+    return [NSArray arrayWithObjects: VLCIntfSettingToolbarIdentifier, VLCAudioSettingToolbarIdentifier, VLCVideoSettingToolbarIdentifier,
         VLCOSDSettingToolbarIdentifier, VLCInputSettingToolbarIdentifier, VLCHotkeysSettingToolbarIdentifier, nil];
 }
 
@@ -228,12 +189,10 @@ create_toolbar_item( NSString * o_itemIdent, NSString * o_name, NSString * o_des
     [o_audio_effects_box setTitle: _NS("Effects")];
     [o_audio_enable_ckb setTitle: _NS("Enable Audio")];
     [o_audio_general_box setTitle: _NS("General Audio")];
-    [o_audio_headphone_ckb setTitle: _NS("Headphone surround effect")];
     [o_audio_lang_txt setStringValue: _NS("Preferred Audio language")];
     [o_audio_last_ckb setTitle: _NS("Enable Last.fm submissions")];
     [o_audio_lastpwd_txt setStringValue: _NS("Password")];
     [o_audio_lastuser_txt setStringValue: _NS("User name")];
-    [o_audio_norm_ckb setTitle: _NS("Volume normalizer")];
     [o_audio_spdif_ckb setTitle: _NS("Use S/PDIF when available")];
     [o_audio_visual_txt setStringValue: _NS("Visualization")];
     [o_audio_vol_txt setStringValue: _NS("Default Volume")];
@@ -260,9 +219,11 @@ create_toolbar_item( NSString * o_itemIdent, NSString * o_name, NSString * o_des
     [o_input_postproc_txt setStringValue: _NS("Post-Processing Quality")];
     [o_input_rtsp_ckb setTitle: _NS("Use RTP over RTSP (TCP)")];
     [o_input_skipLoop_txt setStringValue: _NS("Skip the loop filter for H.264 decoding")];
-    [o_input_serverport_txt setStringValue: _NS("Default Server Port")];
 
     /* interface */
+    [o_intf_style_txt setStringValue: _NS("Interface style")];
+    [o_intf_style_dark_bcell setTitle: _NS("Dark")];
+    [o_intf_style_bright_bcell setTitle: _NS("Bright")];
     [o_intf_art_txt setStringValue: _NS("Album art download policy")];
     [o_intf_embedded_ckb setTitle: _NS("Add controls to the video window")];
     [o_intf_fspanel_ckb setTitle: _NS("Show Fullscreen Controller")];
@@ -270,9 +231,9 @@ create_toolbar_item( NSString * o_itemIdent, NSString * o_name, NSString * o_des
     [o_intf_network_box setTitle: _NS("Privacy / Network Interaction")];
 	[o_intf_appleremote_ckb setTitle: _NS("Control playback with the Apple Remote")];
 	[o_intf_mediakeys_ckb setTitle: _NS("Control playback with media keys")];
-    [o_intf_mediakeys_bg_ckb setTitle: _NS("...when VLC is in background")];
     [o_intf_update_ckb setTitle: _NS("Automatically check for updates")];
     [o_intf_last_update_lbl setStringValue: @""];
+    [o_intf_enableGrowl_ckb setStringValue: _NS("Enable Growl notifications (on playlist item change)")];
 
     /* Subtitles and OSD */
     [o_osd_encoding_txt setStringValue: _NS("Default Encoding")];
@@ -285,6 +246,9 @@ create_toolbar_item( NSString * o_itemIdent, NSString * o_name, NSString * o_des
     [o_osd_lang_txt setStringValue: _NS("Preferred Subtitle Language")];
     [o_osd_osd_box setTitle: _NS("On Screen Display")];
     [o_osd_osd_ckb setTitle: _NS("Enable OSD")];
+    [o_osd_opacity_txt setStringValue: _NS("Opacity")];
+    [o_osd_forcebold_ckb setTitle: _NS("Force Bold")];
+    [o_osd_moreoptions_txt setStringValue: _NS("More options on background, shadow and outline are available in the advanced preferences.")];
 
     /* video */
     [o_video_black_ckb setTitle: _NS("Black screens in Fullscreen mode")];
@@ -301,10 +265,10 @@ create_toolbar_item( NSString * o_itemIdent, NSString * o_name, NSString * o_des
     [o_video_snap_format_txt setStringValue: _NS("Format")];
     [o_video_snap_prefix_txt setStringValue: _NS("Prefix")];
     [o_video_snap_seqnum_ckb setTitle: _NS("Sequential numbering")];
-    
+
     /* generic stuff */
-    [[o_sprefs_basicFull_matrix cellAtRow: 0 column: 0] setStringValue: _NS("Basic")];
-    [[o_sprefs_basicFull_matrix cellAtRow: 0 column: 1] setStringValue: _NS("All")];
+    [[o_sprefs_basicFull_matrix cellAtRow: 0 column: 0] setTitle: _NS("Basic")];
+    [[o_sprefs_basicFull_matrix cellAtRow: 0 column: 1] setTitle: _NS("All")];
     [o_sprefs_cancel_btn setTitle: _NS("Cancel")];
     [o_sprefs_reset_btn setTitle: _NS("Reset All")];
     [o_sprefs_save_btn setTitle: _NS("Save")];
@@ -358,7 +322,8 @@ static inline char * __config_GetLabel( vlc_object_t *p_this, const char *psz_na
         }
         else if( p_item->ppsz_list[i] )
             mi = [[NSMenuItem alloc] initWithTitle: [NSString stringWithUTF8String: p_item->ppsz_list[i]] action:NULL keyEquivalent: @""];
-        else NSLog( @"item %d of pref %s failed to be created", i, name);
+        else
+            msg_Err( p_intf, "item %d of pref %s failed to be created", i, name );
         [mi setRepresentedObject:[NSString stringWithUTF8String: p_item->ppsz_list[i]]];
         [[object menu] addItem: [mi autorelease]];
         if( p_item->value.psz && !strcmp( p_item->value.psz, p_item->ppsz_list[i] ) )
@@ -384,7 +349,8 @@ static inline char * __config_GetLabel( vlc_object_t *p_this, const char *psz_na
             mi = [[NSMenuItem alloc] initWithTitle: _NS( p_item->ppsz_list_text[i] ) action:NULL keyEquivalent: @""];
         else if( p_item->pi_list[i] )
             mi = [[NSMenuItem alloc] initWithTitle: [NSString stringWithFormat: @"%d", p_item->pi_list[i]] action:NULL keyEquivalent: @""];
-        else NSLog( @"item %d of pref %s failed to be created", i, name);
+        else
+            msg_Err( p_intf, "item %d of pref %s failed to be created", i, name);
         [mi setRepresentedObject:[NSNumber numberWithInt: p_item->pi_list[i]]];
         [[object menu] addItem: [mi autorelease]];
         if( p_item->value.i == p_item->pi_list[i] )
@@ -398,15 +364,15 @@ static inline char * __config_GetLabel( vlc_object_t *p_this, const char *psz_na
     module_config_t *p_item;
     module_t *p_parser, **p_list;
     int y = 0;
-    
+
     [object removeAllItems];
-    
+
     p_item = config_FindConfig( VLC_OBJECT(p_intf), name );
     p_list = module_list_get( NULL );
     if( !p_item ||!p_list )
     {
         if( p_list ) module_list_free(p_list);
-        NSLog( @"serious problem, item or list not found" );
+        msg_Err( p_intf, "serious problem, item or list not found" );
         return;
     }
 
@@ -447,7 +413,7 @@ static inline char * __config_GetLabel( vlc_object_t *p_this, const char *psz_na
 
     [[o_sprefs_basicFull_matrix cellAtRow:0 column:0] setState: NSOnState];
     [[o_sprefs_basicFull_matrix cellAtRow:0 column:1] setState: NSOffState];
-    
+
     /**********************
      * interface settings *
      **********************/
@@ -458,12 +424,21 @@ static inline char * __config_GetLabel( vlc_object_t *p_this, const char *psz_na
     [self setupButton: o_intf_embedded_ckb forBoolValue: "embedded-video"];
 	[self setupButton: o_intf_appleremote_ckb forBoolValue: "macosx-appleremote"];
 	[self setupButton: o_intf_mediakeys_ckb forBoolValue: "macosx-mediakeys"];
-    [self setupButton: o_intf_mediakeys_bg_ckb forBoolValue: "macosx-mediakeys-background"];
-    [o_intf_mediakeys_bg_ckb setEnabled: [o_intf_mediakeys_ckb state]];
     if( [[SUUpdater sharedUpdater] lastUpdateCheckDate] != NULL )
         [o_intf_last_update_lbl setStringValue: [NSString stringWithFormat: _NS("Last check on: %@"), [[[SUUpdater sharedUpdater] lastUpdateCheckDate] descriptionWithLocale: [[NSUserDefaults standardUserDefaults] dictionaryRepresentation]]]];
     else
         [o_intf_last_update_lbl setStringValue: _NS("No check was performed yet.")];
+    psz_tmp = config_GetPsz( p_intf, "control" );
+    if (psz_tmp) {
+        [o_intf_enableGrowl_ckb setState: (NSInteger)strstr( psz_tmp, "growl")];
+        free( psz_tmp );
+    }
+    else
+        [o_intf_enableGrowl_ckb setState: NSOffState];
+    if (config_GetInt( p_intf, "macosx-interfacestyle" ))
+        [o_intf_style_dark_bcell setState: YES];
+    else
+        [o_intf_style_dark_bcell setState: NO];
 
     /******************
      * audio settings *
@@ -479,19 +454,6 @@ static inline char * __config_GetLabel( vlc_object_t *p_this, const char *psz_na
 
     [self setupButton: o_audio_dolby_pop forIntList: "force-dolby-surround"];
     [self setupField: o_audio_lang_fld forOption: "audio-language"];
-
-    [self setupButton: o_audio_headphone_ckb forBoolValue: "headphone-dolby"];
-
-    psz_tmp = config_GetPsz( p_intf, "audio-filter" );
-    if( psz_tmp )
-    {
-        [o_audio_norm_ckb setState: (NSInteger)strstr( psz_tmp, "volnorm" )];
-        [o_audio_norm_fld setEnabled: [o_audio_norm_ckb state]];
-        [o_audio_norm_stepper setEnabled: [o_audio_norm_ckb state]];
-        free( psz_tmp );
-    }
-    [o_audio_norm_fld setFloatValue: config_GetFloat( p_intf, "norm-max-level" )];
-    [o_audio_norm_fld setToolTip: [NSString stringWithUTF8String: config_GetLabel( p_intf, "norm-max-level")]];
 
     [self setupButton: o_audio_visual_pop forModuleList: "audio-visual"];
 
@@ -536,7 +498,7 @@ static inline char * __config_GetLabel( vlc_object_t *p_this, const char *psz_na
     while( i < y )
     {
         NSRect s_rect = [[[NSScreen screens] objectAtIndex: i] frame];
-        [o_video_device_pop addItemWithTitle: 
+        [o_video_device_pop addItemWithTitle:
          [NSString stringWithFormat: @"%@ %i (%ix%i)", _NS("Screen"), i+1,
                    (int)s_rect.size.width, (int)s_rect.size.height]];
         [[o_video_device_pop lastItem] setTag: (int)[[[NSScreen screens] objectAtIndex: i] displayID]];
@@ -553,8 +515,6 @@ static inline char * __config_GetLabel( vlc_object_t *p_this, const char *psz_na
     /***************************
      * input & codecs settings *
      ***************************/
-    [o_input_serverport_fld setIntValue: config_GetInt( p_intf, "server-port")];
-    [o_input_serverport_fld setToolTip: [NSString stringWithUTF8String: config_GetLabel( p_intf, "server-port")]];
     [self setupField: o_input_httpproxy_fld forOption:"http-proxy"];
     [self setupField: o_input_httpproxypwd_sfld forOption:"http-proxy-pwd"];
     [o_input_postproc_fld setIntValue: config_GetInt( p_intf, "postproc-q")];
@@ -566,7 +526,7 @@ static inline char * __config_GetLabel( vlc_object_t *p_this, const char *psz_na
     [self setupButton: o_input_skipLoop_pop forIntList: "ffmpeg-skiploopfilter"];
 
     [o_input_cachelevel_pop removeAllItems];
-    [o_input_cachelevel_pop addItemsWithTitles: 
+    [o_input_cachelevel_pop addItemsWithTitles:
         [NSArray arrayWithObjects: _NS("Custom"), _NS("Lowest latency"), _NS("Low latency"), _NS("Normal"),
             _NS("High latency"), _NS("Higher latency"), nil]];
     [[o_input_cachelevel_pop itemAtIndex: 0] setTag: 0];
@@ -575,7 +535,7 @@ static inline char * __config_GetLabel( vlc_object_t *p_this, const char *psz_na
     [[o_input_cachelevel_pop itemAtIndex: 3] setTag: 300];
     [[o_input_cachelevel_pop itemAtIndex: 4] setTag: 400];
     [[o_input_cachelevel_pop itemAtIndex: 5] setTag: 500];
-    
+
 #define TestCaC( name ) \
     b_cache_equal =  b_cache_equal && \
         ( i_cache == config_GetInt( p_intf, name ) )
@@ -587,14 +547,13 @@ static inline char * __config_GetLabel( vlc_object_t *p_this, const char *psz_na
     /* Select the accurate value of the PopupButton */
     bool b_cache_equal = true;
     int i_cache = config_GetInt( p_intf, "file-caching");
-    
+
     TestCaC( "udp-caching" );
     if( module_exists ("dvdread") )
         TestCaC( "dvdread-caching" );
     if( module_exists ("dvdnav") )
         TestCaC( "dvdnav-caching" );
     TestCaC( "tcp-caching" );
-    TestCaC( "fake-caching" );
     TestCaC( "cdda-caching" );
     TestCaC( "screen-caching" );
     TestCaC( "vcd-caching" );
@@ -619,26 +578,19 @@ static inline char * __config_GetLabel( vlc_object_t *p_this, const char *psz_na
      * subtitle settings *
      *********************/
     [self setupButton: o_osd_osd_ckb forBoolValue: "osd"];
-    
+
     [self setupButton: o_osd_encoding_pop forStringList: "subsdec-encoding"];
     [self setupField: o_osd_lang_fld forOption: "sub-language" ];
-	
-	if( module_exists( "quartztext" ) )
-	{
-		[self setupField: o_osd_font_fld forOption: "quartztext-font"];
-		[self setupButton: o_osd_font_color_pop forIntList: "quartztext-color"];
-		[self setupButton: o_osd_font_size_pop forIntList: "quartztext-rel-fontsize"];
-	}
-	else 
-	{
-        /* fallback on freetype */
-		[self setupField: o_osd_font_fld forOption: "freetype-font"];
-		[self setupButton: o_osd_font_color_pop forIntList: "freetype-color"];
-		[self setupButton: o_osd_font_size_pop forIntList: "freetype-rel-fontsize"];
-		/* selector button is useless in this case */
-		[o_osd_font_btn setEnabled: NO];
-	}
 
+    [self setupField: o_osd_font_fld forOption: "freetype-font"];
+    [self setupButton: o_osd_font_color_pop forIntList: "freetype-color"];
+    [self setupButton: o_osd_font_size_pop forIntList: "freetype-rel-fontsize"];
+    i = config_GetInt( p_intf, "freetype-opacity" );
+    [o_osd_opacity_fld setIntValue: i];
+    [o_osd_opacity_sld setIntValue: i];
+    [o_osd_opacity_sld setToolTip: [NSString stringWithUTF8String: config_GetLabel( p_intf, "freetype-opacity")]];
+    [o_osd_opacity_fld setToolTip: [o_osd_opacity_sld toolTip]];
+    [self setupButton: o_osd_forcebold_ckb forBoolValue: "freetype-bold"];
 
     /********************
      * hotkeys settings *
@@ -647,22 +599,41 @@ static inline char * __config_GetLabel( vlc_object_t *p_this, const char *psz_na
     [o_hotkeySettings release];
     o_hotkeySettings = [[NSMutableArray alloc] init];
     NSMutableArray *o_tempArray_desc = [[NSMutableArray alloc] init];
-    i = 1;
+    NSMutableArray *o_tempArray_names = [[NSMutableArray alloc] init];
 
-    while( i < 100 )
+    /* Get the main Module */
+    module_t *p_main = module_get_main();
+    assert( p_main );
+    unsigned confsize;
+    module_config_t *p_config;
+    
+    p_config = module_config_get (p_main, &confsize);
+    
+    for (size_t i = 0; i < confsize; i++)
     {
-        p_item = config_FindConfig( VLC_OBJECT(p_intf), p_hotkeys[i].psz_action );
-        if( !p_item )
-            break;
+        module_config_t *p_item = p_config + i;
 
-        [o_tempArray_desc addObject: _NS( p_item->psz_text )];
-        [o_hotkeySettings addObject: [NSNumber numberWithInt: p_item->value.i]];
-
-        i++;
+        if( CONFIG_ITEM(p_item->i_type) && p_item->psz_name != NULL
+           && !strncmp( p_item->psz_name , "key-", 4 )
+           && !EMPTY_STR( p_item->psz_text ) )
+        {
+            [o_tempArray_desc addObject: _NS( p_item->psz_text )];
+            [o_tempArray_names addObject: [NSString stringWithUTF8String:p_item->psz_name]];
+            if (p_item->value.psz)
+                [o_hotkeySettings addObject: [NSString stringWithUTF8String:p_item->value.psz]];
+            else
+                [o_hotkeySettings addObject: [NSString string]];
+        }
     }
+    module_config_free (p_config);
+    module_release (p_main);
+                  
     [o_hotkeyDescriptions release];
     o_hotkeyDescriptions = [[NSArray alloc] initWithArray: o_tempArray_desc copyItems: YES];
     [o_tempArray_desc release];
+    [o_hotkeyNames release];
+    o_hotkeyNames = [[NSArray alloc] initWithArray: o_tempArray_names copyItems: YES];
+    [o_tempArray_names release];
     [o_hotkeys_listbox reloadData];
 }
 
@@ -674,7 +645,7 @@ static inline char * __config_GetLabel( vlc_object_t *p_this, const char *psz_na
         [[o_sprefs_win toolbar] setSelectedItemIdentifier: VLCIntfSettingToolbarIdentifier];
         [self showInterfaceSettings];
     }
-    
+
     [self resetControls];
 
     [o_sprefs_win center];
@@ -707,7 +678,7 @@ static inline char * __config_GetLabel( vlc_object_t *p_this, const char *psz_na
         msg_Warn( p_intf, "unknown buttonAction sender" );
 }
 
-- (void)sheetDidEnd:(NSWindow *)o_sheet 
+- (void)sheetDidEnd:(NSWindow *)o_sheet
          returnCode:(int)i_return
         contextInfo:(void *)o_context
 {
@@ -715,7 +686,7 @@ static inline char * __config_GetLabel( vlc_object_t *p_this, const char *psz_na
     {
         config_ResetAll( p_intf );
         [self resetControls];
-        config_SaveConfigFile( p_intf, NULL );
+        config_SaveConfigFile( p_intf );
     }
 }
 
@@ -736,10 +707,9 @@ static inline void save_string_list( intf_thread_t * p_intf, id object, const ch
     p_item = config_FindConfig( VLC_OBJECT(p_intf), name );
     p_stringobject = (NSString *)[[object selectedItem] representedObject];
     assert([p_stringobject isKindOfClass:[NSString class]]);
-    if( p_stringobject ) 
+    if( p_stringobject )
     {
         config_PutPsz( p_intf, name, [p_stringobject UTF8String] );
-        [p_stringobject release];
     }
 }
 
@@ -771,14 +741,16 @@ static inline void save_module_list( intf_thread_t * p_intf, id object, const ch
 
 - (void)saveChangedSettings
 {
-    char *psz_tmp;
-    int i;
-    
+    NSString *tmpString;
+    NSRange tmpRange;
+
 #define SaveIntList( object, name ) save_int_list( p_intf, object, name )
-                    
+
 #define SaveStringList( object, name ) save_string_list( p_intf, object, name )
 
 #define SaveModuleList( object, name ) save_module_list( p_intf, object, name )
+
+#define getString( name ) [NSString stringWithFormat:@"%s", config_GetPsz( p_intf, name )]
 
     /**********************
      * interface settings *
@@ -791,33 +763,40 @@ static inline void save_module_list( intf_thread_t * p_intf, id object, const ch
         config_PutInt( p_intf, "macosx-fspanel", [o_intf_fspanel_ckb state] );
         config_PutInt( p_intf, "embedded-video", [o_intf_embedded_ckb state] );
 		config_PutInt( p_intf, "macosx-appleremote", [o_intf_appleremote_ckb state] );
-		config_PutInt( p_intf, "macosx-mediakeys", [o_intf_mediakeys_ckb state] );
-        config_PutInt( p_intf, "macosx-mediakeys-background", [o_intf_mediakeys_bg_ckb state] );
+        config_PutInt( p_intf, "macosx-mediakeys", [o_intf_mediakeys_ckb state] );
+        config_PutInt( p_intf, "macosx-interfacestyle", [o_intf_style_dark_bcell state] );
+        if( [o_intf_enableGrowl_ckb state] == NSOnState )
+        {
+            tmpString = getString( "control" );
+            tmpRange = [tmpString rangeOfString:@"growl"];
+            if( [tmpString length] > 0 && tmpRange.location == NSNotFound )
+            {
+                tmpString = [tmpString stringByAppendingString: @":growl"];
+                config_PutPsz( p_intf, "control", [tmpString UTF8String] );
+            }
+            else
+                config_PutPsz( p_intf, "control", "growl" );
+        }
+        else
+        {
+            tmpString = getString( "control" );
+            if(! [tmpString isEqualToString:@""] )
+            {
+                tmpString = [tmpString stringByTrimmingCharactersInSet: [NSCharacterSet characterSetWithCharactersInString:@":growl"]];
+                tmpString = [tmpString stringByTrimmingCharactersInSet: [NSCharacterSet characterSetWithCharactersInString:@"growl:"]];
+                tmpString = [tmpString stringByTrimmingCharactersInSet: [NSCharacterSet characterSetWithCharactersInString:@"growl"]];
+                config_PutPsz( p_intf, "control", [tmpString UTF8String] );
+            }
+        }
 
 		/* activate stuff without restart */
 		if( [o_intf_appleremote_ckb state] == YES )
 			[[[VLCMain sharedInstance] appleRemoteController] startListening: [VLCMain sharedInstance]];
 		else
 			[[[VLCMain sharedInstance] appleRemoteController] stopListening: [VLCMain sharedInstance]];
-        [[NSNotificationCenter defaultCenter] postNotificationName: @"VLCMediaKeySupportSettingChanged" 
-                                                            object: nil 
-                                                          userInfo: nil];
-
-        /* okay, let's save our changes to vlcrc */
-        i = config_SaveConfigFile( p_intf, "main" );
-        i = i + config_SaveConfigFile( p_intf, "macosx" );
-
-        if( i != 0 )
-        {
-            msg_Err( p_intf, "An error occurred while saving the Interface settings using SimplePrefs (%i)", i );
-            dialog_Fatal( p_intf, _("Interface Settings not saved"),
-                        _("An error occured while saving your settings via SimplePrefs (%i)."), i );
-            i = 0;
-        }
-
         b_intfSettingChanged = NO;
     }
-    
+
     /******************
      * audio settings *
      ******************/
@@ -825,46 +804,17 @@ static inline void save_module_list( intf_thread_t * p_intf, id object, const ch
     {
         config_PutInt( p_intf, "audio", [o_audio_enable_ckb state] );
         config_PutInt( p_intf, "volume", ([o_audio_vol_sld intValue] * 2.56));
-        NSLog( @"slider=%i, pref=%i", [o_audio_vol_sld intValue], config_GetInt( p_intf, "volume" ));
         config_PutInt( p_intf, "spdif", [o_audio_spdif_ckb state] );
 
         SaveIntList( o_audio_dolby_pop, "force-dolby-surround" );
 
         config_PutPsz( p_intf, "audio-language", [[o_audio_lang_fld stringValue] UTF8String] );
-        config_PutInt( p_intf, "headphone-dolby", [o_audio_headphone_ckb state] );
-
-        if( [o_audio_norm_ckb state] == NSOnState )
-        {
-            psz_tmp = config_GetPsz( p_intf, "audio-filter" );
-            if(! psz_tmp)
-                config_PutPsz( p_intf, "audio-filter", "volnorm" );
-            else if( (NSInteger)strstr( psz_tmp, "normvol" ) == NO )
-            {
-                /* work-around a GCC 4.0.1 bug */
-                psz_tmp = (char *)[[NSString stringWithFormat: @"%s:volnorm", psz_tmp] UTF8String];
-                config_PutPsz( p_intf, "audio-filter", psz_tmp );
-                free( psz_tmp );
-            }
-        }
-        else
-        {
-            psz_tmp = config_GetPsz( p_intf, "audio-filter" );
-            if( psz_tmp )
-            {
-                char *psz_tmp2 = (char *)[[[NSString stringWithUTF8String: psz_tmp] stringByTrimmingCharactersInSet: [NSCharacterSet characterSetWithCharactersInString:@":volnorm"]] UTF8String];
-                psz_tmp2 = (char *)[[[NSString stringWithUTF8String: psz_tmp2] stringByTrimmingCharactersInSet: [NSCharacterSet characterSetWithCharactersInString:@"volnorm:"]] UTF8String];
-                psz_tmp2 = (char *)[[[NSString stringWithUTF8String: psz_tmp2] stringByTrimmingCharactersInSet: [NSCharacterSet characterSetWithCharactersInString:@"volnorm"]] UTF8String];
-                config_PutPsz( p_intf, "audio-filter", psz_tmp );
-                free( psz_tmp );
-            }
-        }
-        config_PutFloat( p_intf, "norm-max-level", [o_audio_norm_fld floatValue] );
 
         SaveModuleList( o_audio_visual_pop, "audio-visual" );
 
         /* Last.FM is optional */
         if( module_exists( "audioscrobbler" ) )
-        {   
+        {
             [o_audio_last_ckb setEnabled: YES];
             if( [o_audio_last_ckb state] == NSOnState )
                 config_AddIntf( p_intf, "audioscrobbler" );
@@ -876,23 +826,9 @@ static inline void save_module_list( intf_thread_t * p_intf, id object, const ch
         }
         else
             [o_audio_last_ckb setEnabled: NO];
-
-        /* okay, let's save our changes to vlcrc */
-        i = config_SaveConfigFile( p_intf, "main" );
-        i = i + config_SaveConfigFile( p_intf, "audioscrobbler" );
-        i = i + config_SaveConfigFile( p_intf, "volnorm" );
-
-        if( i != 0 )
-        {
-            msg_Err( p_intf, "An error occurred while saving the Audio settings using SimplePrefs (%i)", i );
-            dialog_Fatal( p_intf, _("Audio Settings not saved"),
-                        _("An error occured while saving your settings via SimplePrefs (%i)."), i );
-            
-            i = 0;
-        }
         b_audioSettingChanged = NO;
     }
-    
+
     /******************
      * video settings *
      ******************/
@@ -911,26 +847,14 @@ static inline void save_module_list( intf_thread_t * p_intf, id object, const ch
         config_PutPsz( p_intf, "snapshot-prefix", [[o_video_snap_prefix_fld stringValue] UTF8String] );
         config_PutInt( p_intf, "snapshot-sequential", [o_video_snap_seqnum_ckb state] );
         SaveStringList( o_video_snap_format_pop, "snapshot-format" );
-
-        i = config_SaveConfigFile( p_intf, "main" );
-        i = i + config_SaveConfigFile( p_intf, "macosx" );
-
-        if( i != 0 )
-        {
-            msg_Err( p_intf, "An error occurred while saving the Video settings using SimplePrefs (%i)", i );
-            dialog_Fatal( p_intf, _("Video Settings not saved"),
-                        _("An error occured while saving your settings via SimplePrefs (%i)."), i );
-            i = 0;
-        }
         b_videoSettingChanged = NO;
     }
-    
+
     /***************************
      * input & codecs settings *
      ***************************/
     if( b_inputSettingChanged )
     {
-        config_PutInt( p_intf, "server-port", [o_input_serverport_fld intValue] );
         config_PutPsz( p_intf, "http-proxy", [[o_input_httpproxy_fld stringValue] UTF8String] );
         config_PutPsz( p_intf, "http-proxy-pwd", [[o_input_httpproxypwd_sfld stringValue] UTF8String] );
         config_PutInt( p_intf, "postproc-q", [o_input_postproc_fld intValue] );
@@ -945,52 +869,20 @@ static inline void save_module_list( intf_thread_t * p_intf, id object, const ch
         msg_Dbg( p_intf, "Adjusting all cache values to: %i", (int)[[o_input_cachelevel_pop selectedItem] tag] );
         CaC( "udp-caching" );
         if( module_exists ( "dvdread" ) )
-        {
             CaC( "dvdread-caching" );
-            i = i + config_SaveConfigFile( p_intf, "dvdread" );
-        }
         if( module_exists ( "dvdnav" ) )
-        {
             CaC( "dvdnav-caching" );
-            i = i + config_SaveConfigFile( p_intf, "dvdnav" );
-        }
         CaC( "tcp-caching" ); CaC( "vcd-caching" );
-        CaC( "fake-caching" ); CaC( "cdda-caching" ); CaC( "file-caching" );
+        CaC( "cdda-caching" ); CaC( "file-caching" );
         CaC( "screen-caching" );
         CaCi( "rtsp-caching", 4 ); CaCi( "ftp-caching", 2 );
         CaCi( "http-caching", 4 );
         if( module_exists ( "access_realrtsp" ) )
-        {
             CaCi( "realrtsp-caching", 10 );
-            i = i + config_SaveConfigFile( p_intf, "access_realrtsp" );
-        }
         CaCi( "mms-caching", 19 );
-
-        i = config_SaveConfigFile( p_intf, "main" );
-        i = i + config_SaveConfigFile( p_intf, "avcodec" );
-        i = i + config_SaveConfigFile( p_intf, "postproc" );
-        i = i + config_SaveConfigFile( p_intf, "access_http" );
-        i = i + config_SaveConfigFile( p_intf, "access_file" );
-        i = i + config_SaveConfigFile( p_intf, "access_tcp" );
-        i = i + config_SaveConfigFile( p_intf, "access_fake" );
-        i = i + config_SaveConfigFile( p_intf, "cdda" );
-        i = i + config_SaveConfigFile( p_intf, "screen" );
-        i = i + config_SaveConfigFile( p_intf, "vcd" );
-        i = i + config_SaveConfigFile( p_intf, "access_ftp" );
-        i = i + config_SaveConfigFile( p_intf, "access_mms" );
-        i = i + config_SaveConfigFile( p_intf, "live555" );
-        i = i + config_SaveConfigFile( p_intf, "avi" );
-
-        if( i != 0 )
-        {
-            msg_Err( p_intf, "An error occurred while saving the Input settings using SimplePrefs (%i)", i );
-            dialog_Fatal( p_intf, _("Input Settings not saved"),
-                        _("An error occured while saving your settings via SimplePrefs (%i)."), i );
-            i = 0;
-        }
         b_inputSettingChanged = NO;
     }
-    
+
     /**********************
      * subtitles settings *
      **********************/
@@ -1004,57 +896,31 @@ static inline void save_module_list( intf_thread_t * p_intf, id object, const ch
             config_PutPsz( p_intf, "subsdec-encoding", "" );
 
         config_PutPsz( p_intf, "sub-language", [[o_osd_lang_fld stringValue] UTF8String] );
-        
-		if( module_exists( "quartztext" ) )
-		{
-			config_PutPsz( p_intf, "quartztext-font", [[o_osd_font_fld stringValue] UTF8String] );
-			SaveIntList( o_osd_font_color_pop, "quartztext-color" );
-			SaveIntList( o_osd_font_size_pop, "quartztext-rel-fontsize" );
-		}
-		else
-		{
-            /* fallback on freetype */
-			config_PutPsz( p_intf, "freetype-font", [[o_osd_font_fld stringValue] UTF8String] );
-			SaveIntList( o_osd_font_color_pop, "freetype-color" );
-			SaveIntList( o_osd_font_size_pop, "freetype-rel-fontsize" );                
-		}
 
-        i = config_SaveConfigFile( p_intf, NULL );
-
-        if( i != 0 )
-        {
-            msg_Err( p_intf, "An error occurred while saving the OSD/Subtitle settings using SimplePrefs (%i)", i );
-            dialog_Fatal( p_intf, _("On Screen Display/Subtitle Settings not saved"),
-                        _("An error occured while saving your settings via SimplePrefs (%i)."), i );
-            i = 0;
-        }
+        config_PutPsz( p_intf, "freetype-font", [[o_osd_font_fld stringValue] UTF8String] );
+        SaveIntList( o_osd_font_color_pop, "freetype-color" );
+        SaveIntList( o_osd_font_size_pop, "freetype-rel-fontsize" );
+        config_PutInt( p_intf, "freetype-opacity", [o_osd_opacity_sld intValue] );
+        config_PutInt( p_intf, "freetype-bold", [o_osd_forcebold_ckb state] );
         b_osdSettingChanged = NO;
     }
-    
+
     /********************
      * hotkeys settings *
      ********************/
     if( b_hotkeyChanged )
     {
-        const struct hotkey *p_hotkeys = p_intf->p_libvlc->p_hotkeys;
-        i = 1;
-        while( i < [o_hotkeySettings count] )
-        {
-            config_PutInt( p_intf, p_hotkeys[i].psz_action, [[o_hotkeySettings objectAtIndex: i-1] intValue] );
-            i++;
-        }        
-
-        i = config_SaveConfigFile( p_intf, "main" );
-
-        if( i != 0 )
-        {
-            msg_Err( p_intf, "An error occurred while saving the Hotkey settings using SimplePrefs (%i)", i );
-            dialog_Fatal( p_intf, _("Hotkeys not saved"),
-                        _("An error occured while saving your settings via SimplePrefs (%i)."), i );
-            i = 0;
-        }
+        for( NSUInteger i = 0; i < [o_hotkeySettings count]; i++ )
+            config_PutPsz( p_intf, [[o_hotkeyNames objectAtIndex:i] UTF8String], [[o_hotkeySettings objectAtIndex:i]UTF8String] );
         b_hotkeyChanged = NO;
     }
+
+    /* okay, let's save our changes to vlcrc */
+    config_SaveConfigFile( p_intf );
+
+    [[NSNotificationCenter defaultCenter] postNotificationName: @"VLCMediaKeySupportSettingChanged"
+                                                            object: nil
+                                                          userInfo: nil];
 }
 
 - (void)showSettingsForCategory: (id)o_new_category_view
@@ -1062,41 +928,41 @@ static inline void save_module_list( intf_thread_t * p_intf, id object, const ch
     NSRect o_win_rect, o_view_rect, o_old_view_rect;
     o_win_rect = [o_sprefs_win frame];
     o_view_rect = [o_new_category_view frame];
-    
+
     if( o_currentlyShownCategoryView != nil )
     {
         /* restore our window's height, if we've shown another category previously */
         o_old_view_rect = [o_currentlyShownCategoryView frame];
         o_win_rect.size.height = o_win_rect.size.height - o_old_view_rect.size.height;
         o_win_rect.origin.y = ( o_win_rect.origin.y + o_old_view_rect.size.height ) - o_view_rect.size.height;
-
-        /* remove our previous category view */
-        [o_currentlyShownCategoryView removeFromSuperviewWithoutNeedingDisplay];
     }
-    
+
     o_win_rect.size.height = o_win_rect.size.height + o_view_rect.size.height;
-    
-    [o_sprefs_win displayIfNeeded];
-    [o_sprefs_win setFrame: o_win_rect display:YES animate: YES];
-    
-    [o_new_category_view setFrame: NSMakeRect( 0, 
-                                               [o_sprefs_controls_box frame].size.height, 
-                                               o_view_rect.size.width, 
+
+    [o_new_category_view setFrame: NSMakeRect( 0,
+                                               [o_sprefs_controls_box frame].size.height,
+                                               o_view_rect.size.width,
                                                o_view_rect.size.height )];
-    [o_new_category_view setNeedsDisplay: YES];
     [o_new_category_view setAutoresizesSubviews: YES];
-    [[o_sprefs_win contentView] addSubview: o_new_category_view];
-    
+    if (o_currentlyShownCategoryView)
+    {
+        [[[o_sprefs_win contentView] animator] replaceSubview: o_currentlyShownCategoryView with: o_new_category_view];
+        [o_currentlyShownCategoryView release];
+        [[o_sprefs_win animator] setFrame: o_win_rect display:YES];
+    }
+    else
+    {
+        [[o_sprefs_win contentView] addSubview: o_new_category_view];
+        [o_sprefs_win setFrame: o_win_rect display:YES animate:NO];
+    }
+
     /* keep our current category for further reference */
-    [o_currentlyShownCategoryView release];
     o_currentlyShownCategoryView = o_new_category_view;
     [o_currentlyShownCategoryView retain];
 }
 
 - (IBAction)interfaceSettingChanged:(id)sender
 {
-    if( sender == o_intf_mediakeys_ckb )
-        [o_intf_mediakeys_bg_ckb setEnabled: [o_intf_mediakeys_ckb state]];
     b_intfSettingChanged = YES;
 }
 
@@ -1113,12 +979,6 @@ static inline void save_module_list( intf_thread_t * p_intf, id object, const ch
     if( sender == o_audio_vol_fld )
         [o_audio_vol_sld setIntValue: [o_audio_vol_fld intValue]];
 
-    if( sender == o_audio_norm_ckb )
-    {
-        [o_audio_norm_stepper setEnabled: [o_audio_norm_ckb state]];
-        [o_audio_norm_fld setEnabled: [o_audio_norm_ckb state]];
-    }    
-    
     if( sender == o_audio_last_ckb )
     {
         if( [o_audio_last_ckb state] == NSOnState )
@@ -1153,8 +1013,8 @@ static inline void save_module_list( intf_thread_t * p_intf, id object, const ch
         [o_selectFolderPanel setMessage: _NS("Choose the folder to save your video snapshots to.")];
         [o_selectFolderPanel setCanCreateDirectories: YES];
         [o_selectFolderPanel setPrompt: _NS("Choose")];
-        [o_selectFolderPanel beginSheetForDirectory: nil file: nil modalForWindow: o_sprefs_win 
-                                      modalDelegate: self 
+        [o_selectFolderPanel beginSheetForDirectory: nil file: nil modalForWindow: o_sprefs_win
+                                      modalDelegate: self
                                      didEndSelector: @selector(savePanelDidEnd:returnCode:contextInfo:)
                                         contextInfo: o_video_snap_folder_btn];
     }
@@ -1168,7 +1028,7 @@ static inline void save_module_list( intf_thread_t * p_intf, id object, const ch
     {
         if( contextInfo == o_video_snap_folder_btn )
         {
-            [o_video_snap_folder_fld setStringValue: [o_selectFolderPanel filename]];
+            [o_video_snap_folder_fld setStringValue: [[o_selectFolderPanel URL] path]];
             b_videoSettingChanged = YES;
         }
     }
@@ -1183,6 +1043,12 @@ static inline void save_module_list( intf_thread_t * p_intf, id object, const ch
 
 - (IBAction)osdSettingChanged:(id)sender
 {
+    if( sender == o_osd_opacity_fld )
+        [o_osd_opacity_sld setIntValue: [o_osd_opacity_fld intValue]];
+
+    if( sender == o_osd_opacity_sld )
+        [o_osd_opacity_fld setIntValue: [o_osd_opacity_sld intValue]];
+
     b_osdSettingChanged = YES;
 }
 
@@ -1193,20 +1059,17 @@ static inline void save_module_list( intf_thread_t * p_intf, id object, const ch
 
 - (IBAction)showFontPicker:(id)sender
 {
-	if( module_exists( "quartztext" ) )
-	{
-		char * font = config_GetPsz( p_intf, "quartztext-font" );
-		NSString * fontFamilyName = font ? [NSString stringWithUTF8String: font] : nil;
-		free(font);
-		if( fontFamilyName )
-		{
-			NSFontDescriptor * fd = [NSFontDescriptor fontDescriptorWithFontAttributes:nil];
-			NSFont * font = [NSFont fontWithDescriptor:[fd fontDescriptorWithFamily:fontFamilyName] textTransform:nil];
-			[[NSFontManager sharedFontManager] setSelectedFont:font isMultiple:NO];
-		}
-		[[NSFontManager sharedFontManager] setTarget: self];
-		[[NSFontPanel sharedFontPanel] orderFront:self];
-	}
+    char * font = config_GetPsz( p_intf, "freetype-font" );
+    NSString * fontFamilyName = font ? [NSString stringWithUTF8String: font] : nil;
+    free(font);
+    if( fontFamilyName )
+    {
+        NSFontDescriptor * fd = [NSFontDescriptor fontDescriptorWithFontAttributes:nil];
+        NSFont * font = [NSFont fontWithDescriptor:[fd fontDescriptorWithFamily:fontFamilyName] textTransform:nil];
+        [[NSFontManager sharedFontManager] setSelectedFont:font isMultiple:NO];
+    }
+    [[NSFontManager sharedFontManager] setTarget: self];
+    [[NSFontPanel sharedFontPanel] orderFront:self];
 }
 
 - (void)changeFont:(id)sender
@@ -1238,9 +1101,9 @@ static inline void save_module_list( intf_thread_t * p_intf, id object, const ch
 {
     if( sender == o_hotkeys_change_btn || sender == o_hotkeys_listbox )
     {
-        [o_hotkeys_change_lbl setStringValue: [NSString stringWithFormat: _NS("Press new keys for\n\"%@\""), 
+        [o_hotkeys_change_lbl setStringValue: [NSString stringWithFormat: _NS("Press new keys for\n\"%@\""),
                                                [o_hotkeyDescriptions objectAtIndex: [o_hotkeys_listbox selectedRow]]]];
-        [o_hotkeys_change_keys_lbl setStringValue: [self OSXKeyToString:[[o_hotkeySettings objectAtIndex: [o_hotkeys_listbox selectedRow]] intValue]]];
+        [o_hotkeys_change_keys_lbl setStringValue: [self OSXStringKeyToString:[o_hotkeySettings objectAtIndex: [o_hotkeys_listbox selectedRow]]]];
         [o_hotkeys_change_taken_lbl setStringValue: @""];
         [o_hotkeys_change_win setInitialFirstResponder: [o_hotkeys_change_win contentView]];
         [o_hotkeys_change_win makeFirstResponder: [o_hotkeys_change_win contentView]];
@@ -1266,7 +1129,12 @@ static inline void save_module_list( intf_thread_t * p_intf, id object, const ch
 
         i_returnValue = [o_hotkeySettings indexOfObject: o_keyInTransition];
         if( i_returnValue != NSNotFound )
-            [o_hotkeySettings replaceObjectAtIndex: i_returnValue withObject: [[NSNumber numberWithInt: 0] retain]];
+            [o_hotkeySettings replaceObjectAtIndex: i_returnValue withObject: [NSString string]];
+        NSString *tempString;
+        tempString = [o_keyInTransition stringByReplacingOccurrencesOfString:@"-" withString:@"+"];
+        i_returnValue = [o_hotkeySettings indexOfObject: tempString];
+        if( i_returnValue != NSNotFound )
+            [o_hotkeySettings replaceObjectAtIndex: i_returnValue withObject: [NSString string]];
 
         [o_hotkeySettings replaceObjectAtIndex: [o_hotkeys_listbox selectedRow] withObject: [o_keyInTransition retain]];
 
@@ -1277,10 +1145,14 @@ static inline void save_module_list( intf_thread_t * p_intf, id object, const ch
     }
     else if( sender == o_hotkeys_clear_btn )
     {
-        [o_hotkeySettings replaceObjectAtIndex: [o_hotkeys_listbox selectedRow] withObject: [NSNumber numberWithInt: 0]];
+        [o_hotkeySettings replaceObjectAtIndex: [o_hotkeys_listbox selectedRow] withObject: [NSString string]];
         [o_hotkeys_listbox reloadData];
         b_hotkeyChanged = YES;
     }
+
+    [[NSNotificationCenter defaultCenter] postNotificationName: @"VLCMediaKeySupportSettingChanged"
+                                                        object: nil
+                                                      userInfo: nil];
 }
 
 - (void)showHotkeySettings
@@ -1298,7 +1170,7 @@ static inline void save_module_list( intf_thread_t * p_intf, id object, const ch
     if( [[aTableColumn identifier] isEqualToString: @"action"] )
         return [o_hotkeyDescriptions objectAtIndex: rowIndex];
     else if( [[aTableColumn identifier] isEqualToString: @"shortcut"] )
-        return [self OSXKeyToString: [[o_hotkeySettings objectAtIndex: rowIndex] intValue]];
+        return [self OSXStringKeyToString:[o_hotkeySettings objectAtIndex: rowIndex]];
     else
     {
         msg_Err( p_intf, "unknown TableColumn identifier (%s)!", [[aTableColumn identifier] UTF8String] );
@@ -1306,11 +1178,12 @@ static inline void save_module_list( intf_thread_t * p_intf, id object, const ch
     }
 }
 
-- (BOOL)changeHotkeyTo: (int)i_theNewKey
+- (BOOL)changeHotkeyTo: (NSString *)theKey
 {
-    NSInteger i_returnValue;
-    i_returnValue = [o_hotkeysNonUseableKeys indexOfObject: [NSNumber numberWithInt: i_theNewKey]];
-    if( i_returnValue != NSNotFound || i_theNewKey == 0 )
+    NSInteger i_returnValue, i_returnValue2;
+    i_returnValue = [o_hotkeysNonUseableKeys indexOfObject: theKey];
+
+    if( i_returnValue != NSNotFound || [theKey isEqualToString:@""] )
     {
         [o_hotkeys_change_keys_lbl setStringValue: _NS("Invalid combination")];
         [o_hotkeys_change_taken_lbl setStringValue: _NS("Regrettably, these keys cannot be assigned as hotkey shortcuts.")];
@@ -1319,28 +1192,30 @@ static inline void save_module_list( intf_thread_t * p_intf, id object, const ch
     }
     else
     {
-        NSString *o_temp;
-        if( o_keyInTransition )
-            [o_keyInTransition release];
-        o_keyInTransition = [[NSNumber numberWithInt: i_theNewKey] retain];
+        [o_hotkeys_change_keys_lbl setStringValue: [self OSXStringKeyToString:theKey]];
 
-        o_temp = [self OSXKeyToString: i_theNewKey];
-
-        [o_hotkeys_change_keys_lbl setStringValue: o_temp];
-
-        i_returnValue = [o_hotkeySettings indexOfObject: o_keyInTransition];
+        i_returnValue = [o_hotkeySettings indexOfObject: theKey];
+        i_returnValue2 = [o_hotkeySettings indexOfObject: [theKey stringByReplacingOccurrencesOfString:@"-" withString:@"+"]];
         if( i_returnValue != NSNotFound )
             [o_hotkeys_change_taken_lbl setStringValue: [NSString stringWithFormat:
                                                          _NS("This combination is already taken by \"%@\"."),
                                                          [o_hotkeyDescriptions objectAtIndex: i_returnValue]]];
+        else if( i_returnValue2 != NSNotFound )
+            [o_hotkeys_change_taken_lbl setStringValue: [NSString stringWithFormat:
+                                                         _NS("This combination is already taken by \"%@\"."),
+                                                         [o_hotkeyDescriptions objectAtIndex: i_returnValue2]]];
+        
         else
             [o_hotkeys_change_taken_lbl setStringValue: @""];
 
         [o_hotkeys_change_ok_btn setEnabled: YES];
+        [o_keyInTransition release];
+        o_keyInTransition = theKey;
+        [o_keyInTransition retain];
         return YES;
     }
 }
-    
+
 @end
 
 /********************
@@ -1367,28 +1242,24 @@ static inline void save_module_list( intf_thread_t * p_intf, id object, const ch
 
 - (BOOL)performKeyEquivalent:(NSEvent *)o_theEvent
 {
-    unichar key;
-    int i_key = 0;
-
+    NSMutableString *tempString = [[[NSMutableString alloc] init] autorelease];
     if( [o_theEvent modifierFlags] & NSControlKeyMask )
-        i_key |= KEY_MODIFIER_CTRL;
-
+        [tempString appendString:@"Ctrl-"];
+    
     if( [o_theEvent modifierFlags] & NSAlternateKeyMask  )
-        i_key |= KEY_MODIFIER_ALT;
-
+        [tempString appendString:@"Alt-"];
+    
     if( [o_theEvent modifierFlags] & NSShiftKeyMask )
-        i_key |= KEY_MODIFIER_SHIFT;
-
+        [tempString appendString:@"Shift-"];
+    
     if( [o_theEvent modifierFlags] & NSCommandKeyMask )
-        i_key |= KEY_MODIFIER_COMMAND;
+        [tempString appendString:@"Command-"];
 
-    key = [[[o_theEvent charactersIgnoringModifiers] lowercaseString] characterAtIndex: 0];
-    if( key )
-    {
-        i_key |= CocoaKeyToVLC( key );
-        return [[[VLCMain sharedInstance] simplePreferences] changeHotkeyTo: i_key];
+    if (![[[o_theEvent charactersIgnoringModifiers] lowercaseString] isEqualToString:@""]) {
+        [tempString appendString:[[o_theEvent charactersIgnoringModifiers] lowercaseString]];
+            return [[[VLCMain sharedInstance] simplePreferences] changeHotkeyTo: tempString];
     }
-    return FALSE;
+    return NO;
 }
 
 @end

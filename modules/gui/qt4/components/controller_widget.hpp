@@ -31,10 +31,10 @@
 #include "qt4.hpp"
 
 #include <QWidget>
-#include <QFrame>
 #include <QToolButton>
 
 class QLabel;
+class QFrame;
 class QSpinBox;
 class QAbstractSlider;
 
@@ -50,17 +50,24 @@ class PlayButton : public QToolButton
 {
     Q_OBJECT
 private slots:
-    void updateButton( bool );
+    void updateButtonIcons( bool );
+};
+
+class LoopButton : public QToolButton
+{
+    Q_OBJECT
+public slots:
+    void updateButtonIcons( int );
 };
 
 class AtoB_Button : public QToolButton
 {
     Q_OBJECT
 private slots:
-    void setIcons( bool, bool );
+    void updateButtonIcons( bool, bool );
 };
 
-#define VOLUME_MAX 200
+#define VOLUME_MAX (QT_VOLUME_MAX * 100 / QT_VOLUME_DEFAULT)
 class SoundWidget : public QWidget
 {
     Q_OBJECT
@@ -69,19 +76,31 @@ public:
     SoundWidget( QWidget *parent, intf_thread_t  *_p_i, bool,
                  bool b_special = false );
     virtual ~SoundWidget();
+    void setMuted( bool );
+
+protected:
+    virtual bool eventFilter( QObject *obj, QEvent *e );
 
 private:
     intf_thread_t       *p_intf;
     QLabel              *volMuteLabel;
     QAbstractSlider     *volumeSlider;
     QFrame              *volumeControlWidget;
-    bool                 b_my_volume;
     QMenu               *volumeMenu;
-    virtual bool eventFilter( QObject *obj, QEvent *e );
+
+    bool                b_is_muted;
+    bool                b_ignore_valuechanged;
+
 protected slots:
-    void updateVolume( int );
-    void updateVolume( void );
+    void userUpdateVolume( int );
+    void libUpdateVolume( void );
+    void updateMuteStatus( void );
+    void refreshLabels( void );
     void showVolumeMenu( QPoint pos );
+    void valueChangedFilter( int );
+
+signals:
+    void valueReallyChanged( int );
 };
 
 #endif

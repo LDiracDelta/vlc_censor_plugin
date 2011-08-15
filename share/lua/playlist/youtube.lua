@@ -1,7 +1,7 @@
 --[[
  $Id$
 
- Copyright © 2007-2009 the VideoLAN team
+ Copyright © 2007-2011 the VideoLAN team
 
  This program is free software; you can redistribute it and/or modify
  it under the terms of the GNU General Public License as published by
@@ -24,18 +24,22 @@ function get_url_param( url, name )
     return res
 end
 
-function get_arturl( path, video_id )
-    if string.match( vlc.path, "iurl=" ) then
-        return vlc.strings( get_url_param( vlc.path, "iurl" ) )
+function get_arturl()
+    -- FIXME: vlc.strings() is not a function, it should probably be
+    -- vlc.strings.decode_uri()
+    --if string.match( vlc.path, "iurl=" ) then
+    --    return vlc.strings( get_url_param( vlc.path, "iurl" ) )
+    --end
+    video_id = get_url_param( vlc.path, "v" )
+    if not video_id then
+        return nil
     end
-    if not arturl then
-        return "http://img.youtube.com/vi/"..video_id.."/default.jpg"
-    end
+    return "http://img.youtube.com/vi/"..video_id.."/default.jpg"
 end
 
 -- Probe function.
 function probe()
-    if vlc.access ~= "http" then
+    if vlc.access ~= "http" and vlc.access ~= "https" then
         return false
     end
     youtube_site = string.match( string.sub( vlc.path, 1, 8 ), "youtube" )
@@ -47,81 +51,87 @@ function probe()
             return false
         end
     end
-    return (  string.match( vlc.path, "watch%?v=" ) -- the html page
-            or string.match( vlc.path, "watch_fullscreen%?video_id=" ) -- the fullscreen page
-            or string.match( vlc.path, "p.swf" ) -- the (old?) player url
-            or string.match( vlc.path, "jp.swf" ) -- the (new?) player url (as of 24/08/2007)
-            or string.match( vlc.path, "player2.swf" ) ) -- another player url
+    return (  string.match( vlc.path, "/watch%?" ) -- the html page
+            or string.match( vlc.path, "/v/" ) -- video in swf player
+            or string.match( vlc.path, "/player2.swf" ) ) -- another player url
 end
 
 -- Parse function.
 function parse()
-    if string.match( vlc.path, "watch%?v=" )
+    if string.match( vlc.path, "/watch%?" )
     then -- This is the HTML page's URL
+        -- fmt is the format of the video
+        -- (cf. http://en.wikipedia.org/wiki/YouTube#Quality_and_codecs)
+        fmt = get_url_param( vlc.path, "fmt" )
         while true do
             -- Try to find the video's title
             line = vlc.readline()
             if not line then break end
             if string.match( line, "<meta name=\"title\"" ) then
                 _,_,name = string.find( line, "content=\"(.-)\"" )
+                name = vlc.strings.resolve_xml_special_chars( name )
+                name = vlc.strings.resolve_xml_special_chars( name )
             end
             if string.match( line, "<meta name=\"description\"" ) then
                -- Don't ask me why they double encode ...
-                _,_,description = vlc.strings.resolve_xml_special_chars(vlc.strings.resolve_xml_special_chars(string.find( line, "content=\"(.-)\"" )))
+                _,_,description = string.find( line, "content=\"(.-)\"" )
+                description = vlc.strings.resolve_xml_special_chars( description )
+                description = vlc.strings.resolve_xml_special_chars( description )
             end
-            if string.match( line, "subscribe_to_user=" ) then
-                _,_,artist = string.find( line, "subscribe_to_user=([^&]*)" )
+            if string.match( line, "<meta property=\"og:image\"" ) then
+                _,_,arturl = string.find( line, "content=\"(.-)\"" )
             end
-            -- OLD: var swfArgs = {hl:'en',BASE_YT_URL:'http://youtube.com/',video_id:'XPJ7d8dq0t8',l:'292',t:'OEgsToPDskLFdOYrrlDm3FQPoQBYaCP1',sk:'0gnr-AE6QZJEZmCMd3lq_AC'};
-            -- NEW: var swfArgs = { "BASE_YT_URL": "http://youtube.com", "video_id": "OHVvVmUNBFc", "l": 88, "sk": "WswKuJzDBsdD6oG3IakCXgC", "t": "OEgsToPDskK3zO44y0QN8Fr5ZSAZwCQp", "plid": "AARGnwWMrmGkbpOxAAAA4AT4IAA", "tk": "mEL4E7PqHeaZp5OG19NQThHt9mXJU4PbRTOw6lz9osHi4Hixp7RE1w=="};
-            -- NEWER: 'SWF_ARGS': { [a lot of stuff...], "video_id": "OHVvVmUNBFc", "sk": "WswKuJzDBsdD6oG3IakCXgC", "t": "OEgsToPDskK3zO44y0QN8Fr5ZSAZwCQp", "plid": "AARGnwWMrmGkbpOxAAAA4AT4IAA"};
-            if ( string.match( line, "SWF_ARGS" ) or string.match( line, "swfArgs" ) ) and string.match( line, "video_id" ) then
-                if string.match( line, "BASE_YT_URL" ) then
-                    _,_,base_yt_url = string.find( line, "\"BASE_YT_URL\": \"(.-)\"" )
+            if string.match( line, " rel=\"author\"" ) then
+                _,_,artist = string.find( line, "href=\"/user/([^\"]*)\"" )
+            end
+            -- JSON parameters, also formerly known as "swfConfig",
+            -- "SWF_ARGS", "swfArgs" ...
+            if string.match( line, "PLAYER_CONFIG" ) then
+                url_map = string.match( line, "\"url_encoded_fmt_stream_map\": \"(.-)\"" )
+                if url_map then
+                    -- FIXME: do this properly
+                    url_map = string.gsub( url_map, "\\u0026", "&" )
+                    for url,itag in string.gmatch( url_map, "url=([^&,]+).-&itag=(%d+)" ) do
+                        -- Apparently formats are listed in quality order,
+                        -- so we can afford to simply take the first one
+                        if not fmt or tonumber( itag ) == tonumber( fmt ) then
+                            url = vlc.strings.decode_uri( url )
+                            path = url
+                            break
+                        end
+                    end
                 end
-                _,_,t = string.find( line, "\"t\": \"(.-)\"" )
-                -- vlc.msg.err( t )
-                -- video_id = string.gsub( line, ".*&video_id:'([^']*)'.*", "%1" )
+            -- There is also another version of the parameters, encoded
+            -- differently, as an HTML attribute of an <object> or <embed>
+            -- tag; but we don't need it now
             end
-            if name and description and artist --[[and video_id]] then break end
+        end
+
+        if not path then
+            vlc.msg.err( "Couldn't extract youtube video URL, please check for updates to this script" )
+            return { }
+        end
+
+        if not arturl then
+            arturl = get_arturl()
+        end
+
+        return { { path = path; name = name; description = description; artist = artist; arturl = arturl } }
+    else -- This is the flash player's URL
+        video_id = get_url_param( vlc.path, "video_id" )
+        if not video_id then
+            _,_,video_id = string.find( vlc.path, "/v/([^?]*)" )
         end
         if not video_id then
-            video_id = get_url_param( vlc.path, "v" )
+            vlc.msg.err( "Couldn't extract youtube video URL" )
+            return { }
         end
-        if not base_yt_url then
-            base_yt_url = "http://youtube.com/"
-        end
-        arturl = get_arturl( vlc.path, video_id )
-        -- fmt is the format of the video: 18 is HQ (mp4)
         fmt = get_url_param( vlc.path, "fmt" )
         if fmt then
             format = "&fmt=" .. fmt
         else
             format = ""
         end
-        if t then
-            return { { path = base_yt_url .. "get_video?video_id="..video_id.."&t="..t..format; name = name; description = description; artist = artist; arturl = arturl } }
-        else
-            -- This shouldn't happen ... but keep it as a backup.
-            return { { path = "http://www.youtube.com/v/"..video_id; name = name; description = description; artist = artist; arturl = arturl } }
-        end
-    else -- This is the flash player's URL
-        if string.match( vlc.path, "title=" ) then
-            name = get_url_param( vlc.path, "title" )
-        end
-        video_id = get_url_param( vlc.path, "video_id" )
-        arturl = get_arturl( vlc.path, video_id )
-        fmt = get_url_param( vlc.path, "fmt" )
-        if fmt then
-            format = "&fmt=" .. fmt
-        else
-            format = ""
-        end
-        if not string.match( vlc.path, "t=" ) then
-            -- This sucks, we're missing "t" which is now mandatory. Let's
-            -- try using another url
-            return { { path = "http://www.youtube.com/v/"..video_id; name = name; arturl = arturl } }
-        end
-        return { { path = "http://www.youtube.com/get_video.php?video_id="..video_id.."&t="..get_url_param( vlc.path, "t" )..format; name = name; arturl = arturl } }
+        return { { path = "http://www.youtube.com/watch?v="..video_id..format } }
     end
 end

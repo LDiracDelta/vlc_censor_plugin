@@ -29,14 +29,9 @@
 #include <vlc_common.h>
 #include <vlc_codec.h>
 
-#ifdef HAVE_LIBAVCODEC_AVCODEC_H
-#   include <libavcodec/avcodec.h>
-#elif defined(HAVE_FFMPEG_AVCODEC_H)
-#   include <ffmpeg/avcodec.h>
-#else
-#   include <avcodec.h>
-#endif
-#include "avcodec.h"
+#include <libavutil/avutil.h>
+#include <libavutil/pixfmt.h>
+#include "chroma.h"
 
 /*****************************************************************************
  * Chroma fourcc -> ffmpeg_id mapping
@@ -88,6 +83,23 @@ static const struct
     {VLC_FOURCC('N','V','1','2'), PIX_FMT_NV12, 0, 0, 0 },
     {VLC_FOURCC('N','V','2','1'), PIX_FMT_NV21, 0, 0, 0 },
 
+#if LIBAVUTIL_VERSION_INT >= ((51<<16)+(4<<8)+0)
+    {VLC_CODEC_I420_9L, PIX_FMT_YUV420P9LE, 0, 0, 0 },
+    {VLC_CODEC_I420_9B, PIX_FMT_YUV420P9BE, 0, 0, 0 },
+    {VLC_CODEC_I420_10L, PIX_FMT_YUV420P10LE, 0, 0, 0 },
+    {VLC_CODEC_I420_10B, PIX_FMT_YUV420P10BE, 0, 0, 0 },
+#endif
+#if LIBAVUTIL_VERSION_INT >= ((51<<16)+(9<<8)+0)
+    /* I422 9-bit seems missing */
+    {VLC_CODEC_I422_10L, PIX_FMT_YUV422P10LE, 0, 0, 0 },
+    {VLC_CODEC_I422_10B, PIX_FMT_YUV422P10BE, 0, 0, 0 },
+
+    {VLC_CODEC_I444_9L, PIX_FMT_YUV444P9LE, 0, 0, 0 },
+    {VLC_CODEC_I444_9B, PIX_FMT_YUV444P9BE, 0, 0, 0 },
+    {VLC_CODEC_I444_10L, PIX_FMT_YUV444P10LE, 0, 0, 0 },
+    {VLC_CODEC_I444_10B, PIX_FMT_YUV444P10BE, 0, 0, 0 },
+#endif
+
     /* Packed YUV formats */
     {VLC_CODEC_YUYV, PIX_FMT_YUYV422, 0, 0, 0 },
     {VLC_FOURCC('Y','U','Y','V'), PIX_FMT_YUYV422, 0, 0, 0 },
@@ -98,16 +110,14 @@ static const struct
     VLC_RGB( VLC_FOURCC('R','G','B','4'), PIX_FMT_RGB4, PIX_FMT_BGR4, 0x10, 0x06, 0x01 )
     VLC_RGB( VLC_FOURCC('R','G','B','8'), PIX_FMT_RGB8, PIX_FMT_BGR8, 0xC0, 0x38, 0x07 )
 
-    VLC_RGB( VLC_CODEC_RGB15, PIX_FMT_BGR555, PIX_FMT_RGB555, 0x7c00, 0x03e0, 0x001f )
-    VLC_RGB( VLC_CODEC_RGB16, PIX_FMT_BGR565, PIX_FMT_RGB565, 0xf800, 0x07e0, 0x001f )
+    VLC_RGB( VLC_CODEC_RGB15, PIX_FMT_RGB555, PIX_FMT_BGR555, 0x7c00, 0x03e0, 0x001f )
+    VLC_RGB( VLC_CODEC_RGB16, PIX_FMT_RGB565, PIX_FMT_BGR565, 0xf800, 0x07e0, 0x001f )
     VLC_RGB( VLC_CODEC_RGB24, PIX_FMT_BGR24, PIX_FMT_RGB24, 0xff0000, 0x00ff00, 0x0000ff )
 
     VLC_RGB( VLC_CODEC_RGB32, PIX_FMT_RGB32, PIX_FMT_BGR32, 0x00ff0000, 0x0000ff00, 0x000000ff )
     VLC_RGB( VLC_CODEC_RGB32, PIX_FMT_RGB32_1, PIX_FMT_BGR32_1, 0xff000000, 0x00ff0000, 0x0000ff00 )
 
-#if defined(PIX_FMT_RGBA)
     {VLC_CODEC_RGBA, PIX_FMT_RGBA, 0xff000000, 0x00ff0000, 0x0000ff00},
-#endif
     {VLC_CODEC_GREY, PIX_FMT_GRAY8, 0, 0, 0},
 
      /* Paletized RGB */

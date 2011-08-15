@@ -131,6 +131,7 @@ static int Open( vlc_object_t *p_this )
     if( ( p_sys->hfaad = faacDecOpen() ) == NULL )
     {
         msg_Err( p_dec, "cannot initialize faad" );
+        free( p_sys );
         return VLC_EGENERIC;
     }
 
@@ -158,6 +159,8 @@ static int Open( vlc_object_t *p_this )
                           &i_rate, &i_channels ) < 0 )
         {
             msg_Err( p_dec, "Failed to initialize faad using extra data" );
+            faacDecClose( p_sys->hfaad );
+            free( p_sys );
             return VLC_EGENERIC;
         }
 
@@ -295,7 +298,7 @@ static aout_buffer_t *DecodeBlock( decoder_t *p_dec, block_t **pp_block )
         date_Init( &p_sys->date, i_rate, 1 );
     }
 
-    if( p_block->i_pts != 0 && p_block->i_pts != date_Get( &p_sys->date ) )
+    if( p_block->i_pts > VLC_TS_INVALID && p_block->i_pts != date_Get( &p_sys->date ) )
     {
         date_Set( &p_sys->date, p_block->i_pts );
     }
@@ -364,7 +367,7 @@ static aout_buffer_t *DecodeBlock( decoder_t *p_dec, block_t **pp_block )
             date_Init( &p_sys->date, frame.samplerate, 1 );
             date_Set( &p_sys->date, p_block->i_pts );
         }
-        p_block->i_pts = 0;  /* PTS is valid only once */
+        p_block->i_pts = VLC_TS_INVALID;  /* PTS is valid only once */
 
         p_dec->fmt_out.audio.i_rate = frame.samplerate;
         p_dec->fmt_out.audio.i_channels = frame.channels;
@@ -373,10 +376,11 @@ static aout_buffer_t *DecodeBlock( decoder_t *p_dec, block_t **pp_block )
             = pi_channels_guessed[frame.channels];
 
         /* Adjust stream info when dealing with SBR/PS */
-        if( p_sys->b_sbr != frame.sbr || p_sys->b_ps != frame.ps )
+        bool b_sbr = (frame.sbr == 1) || (frame.sbr == 2);
+        if( p_sys->b_sbr != b_sbr || p_sys->b_ps != frame.ps )
         {
-            const char *psz_ext = (frame.sbr && frame.ps) ? "SBR+PS" :
-                                    frame.sbr ? "SBR" : "PS";
+            const char *psz_ext = (b_sbr && frame.ps) ? "SBR+PS" :
+                                    b_sbr ? "SBR" : "PS";
 
             msg_Dbg( p_dec, "AAC %s (channels: %u, samplerate: %lu)",
                     psz_ext, frame.channels, frame.samplerate );
@@ -386,7 +390,8 @@ static aout_buffer_t *DecodeBlock( decoder_t *p_dec, block_t **pp_block )
             if( p_dec->p_description )
                 vlc_meta_AddExtra( p_dec->p_description, _("AAC extension"), psz_ext );
 
-            p_sys->b_sbr = frame.sbr; p_sys->b_ps = frame.ps;
+            p_sys->b_sbr = b_sbr;
+            p_sys->b_ps = frame.ps;
         }
 
         /* Convert frame.channel_position to our own channel values */

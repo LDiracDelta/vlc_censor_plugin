@@ -56,7 +56,8 @@
 #import "prefs.h"
 #import "simple_prefs.h"
 #import "prefs_widgets.h"
-#import "vlc_keys.h"
+#import <vlc_keys.h>
+#import <vlc_modules.h>
 
 /* /!\ Warning: Unreadable code :/ */
 
@@ -211,7 +212,7 @@ static VLCPrefs *_o_sharedMainInstance = nil;
 {
     /* TODO: call savePrefs on Root item */
     [_rootTreeItem applyChanges];
-    config_SaveConfigFile( p_intf, NULL );
+    config_SaveConfigFile( p_intf );
     [o_prefs_window orderOut:self];
 }
 
@@ -347,8 +348,7 @@ static VLCPrefs *_o_sharedMainInstance = nil;
 
         /* Exclude empty plugins (submodules don't have config */
         /* options, they are stored in the parent module) */
-        if( module_is_main( p_module) )
-        {
+        if( module_is_main( p_module ) ) {
             pluginItem = self;
             _configItems = module_config_get( p_module, &confsize );
             _configSize = confsize;
@@ -385,7 +385,7 @@ static VLCPrefs *_o_sharedMainInstance = nil;
                 }
             }
             
-            if( module_is_main( p_module) && (configType & CONFIG_ITEM) )
+            if( module_is_main( p_module) && CONFIG_ITEM(configType) )
             {
                 if( categoryItem && [self isSubCategoryGeneral:lastsubcat] )
                 {
@@ -396,7 +396,7 @@ static VLCPrefs *_o_sharedMainInstance = nil;
                     [[subCategoryItem options] addObject:[[VLCTreeLeafItem alloc] initWithConfigItem:&p_configs[j]]];
                 }
             }
-            else if( !module_is_main( p_module) && (configType & CONFIG_ITEM))
+            else if( !module_is_main( p_module) && CONFIG_ITEM(configType))
             {
                 if( ![[subCategoryItem children] containsObject: pluginItem] )
                 {
@@ -516,8 +516,9 @@ static VLCPrefs *_o_sharedMainInstance = nil;
 
 - (id)initWithConfigItem: (module_config_t *) configItem
 {
-    NSString * name = [[[VLCMain sharedInstance] localizedString:configItem->psz_name] autorelease];
+    NSString * name = [[VLCMain sharedInstance] localizedString:configItem->psz_name];
     self = [super initWithName:name];
+    [name release];
     if( self != nil )
     {
         _configItem = configItem;

@@ -25,6 +25,10 @@
 #import "VLCLibrary.h"
 #import "VLCLibVLCBridging.h"
 
+#if TARGET_OS_IPHONE
+# include "vlc-plugins.h"
+#endif
+
 #ifdef HAVE_CONFIG_H
 # include "config.h"
 #endif
@@ -34,48 +38,10 @@
 
 static VLCLibrary * sharedLibrary = nil;
 
-void __catch_exception( void * e, const char * function, const char * file, int line_number )
-{
-    libvlc_exception_t * ex = (libvlc_exception_t *)e;
-    if( libvlc_exception_raised( ex ) )
-    {
-        NSException* libvlcException = [NSException
-            exceptionWithName:@"LibVLCException"
-            reason:[NSString stringWithFormat:@"libvlc has thrown us an error: %s (%s:%d %s)", 
-                libvlc_errmsg(), file, line_number, function]
-            userInfo:nil];
-        libvlc_exception_clear( ex );
-        @throw libvlcException;
-    }
-}
-
-void * CreateSharedLibraryOnStartup( void ) 
-{
-    NSAutoreleasePool *pool = [[NSAutoreleasePool alloc] init];
-    
-    /* This library is not loaded for no reason, so let's create
-     * a VLCLibrary instance. */
-    [VLCLibrary sharedLibrary];
-    
-    [pool release];
-    
-    return NULL;
-}
-
-void * DestroySharedLibraryAtExit( void )
-{
-    /* Release the global object that may have been alloc-ed
-     * in -[VLCLibrary init] */
-    [sharedLibrary release];
-    sharedLibrary = nil;
-
-    return NULL;
-}
-
 @implementation VLCLibrary
 + (VLCLibrary *)sharedLibrary
 {
-    if (!sharedLibrary) 
+    if (!sharedLibrary)
     {
         /* Initialize a shared instance */
         sharedLibrary = [[self alloc] init];
@@ -83,48 +49,70 @@ void * DestroySharedLibraryAtExit( void )
     return sharedLibrary;
 }
 
-- (id)init 
+- (id)init
 {
-    if (self = [super init]) 
+    if (self = [super init])
     {
-        libvlc_exception_t ex;
-        libvlc_exception_init( &ex );
-        
-        const char * lib_vlc_params[] = { 
-            "-I", "dummy",               // No interface 
-            "--no-video-title-show",     // Don't show the title on overlay when starting to play
-            "--no-sout-keep",
-            "--ignore-config",           // Don't read and write VLC config files.
-			"--opengl-provider=minimal_macosx", // Use minimal_macosx
-            "--vout=minimal_macosx",
-			"-verbose=-1",               // Don't polute the log
-            "--play-and-pause"           // When ending a stream pause it instead of stopping it.
-            //, "--control=motion", "--motion-use-rotate", "--video-filter=rotate"
-        };
-        
-        instance = (void *)libvlc_new( sizeof(lib_vlc_params)/sizeof(lib_vlc_params[0]), lib_vlc_params, &ex );
-        catch_exception( &ex );
-        
-        // Assignment unneeded, as the audio unit will do it for us
-        /*audio = */ [[VLCAudio alloc] initWithLibrary:self];
+        NSArray *vlcParams = [[NSBundle mainBundle] objectForInfoDictionaryKey:@"VLCParams"];
+        if (!vlcParams) {
+            NSMutableArray *defaultParams = [NSMutableArray array];
+            [defaultParams addObject:@"--play-and-pause"];                          // We want every movie to pause instead of stopping at eof
+            [defaultParams addObject:@"--no-color"];                                // Don't use color in output (Xcode doesn't show it)
+            [defaultParams addObject:@"--no-video-title-show"];                     // Don't show the title on overlay when starting to play
+            [defaultParams addObject:@"--verbose=-1"];                               // Let's not wreck the logs
+#if TARGET_OS_IPHONE
+//            [defaultParams addObject:@"--ffmpeg-fast"];                             // Let's disable this as it is error-prone
+            [defaultParams addObject:@"--ffmpeg-skiploopfilter=all"];
+#else
+            [defaultParams addObject:@"--no-sout-keep"];
+            [defaultParams addObject:@"--vout=macosx"];                             // Select Mac OS X video output
+            [defaultParams addObject:@"--text-renderer=quartztext"];                // our CoreText-based renderer
+            [defaultParams addObject:@"--extraintf=macosx_dialog_provider"];        // Some extra dialog (login, progress) may come up from here
+#endif
+            vlcParams = defaultParams;
+        }
+
+        NSUInteger paramNum = 0;
+        NSUInteger count = [vlcParams count];
+        const char *lib_vlc_params[count];
+        while (paramNum < count) {
+            NSString *vlcParam = [vlcParams objectAtIndex:paramNum];
+            lib_vlc_params[paramNum] = [vlcParam cStringUsingEncoding:NSASCIIStringEncoding];
+            paramNum++;
+        }
+        unsigned argc = sizeof(lib_vlc_params)/sizeof(lib_vlc_params[0]);
+#if TARGET_OS_IPHONE
+        instance = libvlc_new_with_builtins(argc, lib_vlc_params, vlc_builtins_modules);
+#else
+        instance = libvlc_new(argc, lib_vlc_params);
+#endif
+        NSAssert(instance, @"libvlc failed to initialize");
     }
     return self;
 }
 
-- (void)dealloc 
+- (NSString *)version
 {
-    if( instance ) 
+    return [NSString stringWithUTF8String:libvlc_get_version()];
+}
+
+- (NSString *)changeset
+{
+    return [NSString stringWithUTF8String:libvlc_get_changeset()];
+}
+
+- (void)dealloc
+{
+    if( instance )
         libvlc_release( instance );
-    
-    if( self == sharedLibrary ) 
+
+    if( self == sharedLibrary )
         sharedLibrary = nil;
-    
+
     instance = nil;
-    [audio release];
     [super dealloc];
 }
 
-@synthesize audio;
 @end
 
 @implementation VLCLibrary (VLCLibVLCBridging)
@@ -139,10 +127,3 @@ void * DestroySharedLibraryAtExit( void )
 }
 @end
 
-@implementation VLCLibrary (VLCAudioBridging)
-- (void)setAudio:(VLCAudio *)value
-{
-    if (!audio)
-        audio = value;
-}
-@end

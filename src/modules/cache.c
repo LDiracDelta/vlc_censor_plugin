@@ -35,42 +35,17 @@
 #include <stdio.h>                                              /* sprintf() */
 #include <string.h>                                              /* strdup() */
 #include <vlc_plugin.h>
+#include <errno.h>
 
-#ifdef HAVE_SYS_TYPES_H
-#   include <sys/types.h>
-#endif
+#include <sys/types.h>
 #ifdef HAVE_UNISTD_H
 #   include <unistd.h>
 #endif
-
-#if !defined(HAVE_DYNAMIC_PLUGINS)
-    /* no support for plugins */
-#elif defined(HAVE_DL_DYLD)
-#   if defined(HAVE_MACH_O_DYLD_H)
-#       include <mach-o/dyld.h>
-#   endif
-#elif defined(HAVE_DL_BEOS)
-#   if defined(HAVE_IMAGE_H)
-#       include <image.h>
-#   endif
-#elif defined(HAVE_DL_WINDOWS)
-#   include <windows.h>
-#elif defined(HAVE_DL_DLOPEN)
-#   if defined(HAVE_DLFCN_H) /* Linux, BSD, Hurd */
-#       include <dlfcn.h>
-#   endif
-#   if defined(HAVE_SYS_DL_H)
-#       include <sys/dl.h>
-#   endif
-#elif defined(HAVE_DL_SHL_LOAD)
-#   if defined(HAVE_DL_H)
-#       include <dl.h>
-#   endif
-#endif
+#include <assert.h>
 
 #include "config/configuration.h"
 
-#include "vlc_charset.h"
+#include <vlc_fs.h>
 
 #include "modules/modules.h"
 
@@ -80,76 +55,62 @@
  *****************************************************************************/
 #ifdef HAVE_DYNAMIC_PLUGINS
 static int    CacheLoadConfig  ( module_t *, FILE * );
-static int    CacheSaveConfig  ( module_t *, FILE * );
 
 /* Sub-version number
  * (only used to avoid breakage in dev version when cache structure changes) */
-#define CACHE_SUBVERSION_NUM 4
+#define CACHE_SUBVERSION_NUM 15
 
-/* Format string for the cache filename */
-#define CACHENAME_FORMAT \
-    "plugins-%.2zx%.2zx%.2"PRIx8".dat"
+/* Cache filename */
+#define CACHE_NAME "plugins.dat"
 /* Magic for the cache filename */
-#define CACHENAME_VALUES \
-    sizeof(int), sizeof(void *), *(uint8_t *)&(uint16_t){ 0xbe1e }
+#define CACHE_STRING "cache "PACKAGE_NAME" "PACKAGE_VERSION
 
 
-/*****************************************************************************
- * LoadPluginsCache: loads the plugins cache file
- *****************************************************************************
+void CacheDelete( vlc_object_t *obj, const char *dir )
+{
+    char *path;
+
+    assert( dir != NULL );
+
+    if( asprintf( &path, "%s"DIR_SEP CACHE_NAME, dir ) == -1 )
+        return;
+    msg_Dbg( obj, "removing plugins cache file %s", path );
+    vlc_unlink( path );
+    free( path );
+}
+
+/**
+ * Loads a plugins cache file.
+ *
  * This function will load the plugin cache if present and valid. This cache
  * will in turn be queried by AllocateAllPlugins() to see if it needs to
  * actually load the dynamically loadable module.
  * This allows us to only fully load plugins when they are actually used.
- *****************************************************************************/
-void CacheLoad( vlc_object_t *p_this, module_bank_t *p_bank, bool b_delete )
+ */
+size_t CacheLoad( vlc_object_t *p_this, const char *dir, module_cache_t ***r )
 {
-    char *psz_filename, *psz_cachedir = config_GetUserDir(VLC_CACHE_DIR);
+    char *psz_filename;
     FILE *file;
-    int i, j, i_size, i_read;
-    char p_cachestring[sizeof("cache " COPYRIGHT_MESSAGE)];
-    char p_cachelang[6], p_lang[6];
-    int i_cache;
-    module_cache_t **pp_cache = 0;
+    int i_size, i_read;
+    char p_cachestring[sizeof(CACHE_STRING)];
+    size_t i_cache;
     int32_t i_file_size, i_marker;
 
-    if( !psz_cachedir ) /* XXX: this should never happen */
-    {
-        msg_Err( p_this, "Unable to get cache directory" );
-        return;
-    }
+    assert( dir != NULL );
 
-    if( asprintf( &psz_filename, "%s"DIR_SEP CACHENAME_FORMAT,
-                  psz_cachedir, CACHENAME_VALUES ) == -1 )
-    {
-        free( psz_cachedir );
-        return;
-    }
-    free( psz_cachedir );
-
-    if( b_delete )
-    {
-#if !defined( UNDER_CE )
-        unlink( psz_filename );
-#else
-        wchar_t psz_wf[MAX_PATH];
-        MultiByteToWideChar( CP_ACP, 0, psz_filename, -1, psz_wf, MAX_PATH );
-        DeleteFile( psz_wf );
-#endif
-        msg_Dbg( p_this, "removing plugins cache file %s", psz_filename );
-        free( psz_filename );
-        return;
-    }
+    *r = NULL;
+    if( asprintf( &psz_filename, "%s"DIR_SEP CACHE_NAME, dir ) == -1 )
+        return 0;
 
     msg_Dbg( p_this, "loading plugins cache file %s", psz_filename );
 
-    file = utf8_fopen( psz_filename, "rb" );
+    file = vlc_fopen( psz_filename, "rb" );
     if( !file )
     {
-        msg_Warn( p_this, "could not open plugins cache file %s for reading",
+        msg_Warn( p_this, "cannot read %s (%m)",
                   psz_filename );
         free( psz_filename );
-        return;
+        return 0;
     }
     free( psz_filename );
 
@@ -160,7 +121,7 @@ void CacheLoad( vlc_object_t *p_this, module_bank_t *p_bank, bool b_delete )
         msg_Warn( p_this, "This doesn't look like a valid plugins cache "
                   "(too short)" );
         fclose( file );
-        return;
+        return 0;
     }
 
     fseek( file, 0, SEEK_END );
@@ -169,19 +130,19 @@ void CacheLoad( vlc_object_t *p_this, module_bank_t *p_bank, bool b_delete )
         msg_Warn( p_this, "This doesn't look like a valid plugins cache "
                   "(corrupted size)" );
         fclose( file );
-        return;
+        return 0;
     }
     fseek( file, sizeof(i_file_size), SEEK_SET );
 
     /* Check the file is a plugins cache */
-    i_size = sizeof("cache " COPYRIGHT_MESSAGE) - 1;
+    i_size = sizeof(CACHE_STRING) - 1;
     i_read = fread( p_cachestring, 1, i_size, file );
     if( i_read != i_size ||
-        memcmp( p_cachestring, "cache " COPYRIGHT_MESSAGE, i_size ) )
+        memcmp( p_cachestring, CACHE_STRING, i_size ) )
     {
         msg_Warn( p_this, "This doesn't look like a valid plugins cache" );
         fclose( file );
-        return;
+        return 0;
     }
 
 #ifdef DISTRO_VERSION
@@ -194,7 +155,7 @@ void CacheLoad( vlc_object_t *p_this, module_bank_t *p_bank, bool b_delete )
     {
         msg_Warn( p_this, "This doesn't look like a valid plugins cache" );
         fclose( file );
-        return;
+        return 0;
     }
 #endif
 
@@ -205,18 +166,7 @@ void CacheLoad( vlc_object_t *p_this, module_bank_t *p_bank, bool b_delete )
         msg_Warn( p_this, "This doesn't look like a valid plugins cache "
                   "(corrupted header)" );
         fclose( file );
-        return;
-    }
-
-    /* Check the language hasn't changed */
-    sprintf( p_lang, "%5.5s", _("C") ); i_size = 5;
-    i_read = fread( p_cachelang, 1, i_size, file );
-    if( i_read != i_size || memcmp( p_cachelang, p_lang, i_size ) )
-    {
-        msg_Warn( p_this, "This doesn't look like a valid plugins cache "
-                  "(language changed)" );
-        fclose( file );
-        return;
+        return 0;
     }
 
     /* Check header marker */
@@ -227,21 +177,20 @@ void CacheLoad( vlc_object_t *p_this, module_bank_t *p_bank, bool b_delete )
         msg_Warn( p_this, "This doesn't look like a valid plugins cache "
                   "(corrupted header)" );
         fclose( file );
-        return;
+        return 0;
     }
 
-    p_bank->i_loaded_cache = 0;
     if (fread( &i_cache, 1, sizeof(i_cache), file ) != sizeof(i_cache) )
     {
         msg_Warn( p_this, "This doesn't look like a valid plugins cache "
                   "(file too short)" );
         fclose( file );
-        return;
+        return 0;
     }
 
-    if( i_cache )
-        pp_cache = p_bank->pp_loaded_cache =
-                   malloc( i_cache * sizeof(void *) );
+    module_cache_t **pp_cache = malloc( i_cache * sizeof(*pp_cache) );
+    if( pp_cache == NULL )
+        i_cache = 0; /* don't load anything */
 
 #define LOAD_IMMEDIATE(a) \
     if( fread( (void *)&a, sizeof(char), sizeof(a), file ) != sizeof(a) ) goto error
@@ -252,7 +201,7 @@ void CacheLoad( vlc_object_t *p_this, module_bank_t *p_bank, bool b_delete )
      || ( i_size > 16384 ) ) \
         goto error; \
     if( i_size ) { \
-        char *psz = malloc( i_size ); \
+        char *psz = xmalloc( i_size ); \
         if( fread( psz, i_size, 1, file ) != 1 ) { \
             free( psz ); \
             goto error; \
@@ -265,24 +214,19 @@ void CacheLoad( vlc_object_t *p_this, module_bank_t *p_bank, bool b_delete )
     } \
 }
 
-    for( i = 0; i < i_cache; i++ )
+    for( size_t i = 0; i < i_cache; i++ )
     {
         uint16_t i_size;
         int i_submodules;
 
-        pp_cache[i] = malloc( sizeof(module_cache_t) );
-        p_bank->i_loaded_cache++;
+        pp_cache[i] = xmalloc( sizeof(module_cache_t) );
 
         /* Load common info */
-        LOAD_STRING( pp_cache[i]->psz_file );
-        LOAD_IMMEDIATE( pp_cache[i]->i_time );
-        LOAD_IMMEDIATE( pp_cache[i]->i_size );
-        LOAD_IMMEDIATE( pp_cache[i]->b_junk );
-        pp_cache[i]->b_used = false;
+        LOAD_STRING( pp_cache[i]->path );
+        LOAD_IMMEDIATE( pp_cache[i]->mtime );
+        LOAD_IMMEDIATE( pp_cache[i]->size );
 
-        if( pp_cache[i]->b_junk ) continue;
-
-        pp_cache[i]->p_module = vlc_module_create( p_this );
+        pp_cache[i]->p_module = vlc_module_create();
 
         /* Load additional infos */
         free( pp_cache[i]->p_module->psz_object_name );
@@ -290,22 +234,32 @@ void CacheLoad( vlc_object_t *p_this, module_bank_t *p_bank, bool b_delete )
         LOAD_STRING( pp_cache[i]->p_module->psz_shortname );
         LOAD_STRING( pp_cache[i]->p_module->psz_longname );
         LOAD_STRING( pp_cache[i]->p_module->psz_help );
-        for( j = 0; j < MODULE_SHORTCUT_MAX; j++ )
+
+        LOAD_IMMEDIATE( pp_cache[i]->p_module->i_shortcuts );
+        if( pp_cache[i]->p_module->i_shortcuts > MODULE_SHORTCUT_MAX )
+            goto error;
+        else if( pp_cache[i]->p_module->i_shortcuts == 0 )
+            pp_cache[i]->p_module->pp_shortcuts = NULL;
+        else
         {
-            LOAD_STRING( pp_cache[i]->p_module->pp_shortcuts[j] ); // FIX
+            pp_cache[i]->p_module->pp_shortcuts =
+                    xmalloc( sizeof( char ** ) * pp_cache[i]->p_module->i_shortcuts );
+            for( unsigned j = 0; j < pp_cache[i]->p_module->i_shortcuts; j++ )
+                LOAD_STRING( pp_cache[i]->p_module->pp_shortcuts[j] );
         }
+
         LOAD_STRING( pp_cache[i]->p_module->psz_capability );
         LOAD_IMMEDIATE( pp_cache[i]->p_module->i_score );
-        LOAD_IMMEDIATE( pp_cache[i]->p_module->i_cpu );
         LOAD_IMMEDIATE( pp_cache[i]->p_module->b_unloadable );
-        LOAD_IMMEDIATE( pp_cache[i]->p_module->b_reentrant );
-        LOAD_IMMEDIATE( pp_cache[i]->p_module->b_submodule );
 
         /* Config stuff */
         if( CacheLoadConfig( pp_cache[i]->p_module, file ) != VLC_SUCCESS )
             goto error;
 
         LOAD_STRING( pp_cache[i]->p_module->psz_filename );
+        LOAD_STRING( pp_cache[i]->p_module->domain );
+        if( pp_cache[i]->p_module->domain != NULL )
+            vlc_bindtextdomain( pp_cache[i]->p_module->domain );
 
         LOAD_IMMEDIATE( i_submodules );
 
@@ -313,34 +267,42 @@ void CacheLoad( vlc_object_t *p_this, module_bank_t *p_bank, bool b_delete )
         {
             module_t *p_module = vlc_submodule_create( pp_cache[i]->p_module );
             free( p_module->psz_object_name );
+            free( p_module->pp_shortcuts );
             LOAD_STRING( p_module->psz_object_name );
             LOAD_STRING( p_module->psz_shortname );
             LOAD_STRING( p_module->psz_longname );
             LOAD_STRING( p_module->psz_help );
-            for( j = 0; j < MODULE_SHORTCUT_MAX; j++ )
+
+            LOAD_IMMEDIATE( p_module->i_shortcuts );
+            if( p_module->i_shortcuts > MODULE_SHORTCUT_MAX )
+                goto error;
+            else if( p_module->i_shortcuts == 0 )
+                p_module->pp_shortcuts = NULL;
+            else
             {
-                LOAD_STRING( p_module->pp_shortcuts[j] ); // FIX
+                p_module->pp_shortcuts = xmalloc( sizeof( char ** ) * p_module->i_shortcuts );
+                for( unsigned j = 0; j < p_module->i_shortcuts; j++ )
+                    LOAD_STRING( p_module->pp_shortcuts[j] );
             }
+
             LOAD_STRING( p_module->psz_capability );
             LOAD_IMMEDIATE( p_module->i_score );
-            LOAD_IMMEDIATE( p_module->i_cpu );
             LOAD_IMMEDIATE( p_module->b_unloadable );
-            LOAD_IMMEDIATE( p_module->b_reentrant );
+            LOAD_STRING( p_module->domain );
         }
     }
-
     fclose( file );
-    return;
+
+    *r = pp_cache;
+    return i_cache;
 
  error:
 
     msg_Warn( p_this, "plugins cache not loaded (corrupted)" );
 
     /* TODO: cleanup */
-    p_bank->i_loaded_cache = 0;
-
     fclose( file );
-    return;
+    return 0;
 }
 
 
@@ -378,7 +340,6 @@ static int CacheLoadConfig( module_t *p_module, FILE *file )
         LOAD_STRING( p_module->p_config[i].psz_text );
         LOAD_STRING( p_module->p_config[i].psz_longtext );
         LOAD_STRING( p_module->p_config[i].psz_oldname );
-        LOAD_IMMEDIATE( p_module->p_config[i].b_removed );
 
         if (IsConfigStringType (p_module->p_config[i].i_type))
         {
@@ -386,19 +347,12 @@ static int CacheLoadConfig( module_t *p_module, FILE *file )
             p_module->p_config[i].value.psz =
                     (p_module->p_config[i].orig.psz != NULL)
                         ? strdup (p_module->p_config[i].orig.psz) : NULL;
-            p_module->p_config[i].saved.psz = NULL;
         }
         else
-        {
             memcpy (&p_module->p_config[i].value, &p_module->p_config[i].orig,
                     sizeof (p_module->p_config[i].value));
-            memcpy (&p_module->p_config[i].saved, &p_module->p_config[i].orig,
-                    sizeof (p_module->p_config[i].saved));
-        }
 
         p_module->p_config[i].b_dirty = false;
-
-        p_module->p_config[i].p_lock = &p_module->lock;
 
         if( p_module->p_config[i].i_list )
         {
@@ -406,7 +360,7 @@ static int CacheLoadConfig( module_t *p_module, FILE *file )
             {
                 int j;
                 p_module->p_config[i].ppsz_list =
-                    malloc( (p_module->p_config[i].i_list+1) * sizeof(char *));
+                    xmalloc( (p_module->p_config[i].i_list+1) * sizeof(char *));
                 if( p_module->p_config[i].ppsz_list )
                 {
                     for( j = 0; j < p_module->p_config[i].i_list; j++ )
@@ -418,7 +372,7 @@ static int CacheLoadConfig( module_t *p_module, FILE *file )
             {
                 int j;
                 p_module->p_config[i].ppsz_list_text =
-                    malloc( (p_module->p_config[i].i_list+1) * sizeof(char *));
+                    xmalloc( (p_module->p_config[i].i_list+1) * sizeof(char *));
                 if( p_module->p_config[i].ppsz_list_text )
                 {
                   for( j = 0; j < p_module->p_config[i].i_list; j++ )
@@ -429,7 +383,7 @@ static int CacheLoadConfig( module_t *p_module, FILE *file )
             if( p_module->p_config[i].pi_list )
             {
                 p_module->p_config[i].pi_list =
-                    malloc( (p_module->p_config[i].i_list + 1) * sizeof(int) );
+                    xmalloc( (p_module->p_config[i].i_list + 1) * sizeof(int) );
                 if( p_module->p_config[i].pi_list )
                 {
                     for (int j = 0; j < p_module->p_config[i].i_list; j++)
@@ -441,18 +395,16 @@ static int CacheLoadConfig( module_t *p_module, FILE *file )
         if( p_module->p_config[i].i_action )
         {
             p_module->p_config[i].ppf_action =
-                malloc( p_module->p_config[i].i_action * sizeof(void *) );
+                xmalloc( p_module->p_config[i].i_action * sizeof(void *) );
             p_module->p_config[i].ppsz_action_text =
-                malloc( p_module->p_config[i].i_action * sizeof(char *) );
+                xmalloc( p_module->p_config[i].i_action * sizeof(char *) );
 
             for (int j = 0; j < p_module->p_config[i].i_action; j++)
             {
-                p_module->p_config[i].ppf_action[j] = 0;
+                p_module->p_config[i].ppf_action[j] = NULL;
                 LOAD_STRING( p_module->p_config[i].ppsz_action_text[j] );
             }
         }
-
-        LOAD_IMMEDIATE( p_module->p_config[i].pf_callback );
     }
 
     return VLC_SUCCESS;
@@ -462,63 +414,70 @@ static int CacheLoadConfig( module_t *p_module, FILE *file )
     return VLC_EGENERIC;
 }
 
-static int CacheSaveSubmodule( FILE *file, module_t *p_module );
+static int CacheSaveBank( FILE *file, module_cache_t *const *, size_t );
 
 /*****************************************************************************
  * SavePluginsCache: saves the plugins cache to a file
  *****************************************************************************/
-void CacheSave( vlc_object_t *p_this, module_bank_t *p_bank )
+void CacheSave (vlc_object_t *p_this, const char *dir,
+                module_cache_t *const *pp_cache, size_t n)
 {
-    static char const psz_tag[] =
-        "Signature: 8a477f597d28d172789f06886806bc55\r\n"
-        "# This file is a cache directory tag created by VLC.\r\n"
-        "# For information about cache directory tags, see:\r\n"
-        "#   http://www.brynosaurus.com/cachedir/\r\n";
+    char *filename, *tmpname;
 
-    char *psz_cachedir = config_GetUserDir(VLC_CACHE_DIR);
-    FILE *file;
-    int i, j, i_cache;
-    module_cache_t **pp_cache;
-    uint32_t i_file_size = 0;
+    if (asprintf (&filename, "%s"DIR_SEP CACHE_NAME, dir ) == -1)
+        return;
 
-    if( !psz_cachedir ) /* XXX: this should never happen */
+    if (asprintf (&tmpname, "%s.%"PRIu32, filename, (uint32_t)getpid ()) == -1)
     {
-        msg_Err( p_this, "unable to get cache directory" );
+        free (filename);
         return;
     }
+    msg_Dbg (p_this, "saving plugins cache %s", filename);
 
-    char psz_filename[sizeof(DIR_SEP) + 32 + strlen(psz_cachedir)];
-    config_CreateDir( p_this, psz_cachedir );
-
-    snprintf( psz_filename, sizeof( psz_filename ),
-              "%s"DIR_SEP"CACHEDIR.TAG", psz_cachedir );
-    file = utf8_fopen( psz_filename, "wb" );
-    if (file != NULL)
+    FILE *file = vlc_fopen (tmpname, "wb");
+    if (file == NULL)
     {
-        if (fwrite (psz_tag, 1, sizeof (psz_tag) - 1, file) != 1)
-            clearerr (file); /* what else can we do? */
-        fclose( file );
+        if (errno != EACCES && errno != ENOENT)
+            msg_Warn (p_this, "cannot create %s (%m)", tmpname);
+        goto out;
     }
 
-    snprintf( psz_filename, sizeof( psz_filename ),
-              "%s"DIR_SEP CACHENAME_FORMAT, psz_cachedir,
-              CACHENAME_VALUES );
-    free( psz_cachedir );
-    msg_Dbg( p_this, "writing plugins cache %s", psz_filename );
+    if (CacheSaveBank (file, pp_cache, n))
+    {
+        msg_Warn (p_this, "cannot write %s (%m)", tmpname);
+        clearerr (file);
+        fclose (file);
+        vlc_unlink (tmpname);
+        goto out;
+    }
 
-    char psz_tmpname[sizeof (psz_filename) + 12];
-    snprintf (psz_tmpname, sizeof (psz_tmpname), "%s.%"PRIu32, psz_filename,
-              (uint32_t)getpid ());
-    file = utf8_fopen( psz_tmpname, "wb" );
-    if (file == NULL)
-        goto error;
+#if !defined( WIN32 ) && !defined( __OS2__ )
+    vlc_rename (tmpname, filename); /* atomically replace old cache */
+    fclose (file);
+#else
+    vlc_unlink (filename);
+    fclose (file);
+    vlc_rename (tmpname, filename);
+#endif
+out:
+    free (filename);
+    free (tmpname);
+}
+
+static int CacheSaveConfig (FILE *, const module_t *);
+static int CacheSaveSubmodule (FILE *, const module_t *);
+
+static int CacheSaveBank (FILE *file, module_cache_t *const *pp_cache,
+                          size_t i_cache)
+{
+    uint32_t i_file_size = 0;
 
     /* Empty space for file size */
     if (fwrite (&i_file_size, sizeof (i_file_size), 1, file) != 1)
         goto error;
 
     /* Contains version number */
-    if (fputs ("cache "COPYRIGHT_MESSAGE, file) == EOF)
+    if (fputs (CACHE_STRING, file) == EOF)
         goto error;
 #ifdef DISTRO_VERSION
     /* Allow binary maintaner to pass a string to detect new binary version*/
@@ -531,17 +490,10 @@ void CacheSave( vlc_object_t *p_this, module_bank_t *p_bank )
     if (fwrite (&i_file_size, sizeof (i_file_size), 1, file) != 1 )
         goto error;
 
-    /* Language */
-    if (fprintf (file, "%5.5s", _("C")) == EOF)
-        goto error;
-
     /* Header marker */
     i_file_size = ftell( file );
     if (fwrite (&i_file_size, sizeof (i_file_size), 1, file) != 1)
         goto error;
-
-    i_cache = p_bank->i_cache;
-    pp_cache = p_bank->pp_cache;
 
     if (fwrite( &i_cache, sizeof (i_cache), 1, file) != 1)
         goto error;
@@ -557,39 +509,34 @@ void CacheSave( vlc_object_t *p_this, module_bank_t *p_bank )
             goto error; \
     } while(0)
 
-    for( i = 0; i < i_cache; i++ )
+    for (unsigned i = 0; i < i_cache; i++)
     {
         uint32_t i_submodule;
 
         /* Save common info */
-        SAVE_STRING( pp_cache[i]->psz_file );
-        SAVE_IMMEDIATE( pp_cache[i]->i_time );
-        SAVE_IMMEDIATE( pp_cache[i]->i_size );
-        SAVE_IMMEDIATE( pp_cache[i]->b_junk );
-
-        if( pp_cache[i]->b_junk ) continue;
+        SAVE_STRING( pp_cache[i]->path );
+        SAVE_IMMEDIATE( pp_cache[i]->mtime );
+        SAVE_IMMEDIATE( pp_cache[i]->size );
 
         /* Save additional infos */
         SAVE_STRING( pp_cache[i]->p_module->psz_object_name );
         SAVE_STRING( pp_cache[i]->p_module->psz_shortname );
         SAVE_STRING( pp_cache[i]->p_module->psz_longname );
         SAVE_STRING( pp_cache[i]->p_module->psz_help );
-        for( j = 0; j < MODULE_SHORTCUT_MAX; j++ )
-        {
-            SAVE_STRING( pp_cache[i]->p_module->pp_shortcuts[j] ); // FIX
-        }
+        SAVE_IMMEDIATE( pp_cache[i]->p_module->i_shortcuts );
+        for (unsigned j = 0; j < pp_cache[i]->p_module->i_shortcuts; j++)
+            SAVE_STRING( pp_cache[i]->p_module->pp_shortcuts[j] );
+
         SAVE_STRING( pp_cache[i]->p_module->psz_capability );
         SAVE_IMMEDIATE( pp_cache[i]->p_module->i_score );
-        SAVE_IMMEDIATE( pp_cache[i]->p_module->i_cpu );
         SAVE_IMMEDIATE( pp_cache[i]->p_module->b_unloadable );
-        SAVE_IMMEDIATE( pp_cache[i]->p_module->b_reentrant );
-        SAVE_IMMEDIATE( pp_cache[i]->p_module->b_submodule );
 
         /* Config stuff */
-        if (CacheSaveConfig (pp_cache[i]->p_module, file))
+        if (CacheSaveConfig (file, pp_cache[i]->p_module))
             goto error;
 
         SAVE_STRING( pp_cache[i]->p_module->psz_filename );
+        SAVE_STRING( pp_cache[i]->p_module->domain );
 
         i_submodule = pp_cache[i]->p_module->submodule_count;
         SAVE_IMMEDIATE( i_submodule );
@@ -603,28 +550,13 @@ void CacheSave( vlc_object_t *p_this, module_bank_t *p_bank )
     if (fwrite (&i_file_size, sizeof (i_file_size), 1, file) != 1
      || fflush (file)) /* flush libc buffers */
         goto error;
-
-#ifndef WIN32
-    utf8_rename (psz_tmpname, psz_filename); /* atomically replace old cache */
-    fclose (file);
-#else
-    utf8_unlink (psz_filename);
-    fclose (file);
-    utf8_rename (psz_tmpname, psz_filename);
-#endif
-    return; /* success! */
+    return 0; /* success! */
 
 error:
-    msg_Warn (p_this, "could not write plugins cache %s (%m)",
-              psz_filename);
-    if (file != NULL)
-    {
-        clearerr (file);
-        fclose (file);
-    }
+    return -1;
 }
 
-static int CacheSaveSubmodule( FILE *file, module_t *p_module )
+static int CacheSaveSubmodule( FILE *file, const module_t *p_module )
 {
     if( !p_module )
         return 0;
@@ -635,14 +567,14 @@ static int CacheSaveSubmodule( FILE *file, module_t *p_module )
     SAVE_STRING( p_module->psz_shortname );
     SAVE_STRING( p_module->psz_longname );
     SAVE_STRING( p_module->psz_help );
-    for( unsigned j = 0; j < MODULE_SHORTCUT_MAX; j++ )
-         SAVE_STRING( p_module->pp_shortcuts[j] ); // FIXME
+    SAVE_IMMEDIATE( p_module->i_shortcuts );
+    for( unsigned j = 0; j < p_module->i_shortcuts; j++ )
+         SAVE_STRING( p_module->pp_shortcuts[j] );
 
     SAVE_STRING( p_module->psz_capability );
     SAVE_IMMEDIATE( p_module->i_score );
-    SAVE_IMMEDIATE( p_module->i_cpu );
     SAVE_IMMEDIATE( p_module->b_unloadable );
-    SAVE_IMMEDIATE( p_module->b_reentrant );
+    SAVE_STRING( p_module->domain );
     return 0;
 
 error:
@@ -650,7 +582,7 @@ error:
 }
 
 
-static int CacheSaveConfig( module_t *p_module, FILE *file )
+static int CacheSaveConfig (FILE *file, const module_t *p_module)
 {
     uint32_t i_lines = p_module->confsize;
 
@@ -667,7 +599,6 @@ static int CacheSaveConfig( module_t *p_module, FILE *file )
         SAVE_STRING( p_module->p_config[i].psz_text );
         SAVE_STRING( p_module->p_config[i].psz_longtext );
         SAVE_STRING( p_module->p_config[i].psz_oldname );
-        SAVE_IMMEDIATE( p_module->p_config[i].b_removed );
 
         if (IsConfigStringType (p_module->p_config[i].i_type))
             SAVE_STRING( p_module->p_config[i].orig.psz );
@@ -694,8 +625,6 @@ static int CacheSaveConfig( module_t *p_module, FILE *file )
 
         for (int j = 0; j < p_module->p_config[i].i_action; j++)
             SAVE_STRING( p_module->p_config[i].ppsz_action_text[j] );
-
-        SAVE_IMMEDIATE( p_module->p_config[i].pf_callback );
     }
     return 0;
 
@@ -734,21 +663,21 @@ void CacheMerge( vlc_object_t *p_this, module_t *p_cache, module_t *p_module )
 /*****************************************************************************
  * CacheFind: finds the cache entry corresponding to a file
  *****************************************************************************/
-module_cache_t *CacheFind( module_bank_t *p_bank, const char *psz_file,
-                           int64_t i_time, int64_t i_size )
+module_t *CacheFind( module_bank_t *p_bank,
+                     const char *path, time_t mtime, off_t size )
 {
-    module_cache_t **pp_cache;
-    int i_cache, i;
+    module_cache_t **cache = p_bank->pp_loaded_cache;
+    size_t n = p_bank->i_loaded_cache;
 
-    pp_cache = p_bank->pp_loaded_cache;
-    i_cache = p_bank->i_loaded_cache;
-
-    for( i = 0; i < i_cache; i++ )
-    {
-        if( !strcmp( pp_cache[i]->psz_file, psz_file ) &&
-            pp_cache[i]->i_time == i_time &&
-            pp_cache[i]->i_size == i_size ) return pp_cache[i];
-    }
+    for( size_t i = 0; i < n; i++ )
+        if( !strcmp( cache[i]->path, path )
+         && cache[i]->mtime == mtime
+         && cache[i]->size == size )
+       {
+            module_t *module = cache[i]->p_module;
+            cache[i]->p_module = NULL;
+            return module;
+       }
 
     return NULL;
 }

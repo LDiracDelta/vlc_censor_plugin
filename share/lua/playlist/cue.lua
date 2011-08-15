@@ -60,12 +60,13 @@ function cue_track( global, track )
 	end
 
 	t = {}
-	t.path = cue_path( track.file or global.file )
+	t.path = vlc.strings.make_uri(cue_path( track.file or global.file ))
 	t.title = track.title
 	t.album = global.title
 	t.artist = track.performer or global.performer
 	t.genre = track.genre or global.genre
 	t.date = track.date or global.date
+	t.description = global.comment
 	t.tracknum = track.num
 	t.options = { ":start-time=" .. math.floor(track.index01) }
 
@@ -103,6 +104,8 @@ function parse()
 				data.genre = cue_string( value )
 			elseif( subcmd == "DATE" and value ) then
 				data.date = cue_string( value )
+			elseif( subcmd == "COMMENT" and value ) then
+				data.comment = cue_string( value )
 			end
 		elseif( cmd == "PERFORMER" and arg ) then
 			data.performer = cue_string( arg )

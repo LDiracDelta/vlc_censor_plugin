@@ -157,7 +157,7 @@ OpenDialog::OpenDialog( QWidget *parent,
     CONNECT( ui.slaveCheckbox, toggled( bool ), this, updateMRL() );
     CONNECT( ui.slaveText, textChanged( const QString& ), this, updateMRL() );
     CONNECT( ui.cacheSpinBox, valueChanged( int ), this, updateMRL() );
-    CONNECT( ui.startTimeDoubleSpinBox, valueChanged( double ), this, updateMRL() );
+    CONNECT( ui.startTimeTimeEdit, 	timeChanged ( const QTime& ), this, updateMRL() );
     BUTTONACT( ui.advancedCheckBox, toggleAdvancedPanel() );
     BUTTONACT( ui.slaveBrowseButton, browseInputSlave() );
 
@@ -167,8 +167,11 @@ OpenDialog::OpenDialog( QWidget *parent,
     BUTTONACT( cancelButton, cancel() );
 
     /* Hide the advancedPanel */
-    if( !config_GetInt( p_intf, "qt-adv-options" ) )
+    if( !getSettings()->value( "opendialog-advanced", false ).toBool())
+    {
         ui.advancedFrame->hide();
+        ui.advancedFrame->setEnabled( false );
+    }
     else
         ui.advancedCheckBox->setChecked( true );
 
@@ -176,14 +179,20 @@ OpenDialog::OpenDialog( QWidget *parent,
     storedMethod = "";
     newCachingMethod( "file-caching" );
 
+    /* enforce section due to .ui bug */
+    ui.startTimeTimeEdit->setCurrentSection( QDateTimeEdit::SecondSection );
+
     setMinimumSize( sizeHint() );
     setMaximumWidth( 900 );
-    resize( getSettings()->value( "opendialog-size", QSize( 500, 490 ) ).toSize() );
+    resize( getSettings()->value( "opendialog-size", QSize( 500, 400 ) ).toSize() );
 }
 
 OpenDialog::~OpenDialog()
 {
-    getSettings()->setValue( "opendialog-size", size() );
+    getSettings()->setValue( "opendialog-size", size() -
+                 ( ui.advancedFrame->isEnabled() ?
+                   QSize(0, ui.advancedFrame->height()) : QSize(0, 0) ) );
+    getSettings()->setValue( "opendialog-advanced", ui.advancedFrame->isVisible() );
 }
 
 /* Used by VLM dialog and inputSlave selection */
@@ -192,6 +201,11 @@ QString OpenDialog::getMRL( bool b_all )
     if( itemsMRL.size() == 0 ) return "";
     return b_all ? itemsMRL[0] + ui.advancedLineInput->text()
                  : itemsMRL[0];
+}
+
+QString OpenDialog::getOptions()
+{
+    return ui.advancedLineInput->text();
 }
 
 /* Finish the dialog and decide if you open another one after */
@@ -230,15 +244,25 @@ void OpenDialog::showTab( int i_tab )
     if( i_tab == OPEN_CAPTURE_TAB ) captureOpenPanel->initialize();
     ui.Tab->setCurrentIndex( i_tab );
     show();
+    if( ui.Tab->currentWidget() != NULL )
+    {
+        OpenPanel *panel = dynamic_cast<OpenPanel *>( ui.Tab->currentWidget() );
+        assert( panel );
+        panel->onFocus();
+    }
 }
 
 /* Function called on signal currentChanged triggered */
 void OpenDialog::signalCurrent( int i_tab )
 {
     if( i_tab == OPEN_CAPTURE_TAB ) captureOpenPanel->initialize();
-
     if( ui.Tab->currentWidget() != NULL )
-        ( dynamic_cast<OpenPanel *>( ui.Tab->currentWidget() ) )->updateMRL();
+    {
+        OpenPanel *panel = dynamic_cast<OpenPanel *>( ui.Tab->currentWidget() );
+        assert( panel );
+        panel->onFocus();
+        panel->updateMRL();
+    }
 }
 
 void OpenDialog::toggleAdvancedPanel()
@@ -246,6 +270,7 @@ void OpenDialog::toggleAdvancedPanel()
     if( ui.advancedFrame->isVisible() )
     {
         ui.advancedFrame->hide();
+        ui.advancedFrame->setEnabled( false );
         if( size().isValid() )
             resize( size().width(), size().height()
                     - ui.advancedFrame->height() );
@@ -253,6 +278,7 @@ void OpenDialog::toggleAdvancedPanel()
     else
     {
         ui.advancedFrame->show();
+        ui.advancedFrame->setEnabled( true );
         if( size().isValid() )
             resize( size().width(), size().height()
                     + ui.advancedFrame->height() );
@@ -338,9 +364,7 @@ void OpenDialog::finish( bool b_enqueue = false )
         bool b_start = !i && !b_enqueue;
 
         input_item_t *p_input;
-        char* psz_uri = make_URI( qtu( itemsMRL[i] ) );
-        p_input = input_item_New( p_intf, psz_uri, NULL );
-        free( psz_uri );
+        p_input = input_item_New( qtu( itemsMRL[i] ), NULL );
 
         /* Insert options only for the first element.
            We don't know how to edit that anyway. */
@@ -406,13 +430,15 @@ void OpenDialog::updateMRL() {
     if( ui.slaveCheckbox->isChecked() ) {
         mrl += " :input-slave=" + ui.slaveText->text();
     }
-    int i_cache = config_GetInt( p_intf, qtu( storedMethod ) );
-    if( i_cache != ui.cacheSpinBox->value() ) {
-        mrl += QString( " :%1=%2" ).arg( storedMethod ).
-                                  arg( ui.cacheSpinBox->value() );
-    }
-    if( ui.startTimeDoubleSpinBox->value() ) {
-        mrl += " :start-time=" + QString::number( ui.startTimeDoubleSpinBox->value() );
+    mrl += QString( " :%1=%2" ).arg( storedMethod ).
+                                arg( ui.cacheSpinBox->value() );
+    if( ui.startTimeTimeEdit->time() != ui.startTimeTimeEdit->minimumTime() ) {
+        mrl += QString( " :start-time=%1.%2" )
+                .arg( QString::number(
+                    ui.startTimeTimeEdit->minimumTime().secsTo(
+                        ui.startTimeTimeEdit->time()
+                ) ) )
+               .arg( ui.startTimeTimeEdit->time().msec(), 3, 10, QChar('0') );
     }
     ui.advancedLineInput->setText( mrl );
     ui.mrlLine->setText( itemsMRL.join( " " ) );
@@ -422,7 +448,7 @@ void OpenDialog::newCachingMethod( const QString& method )
 {
     if( method != storedMethod ) {
         storedMethod = method;
-        int i_value = config_GetInt( p_intf, qtu( storedMethod ) );
+        int i_value = var_InheritInteger( p_intf, qtu( storedMethod ) );
         ui.cacheSpinBox->setValue( i_value );
     }
 }

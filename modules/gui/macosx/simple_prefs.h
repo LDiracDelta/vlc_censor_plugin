@@ -1,7 +1,7 @@
 /*****************************************************************************
 * simple_prefs.h: Simple Preferences for Mac OS X
 *****************************************************************************
-* Copyright (C) 2008 the VideoLAN team
+* Copyright (C) 2008-2011 the VideoLAN team
 * $Id$
 *
 * Authors: Felix Paul Kühne <fkuehne at videolan dot org>
@@ -25,14 +25,17 @@
 #import "intf.h"
 #import <vlc_common.h>
 
-@interface VLCSimplePrefs : NSObject
+#ifndef MAC_OS_X_VERSION_10_6
+@protocol NSToolbarDelegate <NSObject> @end
+#endif
+
+@interface VLCSimplePrefs : NSObject <NSToolbarDelegate>
 {
     IBOutlet id o_audio_dolby_pop;
     IBOutlet id o_audio_dolby_txt;
     IBOutlet id o_audio_effects_box;
     IBOutlet id o_audio_enable_ckb;
     IBOutlet id o_audio_general_box;
-    IBOutlet id o_audio_headphone_ckb;
     IBOutlet id o_audio_lang_fld;
     IBOutlet id o_audio_lang_txt;
     IBOutlet id o_audio_last_box;
@@ -41,9 +44,6 @@
     IBOutlet id o_audio_lastpwd_txt;
     IBOutlet id o_audio_lastuser_fld;
     IBOutlet id o_audio_lastuser_txt;
-    IBOutlet id o_audio_norm_ckb;
-    IBOutlet id o_audio_norm_fld;
-    IBOutlet id o_audio_norm_stepper;
     IBOutlet id o_audio_spdif_ckb;
     IBOutlet id o_audio_view;
     IBOutlet id o_audio_visual_pop;
@@ -81,23 +81,24 @@
     IBOutlet id o_input_rtsp_ckb;
     IBOutlet id o_input_skipLoop_txt;
     IBOutlet id o_input_skipLoop_pop;
-    IBOutlet id o_input_serverport_fld;
-    IBOutlet id o_input_serverport_txt;
     IBOutlet id o_input_view;
 
+    IBOutlet id o_intf_style_txt;
+    IBOutlet id o_intf_style_dark_bcell;
+    IBOutlet id o_intf_style_bright_bcell;
     IBOutlet id o_intf_art_pop;
     IBOutlet id o_intf_art_txt;
     IBOutlet id o_intf_embedded_ckb;
     IBOutlet id o_intf_fspanel_ckb;
 	IBOutlet id o_intf_appleremote_ckb;
 	IBOutlet id o_intf_mediakeys_ckb;
-    IBOutlet id o_intf_mediakeys_bg_ckb;
     IBOutlet id o_intf_lang_pop;
     IBOutlet id o_intf_lang_txt;
     IBOutlet id o_intf_network_box;
     IBOutlet id o_intf_view;
     IBOutlet id o_intf_update_ckb;
     IBOutlet id o_intf_last_update_lbl;
+    IBOutlet id o_intf_enableGrowl_ckb;
 
     IBOutlet id o_osd_encoding_pop;
     IBOutlet id o_osd_encoding_txt;
@@ -112,6 +113,11 @@
     IBOutlet id o_osd_lang_box;
     IBOutlet id o_osd_lang_fld;
     IBOutlet id o_osd_lang_txt;
+    IBOutlet id o_osd_opacity_txt;
+    IBOutlet id o_osd_opacity_fld;
+    IBOutlet id o_osd_opacity_sld;
+    IBOutlet id o_osd_forcebold_ckb;
+    IBOutlet id o_osd_moreoptions_txt;
     IBOutlet id o_osd_osd_box;
     IBOutlet id o_osd_osd_ckb;
     IBOutlet id o_osd_view;
@@ -155,14 +161,15 @@
 
     NSOpenPanel *o_selectFolderPanel;
     NSArray *o_hotkeyDescriptions;
+    NSArray *o_hotkeyNames;
     NSArray *o_hotkeysNonUseableKeys;
     NSMutableArray *o_hotkeySettings;
-    NSNumber *o_keyInTransition;
+    NSString *o_keyInTransition;
 
     intf_thread_t *p_intf;
 }
 + (VLCSimplePrefs *)sharedInstance;
-- (NSString *)OSXKeyToString:(int)val;
+- (NSString *)OSXStringKeyToString:(NSString *)theString;
 
 /* toolbar */
 - (NSToolbarItem *) toolbar: (NSToolbar *)o_toolbar 
@@ -209,7 +216,7 @@
 - (void)showHotkeySettings;
 - (int)numberOfRowsInTableView:(NSTableView *)aTableView;
 - (id)tableView:(NSTableView *)aTableView objectValueForTableColumn:(NSTableColumn *)aTableColumn row:(int)rowIndex;
-- (BOOL)changeHotkeyTo: (int)i_theNewKey;
+- (BOOL)changeHotkeyTo: (NSString *)theKey;
 
 @end
 

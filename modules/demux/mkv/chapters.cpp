@@ -28,18 +28,8 @@
 
 chapter_item_c::~chapter_item_c()
 {
-    std::vector<chapter_codec_cmds_c*>::iterator index = codecs.begin();
-    while ( index != codecs.end() )
-    {
-        delete (*index);
-        index++;
-    }
-    std::vector<chapter_item_c*>::iterator index_ = sub_chapters.begin();
-    while ( index_ != sub_chapters.end() )
-    {
-        delete (*index_);
-        index_++;
-    }
+    vlc_delete_all( codecs );
+    vlc_delete_all( sub_chapters );
 }
 
 int chapter_item_c::PublishChapters( input_title_t & title, int & i_user_chapters, int i_level )
@@ -62,7 +52,8 @@ int chapter_item_c::PublishChapters( input_title_t & title, int & i_user_chapter
 
         // A start time of '0' is ok. A missing ChapterTime element is ok, too, because '0' is its default value.
         title.i_seekpoint++;
-        title.seekpoint = (seekpoint_t**)realloc( title.seekpoint, title.i_seekpoint * sizeof( seekpoint_t* ) );
+        title.seekpoint = (seekpoint_t**)xrealloc( title.seekpoint,
+                                 title.i_seekpoint * sizeof( seekpoint_t* ) );
         title.seekpoint[title.i_seekpoint-1] = sk;
 
         if ( b_user_display )
@@ -90,9 +81,9 @@ chapter_item_c *chapter_item_c::BrowseCodecPrivate( unsigned int codec_id,
     {
         if ( match( **index ,p_cookie, i_cookie_size ) )
             return this;
-        index++;
+        ++index;
     }
- 
+
     // sub-chapters
     chapter_item_c *p_result = NULL;
     std::vector<chapter_item_c*>::const_iterator index2 = sub_chapters.begin();
@@ -101,9 +92,9 @@ chapter_item_c *chapter_item_c::BrowseCodecPrivate( unsigned int codec_id,
         p_result = (*index2)->BrowseCodecPrivate( codec_id, match, p_cookie, i_cookie_size );
         if ( p_result != NULL )
             return p_result;
-        index2++;
+        ++index2;
     }
- 
+
     return p_result;
 }
 
@@ -157,7 +148,7 @@ std::string chapter_item_c::GetCodecName( bool f_for_title ) const
         result = (*index)->GetCodecName( f_for_title );
         if ( result != "" )
             break;
-        index++;
+        ++index;
     }
 
     return result;
@@ -173,7 +164,7 @@ int16 chapter_item_c::GetTitleNumber( ) const
         result = (*index)->GetTitleNumber( );
         if ( result >= 0 )
             break;
-        index++;
+        ++index;
     }
 
     return result;
@@ -182,13 +173,13 @@ int16 chapter_item_c::GetTitleNumber( ) const
 int64_t chapter_item_c::RefreshChapters( bool b_ordered, int64_t i_prev_user_time )
 {
     int64_t i_user_time = i_prev_user_time;
- 
+
     // first the sub-chapters, and then ourself
     std::vector<chapter_item_c*>::iterator index = sub_chapters.begin();
     while ( index != sub_chapters.end() )
     {
         i_user_time = (*index)->RefreshChapters( b_ordered, i_user_time );
-        index++;
+        ++index;
     }
 
     if ( b_ordered )
@@ -242,9 +233,9 @@ chapter_item_c *chapter_item_c::FindTimecode( mtime_t i_user_timecode, const cha
         while ( index != sub_chapters.end() && ((p_current == NULL && psz_result == NULL) || (p_current != NULL && (!b_found || psz_result == NULL))))
         {
             psz_result = (*index)->FindTimecode( i_user_timecode, p_current, b_found );
-            index++;
+            ++index;
         }
- 
+
         if ( psz_result == NULL )
             psz_result = this;
     }
@@ -262,7 +253,7 @@ bool chapter_item_c::ParentOf( const chapter_item_c & item ) const
     {
         if ( (*index)->ParentOf( item ) )
             return true;
-        index++;
+        ++index;
     }
 
     return false;
@@ -275,7 +266,7 @@ bool chapter_item_c::Enter( bool b_do_subs )
     while ( index != codecs.end() )
     {
         f_result |= (*index)->Enter();
-        index++;
+        ++index;
     }
 
     if ( b_do_subs )
@@ -285,7 +276,7 @@ bool chapter_item_c::Enter( bool b_do_subs )
         while ( index_ != sub_chapters.end() )
         {
             f_result |= (*index_)->Enter( true );
-            index_++;
+            ++index_;
         }
     }
     return f_result;
@@ -299,7 +290,7 @@ bool chapter_item_c::Leave( bool b_do_subs )
     while ( index != codecs.end() )
     {
         f_result |= (*index)->Leave();
-        index++;
+        ++index;
     }
 
     if ( b_do_subs )
@@ -309,7 +300,7 @@ bool chapter_item_c::Leave( bool b_do_subs )
         while ( index_ != sub_chapters.end() )
         {
             f_result |= (*index_)->Leave( true );
-            index_++;
+            ++index_;
         }
     }
     b_is_leaving = false;
@@ -325,7 +316,7 @@ bool chapter_item_c::EnterAndLeave( chapter_item_c *p_item, bool b_final_enter )
     {
         if ( !p_common_parent->b_is_leaving && p_common_parent->Leave( false ) )
             return true;
-        p_common_parent = p_common_parent->psz_parent;
+        p_common_parent = p_common_parent->p_parent;
     }
 
     // enter from the parent to <this>
@@ -378,14 +369,14 @@ void chapter_edition_c::RefreshChapters( )
 mtime_t chapter_edition_c::Duration() const
 {
     mtime_t i_result = 0;
- 
+
     if ( sub_chapters.size() )
     {
         std::vector<chapter_item_c*>::const_iterator index = sub_chapters.end();
-        index--;
+        --index;
         i_result = (*index)->i_user_end_time;
     }
- 
+
     return i_result;
 }
 

@@ -28,24 +28,19 @@
 #ifdef HAVE_CONFIG_H
 # include "config.h"
 #endif
+#include <assert.h>
 
 #include <vlc_common.h>
 #include <vlc_plugin.h>
 #include <vlc_filter.h>
 #include <vlc_cpu.h>
 
-#ifdef HAVE_LIBSWSCALE_SWSCALE_H
-#   include <libswscale/swscale.h>
-#   include <libavcodec/avcodec.h>
-#elif defined(HAVE_FFMPEG_SWSCALE_H)
-#   include <ffmpeg/swscale.h>
-#   include <ffmpeg/avcodec.h>
-#endif
+#include <libswscale/swscale.h>
+
+#include "../codec/avcodec/chroma.h" // Chroma Avutil <-> VLC conversion
 
 /* Gruikkkkkkkkkk!!!!! */
-#include "../codec/avcodec/avcodec.h"
 #undef AVPALETTE_SIZE
-
 #define AVPALETTE_SIZE (256 * sizeof(uint32_t))
 
 /*****************************************************************************
@@ -71,8 +66,8 @@ vlc_module_begin ()
     set_category( CAT_VIDEO )
     set_subcategory( SUBCAT_VIDEO_VFILTER )
     set_callbacks( OpenScaler, CloseScaler )
-    add_integer( "swscale-mode", 2, NULL, SCALEMODE_TEXT, SCALEMODE_LONGTEXT, true )
-        change_integer_list( pi_mode_values, ppsz_mode_descriptions, NULL )
+    add_integer( "swscale-mode", 2, SCALEMODE_TEXT, SCALEMODE_LONGTEXT, true )
+        change_integer_list( pi_mode_values, ppsz_mode_descriptions )
 vlc_module_end ()
 
 /* Version checking */
@@ -104,6 +99,8 @@ struct filter_sys_t
     picture_t *p_dst_e;
     bool b_add_a;
     bool b_copy;
+    bool b_swap_uvi;
+    bool b_swap_uvo;
 };
 
 static picture_t *Filter( filter_t *, picture_t * );
@@ -118,6 +115,8 @@ typedef struct
     bool b_add_a;
     int  i_sws_flags;
     bool b_copy;
+    bool b_swap_uvi;
+    bool b_swap_uvo;
 } ScalerConfiguration;
 
 static int GetParameters( ScalerConfiguration *,
@@ -255,6 +254,31 @@ static bool IsFmtSimilar( const video_format_t *p_fmt1, const video_format_t *p_
            p_fmt1->i_height == p_fmt2->i_height;
 }
 
+static void FixParameters( int *pi_fmt, bool *pb_has_a, bool *pb_swap_uv, vlc_fourcc_t fmt )
+{
+    switch( fmt )
+    {
+    case VLC_CODEC_YUVA:
+        *pi_fmt = PIX_FMT_YUV444P;
+        *pb_has_a = true;
+        break;
+    case VLC_CODEC_RGBA:
+        *pi_fmt = PIX_FMT_BGR32;
+        *pb_has_a = true;
+        break;
+    case VLC_CODEC_YV12:
+        *pi_fmt = PIX_FMT_YUV420P;
+        *pb_swap_uv = true;
+        break;
+    case VLC_CODEC_YV9:
+        *pi_fmt = PIX_FMT_YUV410P;
+        *pb_swap_uv = true;
+        break;
+    default:
+        break;
+    }
+}
+
 static int GetParameters( ScalerConfiguration *p_cfg,
                           const video_format_t *p_fmti,
                           const video_format_t *p_fmto,
@@ -266,6 +290,8 @@ static int GetParameters( ScalerConfiguration *p_cfg,
     bool b_has_ai = false;
     bool b_has_ao = false;
     int i_sws_flags = i_sws_flags_default;
+    bool b_swap_uvi = false;
+    bool b_swap_uvo = false;
 
     GetFfmpegChroma( &i_fmti, *p_fmti );
     GetFfmpegChroma( &i_fmto, *p_fmto );
@@ -279,27 +305,8 @@ static int GetParameters( ScalerConfiguration *p_cfg,
         }
     }
 
-    if( p_fmti->i_chroma == VLC_CODEC_YUVA )
-    {
-        i_fmti = PIX_FMT_YUV444P;
-        b_has_ai = true;
-    }
-    else if( p_fmti->i_chroma == VLC_CODEC_RGBA )
-    {
-        i_fmti = PIX_FMT_BGR32;
-        b_has_ai = true;
-    }
-
-    if( p_fmto->i_chroma == VLC_CODEC_YUVA )
-    {
-        i_fmto = PIX_FMT_YUV444P;
-        b_has_ao = true;
-    }
-    else if( p_fmto->i_chroma == VLC_CODEC_RGBA )
-    {
-        i_fmto = PIX_FMT_BGR32;
-        b_has_ao = true;
-    }
+    FixParameters( &i_fmti, &b_has_ai, &b_swap_uvi, p_fmti->i_chroma );
+    FixParameters( &i_fmto, &b_has_ao, &b_swap_uvo, p_fmto->i_chroma );
 
     /* FIXME TODO removed when ffmpeg is fixed
      * Without SWS_ACCURATE_RND the quality is really bad for some conversions */
@@ -318,7 +325,11 @@ static int GetParameters( ScalerConfiguration *p_cfg,
         p_cfg->i_fmto = i_fmto;
         p_cfg->b_has_a = b_has_ai && b_has_ao;
         p_cfg->b_add_a = (!b_has_ai) && b_has_ao;
-        p_cfg->b_copy = i_fmti == i_fmto && p_fmti->i_width == p_fmto->i_width && p_fmti->i_height == p_fmto->i_height;
+        p_cfg->b_copy = i_fmti == i_fmto &&
+                        p_fmti->i_width == p_fmto->i_width &&
+                        p_fmti->i_height == p_fmto->i_height;
+        p_cfg->b_swap_uvi = b_swap_uvi;
+        p_cfg->b_swap_uvo = b_swap_uvo;
         p_cfg->i_sws_flags = i_sws_flags;
     }
 
@@ -332,7 +343,7 @@ static int Init( filter_t *p_filter )
 {
     filter_sys_t *p_sys = p_filter->p_sys;
     const video_format_t *p_fmti = &p_filter->fmt_in.video;
-    const video_format_t *p_fmto = &p_filter->fmt_out.video;
+    video_format_t       *p_fmto = &p_filter->fmt_out.video;
 
     if( IsFmtSimilar( p_fmti, &p_sys->fmt_in ) &&
         IsFmtSimilar( p_fmto, &p_sys->fmt_out ) &&
@@ -379,16 +390,18 @@ static int Init( filter_t *p_filter )
     }
     if( p_sys->ctxA )
     {
-        p_sys->p_src_a = picture_New( VLC_CODEC_GREY, i_fmti_width, p_fmti->i_height, 0 );
-        p_sys->p_dst_a = picture_New( VLC_CODEC_GREY, i_fmto_width, p_fmto->i_height, 0 );
+        p_sys->p_src_a = picture_New( VLC_CODEC_GREY, i_fmti_width, p_fmti->i_height, 0, 1 );
+        p_sys->p_dst_a = picture_New( VLC_CODEC_GREY, i_fmto_width, p_fmto->i_height, 0, 1 );
     }
     if( p_sys->i_extend_factor != 1 )
     {
-        p_sys->p_src_e = picture_New( p_fmti->i_chroma, i_fmti_width, p_fmti->i_height, 0 );
-        p_sys->p_dst_e = picture_New( p_fmto->i_chroma, i_fmto_width, p_fmto->i_height, 0 );
+        p_sys->p_src_e = picture_New( p_fmti->i_chroma, i_fmti_width, p_fmti->i_height, 0, 1 );
+        p_sys->p_dst_e = picture_New( p_fmto->i_chroma, i_fmto_width, p_fmto->i_height, 0, 1 );
 
-        memset( p_sys->p_src_e->p[0].p_pixels, 0, p_sys->p_src_e->p[0].i_pitch * p_sys->p_src_e->p[0].i_lines );
-        memset( p_sys->p_dst_e->p[0].p_pixels, 0, p_sys->p_dst_e->p[0].i_pitch * p_sys->p_dst_e->p[0].i_lines );
+        if( p_sys->p_src_e )
+            memset( p_sys->p_src_e->p[0].p_pixels, 0, p_sys->p_src_e->p[0].i_pitch * p_sys->p_src_e->p[0].i_lines );
+        if( p_sys->p_dst_e )
+            memset( p_sys->p_dst_e->p[0].p_pixels, 0, p_sys->p_dst_e->p[0].i_pitch * p_sys->p_dst_e->p[0].i_lines );
     }
 
     if( !p_sys->ctx ||
@@ -404,7 +417,10 @@ static int Init( filter_t *p_filter )
     p_sys->b_copy = cfg.b_copy;
     p_sys->fmt_in  = *p_fmti;
     p_sys->fmt_out = *p_fmto;
+    p_sys->b_swap_uvi = cfg.b_swap_uvi;
+    p_sys->b_swap_uvo = cfg.b_swap_uvo;
 
+    video_format_ScaleCropAr( p_fmto, p_fmti );
 #if 0
     msg_Dbg( p_filter, "%ix%i chroma: %4.4s -> %ix%i chroma: %4.4s extend by %d",
              p_fmti->i_width, p_fmti->i_height, (char *)&p_fmti->i_chroma,
@@ -444,13 +460,16 @@ static void Clean( filter_t *p_filter )
 
 static void GetPixels( uint8_t *pp_pixel[4], int pi_pitch[4],
                        const picture_t *p_picture,
-                       int i_plane_start, int i_plane_count )
+                       int i_plane_start, int i_plane_count,
+                       bool b_swap_uv )
 {
+    assert( !b_swap_uv || i_plane_count >= 3 );
     int n;
     for( n = 0; n < __MIN(i_plane_count, p_picture->i_planes-i_plane_start ); n++ )
     {
-        pp_pixel[n] = p_picture->p[i_plane_start+n].p_pixels;
-        pi_pitch[n] = p_picture->p[i_plane_start+n].i_pitch;
+        const int nd = ( b_swap_uv && n >= 1 && n <= 2 ) ? (3 - n) : n;
+        pp_pixel[nd] = p_picture->p[i_plane_start+n].p_pixels;
+        pi_pitch[nd] = p_picture->p[i_plane_start+n].i_pitch;
     }
     for( ; n < 4; n++ )
     {
@@ -500,15 +519,24 @@ static void CopyPad( picture_t *p_dst, const picture_t *p_src )
     }
 }
 
+static void SwapUV( picture_t *p_dst, const picture_t *p_src )
+{
+    picture_t tmp = *p_src;
+    tmp.p[1] = p_src->p[2];
+    tmp.p[2] = p_src->p[1];
+
+    picture_CopyPixels( p_dst, &tmp );
+}
 static void Convert( filter_t *p_filter, struct SwsContext *ctx,
-                     picture_t *p_dst, picture_t *p_src, int i_height, int i_plane_start, int i_plane_count )
+                     picture_t *p_dst, picture_t *p_src, int i_height, int i_plane_start, int i_plane_count,
+                     bool b_swap_uvi, bool b_swap_uvo )
 {
     uint8_t palette[AVPALETTE_SIZE];
 
     uint8_t *src[4]; int src_stride[4];
     uint8_t *dst[4]; int dst_stride[4];
 
-    GetPixels( src, src_stride, p_src, i_plane_start, i_plane_count );
+    GetPixels( src, src_stride, p_src, i_plane_start, i_plane_count, b_swap_uvi );
     if( p_filter->fmt_in.video.i_chroma == VLC_CODEC_RGBP )
     {
         memset( palette, 0, sizeof(palette) );
@@ -519,7 +547,7 @@ static void Convert( filter_t *p_filter, struct SwsContext *ctx,
         src_stride[1] = 4;
     }
 
-    GetPixels( dst, dst_stride, p_dst, i_plane_start, i_plane_count );
+    GetPixels( dst, dst_stride, p_dst, i_plane_start, i_plane_count, b_swap_uvo );
 
 #if LIBSWSCALE_VERSION_INT  >= ((0<<16)+(5<<8)+0)
     sws_scale( ctx, src, src_stride, 0, i_height,
@@ -568,10 +596,13 @@ static picture_t *Filter( filter_t *p_filter, picture_t *p_pic )
         CopyPad( p_src, p_pic );
     }
 
-    if( p_sys->b_copy )
+    if( p_sys->b_copy && p_sys->b_swap_uvi == p_sys->b_swap_uvo )
         picture_CopyPixels( p_dst, p_src );
+    else if( p_sys->b_copy )
+        SwapUV( p_dst, p_src );
     else
-        Convert( p_filter, p_sys->ctx, p_dst, p_src, p_fmti->i_height, 0, 3 );
+        Convert( p_filter, p_sys->ctx, p_dst, p_src, p_fmti->i_height, 0, 3,
+                 p_sys->b_swap_uvi, p_sys->b_swap_uvo );
     if( p_sys->ctxA )
     {
         /* We extract the A plane to rescale it, and then we reinject it. */
@@ -580,7 +611,7 @@ static picture_t *Filter( filter_t *p_filter, picture_t *p_pic )
         else
             plane_CopyPixels( p_sys->p_src_a->p, p_src->p+A_PLANE );
 
-        Convert( p_filter, p_sys->ctxA, p_sys->p_dst_a, p_sys->p_src_a, p_fmti->i_height, 0, 1 );
+        Convert( p_filter, p_sys->ctxA, p_sys->p_dst_a, p_sys->p_src_a, p_fmti->i_height, 0, 1, false, false );
         if( p_fmto->i_chroma == VLC_CODEC_RGBA )
             InjectA( p_dst, p_sys->p_dst_a, p_fmto->i_width * p_sys->i_extend_factor, p_fmto->i_height );
         else

@@ -35,21 +35,24 @@
  */
 
 #if defined( UNDER_CE )
-#   include <errno.h>                                           /* WinCE API */
 #elif defined( WIN32 )
 #   include <process.h>                                         /* Win32 API */
-#   include <errno.h>
 
 #else                                         /* pthreads (like Linux & BSD) */
 #   define LIBVLC_USE_PTHREAD 1
 #   define LIBVLC_USE_PTHREAD_CANCEL 1
 #   define _APPLE_C_SOURCE    1 /* Proper pthread semantics on OSX */
 
-#   include <stdlib.h> /* lldiv_t definition (only in C99) */
 #   include <unistd.h> /* _POSIX_SPIN_LOCKS */
 #   include <pthread.h>
-#   include <semaphore.h>
-#   include <time.h>
+
+/* Unnamed POSIX semaphores not supported on Mac OS X, use Mach semaphores instead */
+#   if defined (__APPLE__)
+#      include <mach/semaphore.h>
+#      include <mach/task.h>
+#   else
+#      include <semaphore.h>
+#   endif
 
 #endif
 
@@ -106,30 +109,41 @@ typedef pthread_t       vlc_thread_t;
 typedef pthread_mutex_t vlc_mutex_t;
 #define VLC_STATIC_MUTEX PTHREAD_MUTEX_INITIALIZER
 typedef pthread_cond_t  vlc_cond_t;
-typedef sem_t           vlc_sem_t;
+#define VLC_STATIC_COND  PTHREAD_COND_INITIALIZER
 typedef pthread_rwlock_t vlc_rwlock_t;
 typedef pthread_key_t   vlc_threadvar_t;
 typedef struct vlc_timer *vlc_timer_t;
 
-#elif defined( WIN32 )
-#if !defined( UNDER_CE )
-typedef HANDLE vlc_thread_t;
+#if defined (__APPLE__)
+typedef semaphore_t     vlc_sem_t;
 #else
-typedef struct
-{
-    HANDLE handle;
-    HANDLE cancel_event;
-} *vlc_thread_t;
+typedef sem_t           vlc_sem_t;
 #endif
 
+#elif defined( WIN32 )
+typedef struct vlc_thread *vlc_thread_t;
+
 typedef struct
 {
-    LONG initialized;
-    CRITICAL_SECTION mutex;
+    bool dynamic;
+    union
+    {
+        struct
+        {
+            bool locked;
+            unsigned long contention;
+        };
+        CRITICAL_SECTION mutex;
+    };
 } vlc_mutex_t;
-#define VLC_STATIC_MUTEX { 0, }
+#define VLC_STATIC_MUTEX { false, { { false, 0 } } }
 
-typedef HANDLE  vlc_cond_t;
+typedef struct
+{
+    HANDLE   handle;
+    unsigned clock;
+} vlc_cond_t;
+
 typedef HANDLE  vlc_sem_t;
 
 typedef struct
@@ -142,7 +156,7 @@ typedef struct
     DWORD         writer;
 } vlc_rwlock_t;
 
-typedef DWORD   vlc_threadvar_t;
+typedef struct vlc_threadvar *vlc_threadvar_t;
 typedef struct vlc_timer *vlc_timer_t;
 #endif
 
@@ -153,57 +167,117 @@ typedef struct vlc_timer *vlc_timer_t;
 /*****************************************************************************
  * Function definitions
  *****************************************************************************/
-VLC_EXPORT( void, vlc_mutex_init,    ( vlc_mutex_t * ) );
-VLC_EXPORT( void, vlc_mutex_init_recursive, ( vlc_mutex_t * ) );
-VLC_EXPORT( void, vlc_mutex_destroy, ( vlc_mutex_t * ) );
-VLC_EXPORT( void, vlc_mutex_lock, ( vlc_mutex_t * ) );
-VLC_EXPORT( int,  vlc_mutex_trylock, ( vlc_mutex_t * ) LIBVLC_USED );
-VLC_EXPORT( void, vlc_mutex_unlock, ( vlc_mutex_t * ) );
-VLC_EXPORT( void, vlc_cond_init,     ( vlc_cond_t * ) );
-VLC_EXPORT( void, vlc_cond_destroy,  ( vlc_cond_t * ) );
-VLC_EXPORT( void, vlc_cond_signal, (vlc_cond_t *) );
-VLC_EXPORT( void, vlc_cond_broadcast, (vlc_cond_t *) );
-VLC_EXPORT( void, vlc_cond_wait, (vlc_cond_t *, vlc_mutex_t *) );
-VLC_EXPORT( int,  vlc_cond_timedwait, (vlc_cond_t *, vlc_mutex_t *, mtime_t) );
-VLC_EXPORT( void, vlc_sem_init, (vlc_sem_t *, unsigned) );
-VLC_EXPORT( void, vlc_sem_destroy, (vlc_sem_t *) );
-VLC_EXPORT( int,  vlc_sem_post, (vlc_sem_t *) );
-VLC_EXPORT( void, vlc_sem_wait, (vlc_sem_t *) );
+VLC_API void vlc_mutex_init( vlc_mutex_t * );
+VLC_API void vlc_mutex_init_recursive( vlc_mutex_t * );
+VLC_API void vlc_mutex_destroy( vlc_mutex_t * );
+VLC_API void vlc_mutex_lock( vlc_mutex_t * );
+VLC_API int vlc_mutex_trylock( vlc_mutex_t * ) VLC_USED;
+VLC_API void vlc_mutex_unlock( vlc_mutex_t * );
+VLC_API void vlc_cond_init( vlc_cond_t * );
+VLC_API void vlc_cond_init_daytime( vlc_cond_t * );
+VLC_API void vlc_cond_destroy( vlc_cond_t * );
+VLC_API void vlc_cond_signal(vlc_cond_t *);
+VLC_API void vlc_cond_broadcast(vlc_cond_t *);
+VLC_API void vlc_cond_wait(vlc_cond_t *, vlc_mutex_t *);
+VLC_API int vlc_cond_timedwait(vlc_cond_t *, vlc_mutex_t *, mtime_t);
+VLC_API void vlc_sem_init(vlc_sem_t *, unsigned);
+VLC_API void vlc_sem_destroy(vlc_sem_t *);
+VLC_API int vlc_sem_post(vlc_sem_t *);
+VLC_API void vlc_sem_wait(vlc_sem_t *);
 
-VLC_EXPORT( void, vlc_rwlock_init, (vlc_rwlock_t *) );
-VLC_EXPORT( void, vlc_rwlock_destroy, (vlc_rwlock_t *) );
-VLC_EXPORT( void, vlc_rwlock_rdlock, (vlc_rwlock_t *) );
-VLC_EXPORT( void, vlc_rwlock_wrlock, (vlc_rwlock_t *) );
-VLC_EXPORT( void, vlc_rwlock_unlock, (vlc_rwlock_t *) );
-VLC_EXPORT( int, vlc_threadvar_create, (vlc_threadvar_t * , void (*) (void *) ) );
-VLC_EXPORT( void, vlc_threadvar_delete, (vlc_threadvar_t *) );
-VLC_EXPORT( int, vlc_threadvar_set, (vlc_threadvar_t, void *) );
-VLC_EXPORT( void *, vlc_threadvar_get, (vlc_threadvar_t) );
-VLC_EXPORT( int,  vlc_thread_create, ( vlc_object_t *, const char *, int, const char *, void * ( * ) ( vlc_object_t * ), int ) LIBVLC_USED );
-VLC_EXPORT( int,  __vlc_thread_set_priority, ( vlc_object_t *, const char *, int, int ) );
-VLC_EXPORT( void, __vlc_thread_join,   ( vlc_object_t * ) );
+VLC_API void vlc_rwlock_init(vlc_rwlock_t *);
+VLC_API void vlc_rwlock_destroy(vlc_rwlock_t *);
+VLC_API void vlc_rwlock_rdlock(vlc_rwlock_t *);
+VLC_API void vlc_rwlock_wrlock(vlc_rwlock_t *);
+VLC_API void vlc_rwlock_unlock(vlc_rwlock_t *);
+VLC_API int vlc_threadvar_create(vlc_threadvar_t * , void (*) (void *) );
+VLC_API void vlc_threadvar_delete(vlc_threadvar_t *);
+VLC_API int vlc_threadvar_set(vlc_threadvar_t, void *);
+VLC_API void * vlc_threadvar_get(vlc_threadvar_t);
 
-VLC_EXPORT( int, vlc_clone, (vlc_thread_t *, void * (*) (void *), void *, int) LIBVLC_USED );
-VLC_EXPORT( void, vlc_cancel, (vlc_thread_t) );
-VLC_EXPORT( void, vlc_join, (vlc_thread_t, void **) );
-VLC_EXPORT (void, vlc_control_cancel, (int cmd, ...));
+VLC_API int vlc_clone(vlc_thread_t *, void * (*) (void *), void *, int) VLC_USED;
+VLC_API void vlc_cancel(vlc_thread_t);
+VLC_API void vlc_join(vlc_thread_t, void **);
+VLC_API void vlc_control_cancel (int cmd, ...);
 
-VLC_EXPORT( int, vlc_timer_create, (vlc_timer_t *, void (*) (void *), void *) LIBVLC_USED );
-VLC_EXPORT( void, vlc_timer_destroy, (vlc_timer_t) );
-VLC_EXPORT( void, vlc_timer_schedule, (vlc_timer_t, bool, mtime_t, mtime_t) );
-VLC_EXPORT( unsigned, vlc_timer_getoverrun, (vlc_timer_t) LIBVLC_USED );
+VLC_API mtime_t mdate(void);
+VLC_API void mwait(mtime_t deadline);
+VLC_API void msleep(mtime_t delay);
+
+#define VLC_HARD_MIN_SLEEP   10000 /* 10 milliseconds = 1 tick at 100Hz */
+#define VLC_SOFT_MIN_SLEEP 9000000 /* 9 seconds */
+
+#if defined (__GNUC__) \
+ && ((__GNUC__ > 4) || (__GNUC__ == 4 && __GNUC_MINOR__ >= 3))
+/* Linux has 100, 250, 300 or 1000Hz
+ *
+ * HZ=100 by default on FreeBSD, but some architectures use a 1000Hz timer
+ */
+
+static
+__attribute__((unused))
+__attribute__((noinline))
+__attribute__((error("sorry, cannot sleep for such short a time")))
+mtime_t impossible_delay( mtime_t delay )
+{
+    (void) delay;
+    return VLC_HARD_MIN_SLEEP;
+}
+
+static
+__attribute__((unused))
+__attribute__((noinline))
+__attribute__((warning("use proper event handling instead of short delay")))
+mtime_t harmful_delay( mtime_t delay )
+{
+    return delay;
+}
+
+# define check_delay( d ) \
+    ((__builtin_constant_p(d < VLC_HARD_MIN_SLEEP) \
+   && (d < VLC_HARD_MIN_SLEEP)) \
+       ? impossible_delay(d) \
+       : ((__builtin_constant_p(d < VLC_SOFT_MIN_SLEEP) \
+       && (d < VLC_SOFT_MIN_SLEEP)) \
+           ? harmful_delay(d) \
+           : d))
+
+static
+__attribute__((unused))
+__attribute__((noinline))
+__attribute__((error("deadlines can not be constant")))
+mtime_t impossible_deadline( mtime_t deadline )
+{
+    return deadline;
+}
+
+# define check_deadline( d ) \
+    (__builtin_constant_p(d) ? impossible_deadline(d) : d)
+#else
+# define check_delay(d) (d)
+# define check_deadline(d) (d)
+#endif
+
+#define msleep(d) msleep(check_delay(d))
+#define mwait(d) mwait(check_deadline(d))
+
+VLC_API int vlc_timer_create(vlc_timer_t *, void (*) (void *), void *) VLC_USED;
+VLC_API void vlc_timer_destroy(vlc_timer_t);
+VLC_API void vlc_timer_schedule(vlc_timer_t, bool, mtime_t, mtime_t);
+VLC_API unsigned vlc_timer_getoverrun(vlc_timer_t) VLC_USED;
+
+VLC_API unsigned vlc_GetCPUCount(void);
 
 #ifndef LIBVLC_USE_PTHREAD_CANCEL
 enum {
-    VLC_DO_CANCEL,
     VLC_CLEANUP_PUSH,
     VLC_CLEANUP_POP,
 };
 #endif
 
-VLC_EXPORT( int, vlc_savecancel, (void) );
-VLC_EXPORT( void, vlc_restorecancel, (int state) );
-VLC_EXPORT( void, vlc_testcancel, (void) );
+VLC_API int vlc_savecancel(void);
+VLC_API void vlc_restorecancel(int state);
+VLC_API void vlc_testcancel(void);
 
 #if defined (LIBVLC_USE_PTHREAD_CANCEL)
 /**
@@ -379,24 +453,6 @@ static inline void barrier (void)
 #endif
 }
 
-/*****************************************************************************
- * vlc_thread_create: create a thread
- *****************************************************************************/
-#define vlc_thread_create( P_THIS, PSZ_NAME, FUNC, PRIORITY )         \
-    vlc_thread_create( VLC_OBJECT(P_THIS), __FILE__, __LINE__, PSZ_NAME, FUNC, PRIORITY )
-
-/*****************************************************************************
- * vlc_thread_set_priority: set the priority of the calling thread
- *****************************************************************************/
-#define vlc_thread_set_priority( P_THIS, PRIORITY )                         \
-    __vlc_thread_set_priority( VLC_OBJECT(P_THIS), __FILE__, __LINE__, PRIORITY )
-
-/*****************************************************************************
- * vlc_thread_join: wait until a thread exits
- *****************************************************************************/
-#define vlc_thread_join( P_THIS )                                           \
-    __vlc_thread_join( VLC_OBJECT(P_THIS) )
-
 #ifdef __cplusplus
 /**
  * Helper C++ class to lock a mutex.
@@ -419,5 +475,19 @@ class vlc_mutex_locker
         }
 };
 #endif
+
+enum {
+   VLC_AVCODEC_MUTEX = 0,
+   VLC_GCRYPT_MUTEX,
+   VLC_XLIB_MUTEX,
+   VLC_MOSAIC_MUTEX,
+   VLC_HIGHLIGHT_MUTEX,
+   /* Insert new entry HERE */
+   VLC_MAX_MUTEX
+};
+
+VLC_API void vlc_global_mutex( unsigned, bool );
+#define vlc_global_lock( n ) vlc_global_mutex( n, true )
+#define vlc_global_unlock( n ) vlc_global_mutex( n, false )
 
 #endif /* !_VLC_THREADS_H */

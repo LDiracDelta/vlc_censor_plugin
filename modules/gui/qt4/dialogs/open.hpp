@@ -57,7 +57,7 @@ class QTabWidget;
 
 class OpenDialog : public QVLCDialog
 {
-    Q_OBJECT;
+    Q_OBJECT
 public:
     static OpenDialog * getInstance( QWidget *parent, intf_thread_t *p_intf,
                                 bool b_rawInstance = false, int _action_flag = 0,
@@ -71,6 +71,7 @@ public:
 
     void showTab( int = OPEN_FILE_TAB );
     QString getMRL( bool b = true );
+    QString getOptions();
 
 public slots:
     void selectSlots();

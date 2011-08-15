@@ -39,6 +39,7 @@
 struct demux_sys_t
 {
     char *psz_prefix;
+    char *(*pf_dup) (const char *);
 };
 
 /*****************************************************************************
@@ -49,6 +50,11 @@ static int Control( demux_t *p_demux, int i_query, va_list args );
 static void parseEXTINF( char *psz_string, char **ppsz_artist, char **ppsz_name, int *pi_duration );
 static bool ContainsURL( demux_t *p_demux );
 
+static char *GuessEncoding (const char *str)
+{
+    return IsUTF8 (str) ? strdup (str) : FromLatin1 (str);
+}
+
 /*****************************************************************************
  * Import_M3U: main import function
  *****************************************************************************/
@@ -57,14 +63,25 @@ int Import_M3U( vlc_object_t *p_this )
     demux_t *p_demux = (demux_t *)p_this;
     const uint8_t *p_peek;
     CHECK_PEEK( p_peek, 8 );
+    char *(*pf_dup) (const char *);
 
-    if(! ( POKE( p_peek, "#EXTM3U", 7 ) || POKE( p_peek, "RTSPtext", 8 ) ||
-           demux_IsPathExtension( p_demux, ".m3u" ) || demux_IsPathExtension( p_demux, ".vlc" ) ||
-           demux_IsForced( p_demux,  "m3u" ) || ContainsURL( p_demux ) ) )
+    if( POKE( p_peek, "RTSPtext", 8 ) /* QuickTime */
+     || demux_IsPathExtension( p_demux, ".m3u8" )
+     || demux_IsForced( p_demux, "m3u8" ) )
+        pf_dup = strdup; /* UTF-8 */
+    else
+    if( POKE( p_peek, "#EXTM3U", 7 )
+     || demux_IsPathExtension( p_demux, ".m3u" )
+     || demux_IsPathExtension( p_demux, ".vlc" )
+     || demux_IsForced( p_demux, "m3u" )
+     || ContainsURL( p_demux ) )
+        pf_dup = GuessEncoding;
+    else
         return VLC_EGENERIC;
 
     STANDARD_DEMUX_INIT_MSG( "found valid M3U playlist" );
     p_demux->p_sys->psz_prefix = FindPrefix( p_demux );
+    p_demux->p_sys->pf_dup = pf_dup;
 
     return VLC_SUCCESS;
 }
@@ -80,7 +97,7 @@ static bool ContainsURL( demux_t *p_demux )
 
     while( p_peek + sizeof( "https://" ) < p_peek_end )
     {
-        /* One line starting with an URL is enough */
+        /* One line starting with a URL is enough */
         if( !strncasecmp( (const char *)p_peek, "http://", 7 ) ||
             !strncasecmp( (const char *)p_peek, "mms://", 6 ) ||
             !strncasecmp( (const char *)p_peek, "rtsp://", 7 ) ||
@@ -119,14 +136,17 @@ static int Demux( demux_t *p_demux )
     char       *psz_line;
     char       *psz_name = NULL;
     char       *psz_artist = NULL;
+    char       *psz_album_art = NULL;
     int        i_parsed_duration = 0;
     mtime_t    i_duration = -1;
     const char**ppsz_options = NULL;
+    char *    (*pf_dup) (const char *) = p_demux->p_sys->pf_dup;
     int        i_options = 0;
     bool b_cleanup = false;
     input_item_t *p_input;
 
     input_item_t *p_current_input = GetCurrentItem(p_demux);
+    input_item_node_t *p_subitems = input_item_node_Create( p_current_input );
 
     psz_line = stream_ReadLine( p_demux->s );
     while( psz_line )
@@ -152,13 +172,15 @@ static int Demux( demux_t *p_demux )
             {
                 /* Extended info */
                 psz_parse += sizeof("EXTINF:") - 1;
+                free(psz_name);
+                free(psz_artist);
                 parseEXTINF( psz_parse, &psz_artist, &psz_name, &i_parsed_duration );
                 if( i_parsed_duration >= 0 )
                     i_duration = i_parsed_duration * INT64_C(1000000);
                 if( psz_name )
-                    psz_name = FromLocaleDup( psz_name );
+                    psz_name = pf_dup( psz_name );
                 if( psz_artist )
-                    psz_artist = FromLocaleDup( psz_artist );
+                    psz_artist = pf_dup( psz_artist );
             }
             else if( !strncasecmp( psz_parse, "EXTVLCOPT:",
                                    sizeof("EXTVLCOPT:") -1 ) )
@@ -168,10 +190,18 @@ static int Demux( demux_t *p_demux )
                 psz_parse += sizeof("EXTVLCOPT:") -1;
                 if( !*psz_parse ) goto error;
 
-                psz_option = FromLocaleDup( psz_parse );
+                psz_option = pf_dup( psz_parse );
                 if( psz_option )
                     INSERT_ELEM( ppsz_options, i_options, i_options,
                                  psz_option );
+            }
+            /* Special case for jamendo which provide the albumart */
+            else if( !strncasecmp( psz_parse, "EXTALBUMARTURL:",
+                     sizeof( "EXTALBUMARTURL:" ) -1 ) )
+            {
+                psz_parse += sizeof( "EXTALBUMARTURL:" ) - 1;
+                free( psz_album_art );
+                psz_album_art = pf_dup( psz_parse );
             }
         }
         else if( !strncasecmp( psz_parse, "RTSPtext", sizeof("RTSPtext") -1 ) )
@@ -182,7 +212,7 @@ static int Demux( demux_t *p_demux )
         {
             char *psz_mrl;
 
-            psz_parse = FromLocale( psz_parse );
+            psz_parse = pf_dup( psz_parse );
             if( !psz_name && psz_parse )
                 /* Use filename as name for relative entries */
                 psz_name = strdup( psz_parse );
@@ -190,19 +220,25 @@ static int Demux( demux_t *p_demux )
             psz_mrl = ProcessMRL( psz_parse, p_demux->p_sys->psz_prefix );
 
             b_cleanup = true;
-            if( !psz_mrl ) goto error;
+            if( !psz_mrl )
+            {
+                free( psz_parse );
+                goto error;
+            }
 
-            p_input = input_item_NewExt( p_demux, psz_mrl, psz_name,
+            p_input = input_item_NewExt( psz_mrl, psz_name,
                                         i_options, ppsz_options, 0, i_duration );
 
-            LocaleFree( psz_parse );
+            free( psz_parse );
             free( psz_mrl );
 
-            if ( psz_artist && *psz_artist )
+            if ( !EMPTY_STR(psz_artist) )
                 input_item_SetArtist( p_input, psz_artist );
             if( psz_name ) input_item_SetTitle( p_input, psz_name );
+            if( !EMPTY_STR(psz_album_art) )
+                input_item_SetArtURL( p_input, psz_album_art );
 
-            input_item_AddSubItem( p_current_input, p_input );
+            input_item_node_AppendItem( p_subitems, p_input );
             vlc_gc_decref( p_input );
         }
 
@@ -217,18 +253,18 @@ static int Demux( demux_t *p_demux )
         {
             /* Cleanup state */
             while( i_options-- ) free( (char*)ppsz_options[i_options] );
-            free( ppsz_options );
-            ppsz_options = NULL; i_options = 0;
-            free( psz_name );
-            psz_name = NULL;
-            free( psz_artist );
-            psz_artist = NULL;
+            FREENULL( ppsz_options );
+            i_options = 0;
+            FREENULL( psz_name );
+            FREENULL( psz_artist );
+            FREENULL( psz_album_art );
             i_parsed_duration = 0;
             i_duration = -1;
 
             b_cleanup = false;
         }
     }
+    input_item_node_PostAndDelete( p_subitems );
     vlc_gc_decref(p_current_input);
     var_Destroy( p_demux, "m3u-extvlcopt" );
     return 0; /* Needed for correct operation of go back */

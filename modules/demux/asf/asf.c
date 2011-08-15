@@ -95,7 +95,10 @@ struct demux_sys_t
     int64_t             i_data_begin;
     int64_t             i_data_end;
 
-    bool          b_index;
+    bool                b_index;
+    unsigned int        i_seek_track;
+    unsigned int        i_wait_keyframe;
+
     vlc_meta_t          *meta;
 };
 
@@ -225,24 +228,41 @@ static void Close( vlc_object_t * p_this )
 /*****************************************************************************
  * SeekIndex: goto to i_date or i_percent
  *****************************************************************************/
+static int SeekPercent( demux_t *p_demux, int i_query, va_list args )
+{
+    demux_sys_t *p_sys = p_demux->p_sys;
+    p_sys->i_wait_keyframe = p_sys->i_seek_track ? 50 : 0;
+    return demux_vaControlHelper( p_demux->s, p_sys->i_data_begin,
+                                   p_sys->i_data_end, p_sys->i_bitrate,
+                                   p_sys->p_fp->i_min_data_packet_size,
+                                   i_query, args );
+}
+
 static int SeekIndex( demux_t *p_demux, mtime_t i_date, float f_pos )
 {
     demux_sys_t *p_sys = p_demux->p_sys;
     asf_object_index_t *p_index;
-    int64_t i_pos;
 
     msg_Dbg( p_demux, "seek with index: %i seconds, position %f",
-             (int)(i_date/1000000), f_pos );
+             i_date >= 0 ? (int)(i_date/1000000) : -1, f_pos );
+
+    if( i_date < 0 )
+        i_date = p_sys->i_length * f_pos;
 
     p_index = ASF_FindObject( p_sys->p_root, &asf_object_index_guid, 0 );
 
-    if( i_date < 0 ) i_date = p_sys->i_length * f_pos;
+    uint64_t i_entry = i_date * 10 / p_index->i_index_entry_time_interval;
+    if( i_entry >= p_index->i_index_entry_count )
+    {
+        msg_Warn( p_demux, "Incomplete index" );
+        return VLC_EGENERIC;
+    }
 
-    i_pos = i_date * 10 / p_index->i_index_entry_time_interval;
-    i_pos = p_index->index_entry[i_pos].i_packet_number *
-        p_sys->p_fp->i_min_data_packet_size;
+    p_sys->i_wait_keyframe = p_sys->i_seek_track ? 50 : 0;
 
-    return stream_Seek( p_demux->s, p_sys->i_data_begin + i_pos );
+    uint64_t i_offset = (uint64_t)p_index->index_entry[i_entry].i_packet_number *
+                        p_sys->p_fp->i_min_data_packet_size;
+    return stream_Seek( p_demux->s, p_sys->i_data_begin + i_offset );
 }
 
 static void SeekPrepare( demux_t *p_demux )
@@ -291,16 +311,15 @@ static int Control( demux_t *p_demux, int i_query, va_list args )
 
         if( p_sys->b_index && p_sys->i_length > 0 )
         {
-            i64 = (int64_t)va_arg( args, int64_t );
-            return SeekIndex( p_demux, i64, -1 );
+            va_list acpy;
+            va_copy( acpy, args );
+            i64 = (int64_t)va_arg( acpy, int64_t );
+            va_end( acpy );
+
+            if( !SeekIndex( p_demux, i64, -1 ) )
+                return VLC_SUCCESS;
         }
-        else
-        {
-            return demux_vaControlHelper( p_demux->s, p_sys->i_data_begin,
-                                           p_sys->i_data_end, p_sys->i_bitrate,
-                                           p_sys->p_fp->i_min_data_packet_size,
-                                           i_query, args );
-        }
+        return SeekPercent( p_demux, i_query, args );
 
     case DEMUX_GET_POSITION:
         if( p_sys->i_time < 0 ) return VLC_EGENERIC;
@@ -320,16 +339,15 @@ static int Control( demux_t *p_demux, int i_query, va_list args )
 
         if( p_sys->b_index && p_sys->i_length > 0 )
         {
-            f = (double)va_arg( args, double );
-            return SeekIndex( p_demux, -1, f );
+            va_list acpy;
+            va_copy( acpy, args );
+            f = (double)va_arg( acpy, double );
+            va_end( acpy );
+
+            if( !SeekIndex( p_demux, -1, f ) )
+                return VLC_SUCCESS;
         }
-        else
-        {
-            return demux_vaControlHelper( p_demux->s, p_sys->i_data_begin,
-                                           p_sys->i_data_end, p_sys->i_bitrate,
-                                           p_sys->p_fp->i_min_data_packet_size,
-                                           i_query, args );
-        }
+        return SeekPercent( p_demux, i_query, args );
 
     case DEMUX_GET_META:
         p_meta = (vlc_meta_t*)va_arg( args, vlc_meta_t* );
@@ -454,11 +472,17 @@ static int DemuxPacket( demux_t *p_demux )
         goto loop_error_recovery;
     }
 
+    if( i_packet_length < i_data_packet_min )
+    {
+        /* if packet length too short, there is extra padding */
+        i_packet_padding_length += i_data_packet_min - i_packet_length;
+        i_packet_length = i_data_packet_min;
+    }
+
     i_packet_send_time = GetDWLE( p_peek + i_skip ); i_skip += 4;
     i_packet_duration  = GetWLE( p_peek + i_skip ); i_skip += 2;
 
-    /* FIXME I have to do that for some file, I don't known why */
-    i_packet_size_left = i_data_packet_min /*i_packet_length*/ ;
+    i_packet_size_left = i_packet_length;
 
     if( b_packet_multiple_payload )
     {
@@ -477,7 +501,7 @@ static int DemuxPacket( demux_t *p_demux )
         asf_track_t   *tk;
 
         int i_packet_keyframe;
-        int i_stream_number;
+        unsigned int i_stream_number;
         int i_media_object_number;
         int i_media_object_offset;
         int i_replicated_data_length;
@@ -562,6 +586,16 @@ static int DemuxPacket( demux_t *p_demux )
             continue;   // over payload
         }
 
+        if( p_sys->i_wait_keyframe &&
+            !(i_stream_number == p_sys->i_seek_track && i_packet_keyframe &&
+              !i_media_object_offset) )
+        {
+            i_skip += i_payload_data_length;
+            p_sys->i_wait_keyframe--;
+            continue;   // over payload
+        }
+        p_sys->i_wait_keyframe = 0;
+
         if( !tk->p_es )
         {
             i_skip += i_payload_data_length;
@@ -594,10 +628,11 @@ static int DemuxPacket( demux_t *p_demux )
                 /* send complete packet to decoder */
                 block_t *p_gather = block_ChainGather( tk->p_frame );
 
-                tk->i_time = p_gather->i_dts;
+                if( p_gather->i_dts > VLC_TS_INVALID )
+                    tk->i_time = p_gather->i_dts - VLC_TS_0;
 
                 if( p_sys->i_time < 0 )
-                    es_out_Control( p_demux->out, ES_OUT_SET_PCR, tk->i_time+1 );
+                    es_out_Control( p_demux->out, ES_OUT_SET_PCR, VLC_TS_0 + tk->i_time );
 
                 es_out_Send( p_demux->out, tk->p_es, p_gather );
 
@@ -617,13 +652,13 @@ static int DemuxPacket( demux_t *p_demux )
 
             if( tk->p_frame == NULL )
             {
-                p_frag->i_pts = i_pts + i_payload * (mtime_t)i_pts_delta;
+                p_frag->i_pts = VLC_TS_0 + i_pts + i_payload * (mtime_t)i_pts_delta;
                 if( tk->i_cat != VIDEO_ES )
-                    p_frag->i_dts = p_frag->i_pts;
+                    p_frag->i_dts = VLC_TS_0 + p_frag->i_pts;
                 else
                 {
-                    p_frag->i_dts = p_frag->i_pts;
-                    p_frag->i_pts = 0;
+                    p_frag->i_dts = VLC_TS_0 + p_frag->i_pts;
+                    p_frag->i_pts = VLC_TS_INVALID;
                 }
             }
 
@@ -684,11 +719,6 @@ loop_error_recovery:
 static int DemuxInit( demux_t *p_demux )
 {
     demux_sys_t *p_sys = p_demux->p_sys;
-    bool b_seekable;
-    unsigned int i_stream;
-    asf_object_content_description_t *p_cd;
-    asf_object_index_t *p_index;
-    bool b_index;
 
     /* init context */
     p_sys->i_time   = -1;
@@ -698,6 +728,8 @@ static int DemuxInit( demux_t *p_demux )
     p_sys->p_fp     = NULL;
     p_sys->b_index  = 0;
     p_sys->i_track  = 0;
+    p_sys->i_seek_track = 0;
+    p_sys->i_wait_keyframe = 0;
     for( int i = 0; i < 128; i++ )
     {
         p_sys->track[i] = NULL;
@@ -707,6 +739,7 @@ static int DemuxInit( demux_t *p_demux )
     p_sys->meta         = NULL;
 
     /* Now load all object ( except raw data ) */
+    bool b_seekable;
     stream_Control( p_demux->s, STREAM_CAN_FASTSEEK, &b_seekable );
     if( !(p_sys->p_root = ASF_ReadObjectRoot(p_demux->s, b_seekable)) )
     {
@@ -728,19 +761,26 @@ static int DemuxInit( demux_t *p_demux )
         msg_Warn( p_demux, "ASF plugin discarded (cannot find any stream!)" );
         goto error;
     }
-
-    /* check if index is available */
-    p_index = ASF_FindObject( p_sys->p_root, &asf_object_index_guid, 0 );
-    b_index = p_index && p_index->i_index_entry_count;
-
     msg_Dbg( p_demux, "found %d streams", p_sys->i_track );
 
-    for( i_stream = 0; i_stream < p_sys->i_track; i_stream ++ )
+    /* check if index is available */
+    asf_object_index_t *p_index = ASF_FindObject( p_sys->p_root,
+                                                  &asf_object_index_guid, 0 );
+    const bool b_index = p_index && p_index->i_index_entry_count;
+
+    /* Find the extended header if any */
+    asf_object_t *p_hdr_ext = ASF_FindObject( p_sys->p_root->p_hdr,
+                                              &asf_object_header_extension_guid, 0 );
+
+    asf_object_language_list_t *p_languages = NULL;
+    if( p_hdr_ext )
+        p_languages = ASF_FindObject( p_hdr_ext, &asf_object_language_list, 0 );
+
+    for( unsigned i_stream = 0; i_stream < p_sys->i_track; i_stream++ )
     {
         asf_track_t    *tk;
         asf_object_stream_properties_t *p_sp;
         asf_object_extended_stream_properties_t *p_esp;
-        asf_object_t *p_hdr_ext;
         bool b_access_selected;
 
         p_sp = ASF_FindObject( p_sys->p_root->p_hdr,
@@ -768,8 +808,6 @@ static int DemuxInit( demux_t *p_demux )
         }
 
         /* Find the associated extended_stream_properties if any */
-        p_hdr_ext = ASF_FindObject( p_sys->p_root->p_hdr,
-                                    &asf_object_header_extension_guid, 0 );
         if( p_hdr_ext )
         {
             int i_ext_stream = ASF_CountObject( p_hdr_ext,
@@ -787,10 +825,11 @@ static int DemuxInit( demux_t *p_demux )
             }
         }
 
+        es_format_t fmt;
+
         if( ASF_CmpGUID( &p_sp->i_stream_type, &asf_object_stream_type_audio ) &&
             p_sp->i_type_specific_data_length >= sizeof( WAVEFORMATEX ) - 2 )
         {
-            es_format_t fmt;
             uint8_t *p_data = p_sp->p_type_specific_data;
             int i_format;
 
@@ -815,10 +854,6 @@ static int DemuxInit( demux_t *p_demux )
                         fmt.i_extra );
             }
 
-            tk->i_cat = AUDIO_ES;
-            tk->p_es = es_out_Add( p_demux->out, &fmt );
-            es_format_Clean( &fmt );
-
             msg_Dbg( p_demux, "added new audio stream(codec:0x%x,ID:%d)",
                     GetWLE( p_data ), p_sp->i_stream_number );
         }
@@ -827,7 +862,6 @@ static int DemuxInit( demux_t *p_demux )
                  p_sp->i_type_specific_data_length >= 11 +
                  sizeof( BITMAPINFOHEADER ) )
         {
-            es_format_t  fmt;
             uint8_t      *p_data = &p_sp->p_type_specific_data[11];
 
             es_format_Init( &fmt, VIDEO_ES,
@@ -887,15 +921,10 @@ static int DemuxInit( demux_t *p_demux )
 
                 if( i_aspect_x && i_aspect_y )
                 {
-                    fmt.video.i_aspect = i_aspect_x *
-                        (int64_t)fmt.video.i_width * VOUT_ASPECT_FACTOR /
-                        fmt.video.i_height / i_aspect_y;
+                    fmt.video.i_sar_num = i_aspect_x;
+                    fmt.video.i_sar_den = i_aspect_y;
                 }
             }
-
-            tk->i_cat = VIDEO_ES;
-            tk->p_es = es_out_Add( p_demux->out, &fmt );
-            es_format_Clean( &fmt );
 
             /* If there is a video track then use the index for seeking */
             p_sys->b_index = b_index;
@@ -907,7 +936,6 @@ static int DemuxInit( demux_t *p_demux )
             p_sp->i_type_specific_data_length >= 64 )
         {
             /* Now follows a 64 byte header of which we don't know much */
-            es_format_t fmt;
             guid_t  *p_ref  = (guid_t *)p_sp->p_type_specific_data;
             uint8_t *p_data = p_sp->p_type_specific_data + 64;
             unsigned int i_data = p_sp->i_type_specific_data_length - 64;
@@ -942,20 +970,44 @@ static int DemuxInit( demux_t *p_demux )
                         fmt.i_extra );
                 }
 
-                tk->i_cat = AUDIO_ES;
-                tk->p_es = es_out_Add( p_demux->out, &fmt );
-                es_format_Clean( &fmt );
-
                 msg_Dbg( p_demux, "added new audio stream (codec:0x%x,ID:%d)",
                     i_format, p_sp->i_stream_number );
+            }
+            else
+            {
+                es_format_Init( &fmt, UNKNOWN_ES, 0 );
             }
         }
         else
         {
-            tk->i_cat = UNKNOWN_ES;
+            es_format_Init( &fmt, UNKNOWN_ES, 0 );
+        }
+
+        tk->i_cat = fmt.i_cat;
+        if( fmt.i_cat != UNKNOWN_ES )
+        {
+            if( p_esp && p_languages &&
+                p_esp->i_language_index >= 0 &&
+                p_esp->i_language_index < p_languages->i_language )
+            {
+                fmt.psz_language = strdup( p_languages->ppsz_language[p_esp->i_language_index] );
+                char *p;
+                if( fmt.psz_language && (p = strchr( fmt.psz_language, '-' )) )
+                    *p = '\0';
+            }
+
+            /* Set the track on which we'll do our seeking to the first video track */
+            if(!p_sys->i_seek_track && fmt.i_cat == VIDEO_ES)
+                p_sys->i_seek_track = p_sp->i_stream_number;
+
+            tk->p_es = es_out_Add( p_demux->out, &fmt );
+        }
+        else
+        {
             msg_Dbg( p_demux, "ignoring unknown stream(ID:%d)",
                      p_sp->i_stream_number );
         }
+        es_format_Clean( &fmt );
     }
 
     p_sys->i_data_begin = p_sys->p_root->p_data->i_object_pos + 50;
@@ -990,7 +1042,9 @@ static int DemuxInit( demux_t *p_demux )
         /* calculate the time duration in micro-s */
         p_sys->i_length = (mtime_t)p_sys->p_fp->i_play_duration / 10 *
                    (mtime_t)i_count /
-                   (mtime_t)p_sys->p_fp->i_data_packets_count;
+                   (mtime_t)p_sys->p_fp->i_data_packets_count - p_sys->p_fp->i_preroll * 1000;
+        if( p_sys->i_length < 0 )
+            p_sys->i_length = 0;
 
         if( p_sys->i_length > 0 )
         {
@@ -1001,6 +1055,7 @@ static int DemuxInit( demux_t *p_demux )
     /* Create meta information */
     p_sys->meta = vlc_meta_New();
 
+    asf_object_content_description_t *p_cd;
     if( ( p_cd = ASF_FindObject( p_sys->p_root->p_hdr,
                                  &asf_object_content_description_guid, 0 ) ) )
     {

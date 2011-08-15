@@ -83,16 +83,12 @@ void playlist_preparser_Push( playlist_preparser_t *p_preparser, input_item_t *p
                  p_preparser->i_waiting, p_item );
     if( !p_preparser->b_live )
     {
-        vlc_thread_t th;
-
-        if( vlc_clone( &th, Thread, p_preparser, VLC_THREAD_PRIORITY_LOW ) )
+        if( vlc_clone_detach( NULL, Thread, p_preparser,
+                              VLC_THREAD_PRIORITY_LOW ) )
             msg_Warn( p_preparser->p_playlist,
                       "cannot spawn pre-parser thread" );
         else
-        {
-            vlc_detach( th );
             p_preparser->b_live = true;
-        }
     }
     vlc_mutex_unlock( &p_preparser->lock );
 }
@@ -130,7 +126,10 @@ static void Preparse( playlist_t *p_playlist, input_item_t *p_item )
     vlc_mutex_unlock( &p_item->lock );
 
     if( i_type != ITEM_TYPE_FILE )
+    {
+        input_item_SetPreparsed( p_item, true );
         return;
+    }
 
     stats_TimerStart( p_playlist, "Preparse run", STATS_TIMER_PREPARSE );
 
@@ -170,13 +169,15 @@ static void Art( playlist_preparser_t *p_preparser, input_item_t *p_item )
         if( p_preparser->i_art_policy == ALBUM_ART_ALL &&
             ( !psz_arturl || strncmp( psz_arturl, "file://", 7 ) ) )
         {
-            msg_Dbg( p_playlist, "meta ok for %s, need to fetch art", psz_name );
+            msg_Dbg( p_playlist, "meta ok for %s, need to fetch art",
+                     psz_name ? psz_name : "(null)" );
             b_fetch = true;
         }
         else
         {
             msg_Dbg( p_playlist, "no fetch required for %s (art currently %s)",
-                     psz_name, psz_arturl );
+                     psz_name ? psz_name : "(null)",
+                     psz_arturl ? psz_arturl : "(null)" );
         }
     }
     vlc_mutex_unlock( &p_item->lock );
@@ -208,6 +209,7 @@ static void *Thread( void *data )
         {
             p_current = NULL;
             p_preparser->b_live = false;
+            vlc_cond_signal( &p_preparser->wait );
         }
         vlc_mutex_unlock( &p_preparser->lock );
 
@@ -217,6 +219,7 @@ static void *Thread( void *data )
         Preparse( p_playlist, p_current );
 
         Art( p_preparser, p_current );
+        vlc_gc_decref(p_current);
     }
     return NULL;
 }

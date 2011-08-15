@@ -42,11 +42,14 @@
 #include <vlc_input.h>
 #include <vlc_meta.h>
 #include <vlc_playlist.h>
-#include <vlc_aout.h>
+#include <vlc_aout_intf.h>
 
 #include <vlc_strings.h>
 #include <vlc_url.h>
 #include <vlc_charset.h>
+#include <vlc_fs.h>
+#include <libvlc.h>
+#include <errno.h>
 
 /**
  * Decode encoded URI component. See also decode_URI().
@@ -95,10 +98,6 @@ char *decode_URI( char *psz )
                 break;
             }
 
-            case '+': /* This is HTTP forms, not URI decoding... */
-                *out++ = ' ';
-                break;
-
             default:
                 /* Inserting non-ASCII or non-printable characters is unsafe,
                  * and no sane browser will send these unencoded */
@@ -109,7 +108,6 @@ char *decode_URI( char *psz )
         }
     }
     *out = '\0';
-    EnsureUTF8( psz );
     return psz;
 }
 
@@ -152,10 +150,10 @@ static char *encode_URI_bytes (const char *psz_uri, size_t len)
 }
 
 /**
- * Encodes an URI component (RFC3986 §2).
+ * Encodes a URI component (RFC3986 §2).
  *
  * @param psz_uri nul-terminated UTF-8 representation of the component.
- * Obviously, you can't pass an URI containing a nul character, but you don't
+ * Obviously, you can't pass a URI containing a nul character, but you don't
  * want to do that, do you?
  *
  * @return encoded string (must be free()'d), or NULL for ENOMEM.
@@ -397,41 +395,51 @@ void resolve_xml_special_chars( char *psz_value )
 }
 
 /**
- * Converts '<', '>', '\"', '\'' and '&' to their html entities
- * \param psz_content simple element content that is to be converted
+ * XML-encode an UTF-8 string
+ * \param str nul-terminated UTF-8 byte sequence to XML-encode
+ * \return XML encoded string or NULL on error
+ * (errno is set to ENOMEM or EILSEQ as appropriate)
  */
-char *convert_xml_special_chars( const char *psz_content )
+char *convert_xml_special_chars (const char *str)
 {
-    assert( psz_content );
+    assert (str != NULL);
 
-    const size_t len = strlen( psz_content );
-    char *const psz_temp = malloc( 6 * len + 1 );
-    char *p_to   = psz_temp;
-
-    if( psz_temp == NULL )
+    const size_t len = strlen (str);
+    char *const buf = malloc (6 * len + 1), *ptr = buf;
+    if (unlikely(buf == NULL))
         return NULL;
-    for( size_t i = 0; i < len; i++ )
+
+    size_t n;
+    uint32_t cp;
+
+    while ((n = vlc_towc (str, &cp)) != 0)
     {
-        const char *str;
-        char c = psz_content[i];
-
-        switch ( c )
+        if (unlikely(n == (size_t)-1))
         {
-            case '\"': str = "quot"; break;
-            case '&':  str = "amp";  break;
-            case '\'': str = "#39";  break;
-            case '<':  str = "lt";   break;
-            case '>':  str = "gt";   break;
-            default:
-                *(p_to++) = c;
-                continue;
+            free (buf);
+            errno = EILSEQ;
+            return NULL;
         }
-        p_to += sprintf( p_to, "&%s;", str );
-    }
-    *(p_to++) = '\0';
 
-    p_to = realloc( psz_temp, p_to - psz_temp );
-    return p_to ? p_to : psz_temp; /* cannot fail */
+        if ((cp & ~0x0080) < 32 /* C0/C1 control codes */
+         && strchr ("\x09\x0A\x0D\x85", cp) == NULL)
+            ptr += sprintf (ptr, "&#%"PRIu32";", cp);
+        else
+        switch (cp)
+        {
+            case '\"': strcpy (ptr, "&quot;"); ptr += 6; break;
+            case '&':  strcpy (ptr, "&amp;");  ptr += 5; break;
+            case '\'': strcpy (ptr, "&#39;");  ptr += 5; break;
+            case '<':  strcpy (ptr, "&lt;");   ptr += 4; break;
+            case '>':  strcpy (ptr, "&gt;");   ptr += 4; break;
+            default:   memcpy (ptr, str, n);   ptr += n; break;
+        }
+        str += n;
+    }
+    *(ptr++) = '\0';
+
+    ptr = realloc (buf, ptr - buf);
+    return likely(ptr != NULL) ? ptr : buf; /* cannot fail */
 }
 
 /* Base64 encoding */
@@ -602,30 +610,38 @@ char *str_format_time( const char *tformat )
     assert (0);
 }
 
+static void format_duration (char *buf, size_t len, int64_t duration)
+{
+    lldiv_t d;
+    int sec;
+
+    duration /= CLOCK_FREQ;
+    d = lldiv (duration, 60);
+    sec = d.rem;
+    d = lldiv (d.quot, 60);
+    snprintf (buf, len, "%02lld:%02d:%02d", d.quot, (int)d.rem, sec);
+}
+
 #define INSERT_STRING( string )                                     \
                     if( string != NULL )                            \
                     {                                               \
                         int len = strlen( string );                 \
-                        dst = realloc( dst, i_size = i_size + len );\
+                        dst = xrealloc( dst, i_size = i_size + len );\
                         memcpy( (dst+d), string, len );             \
                         d += len;                                   \
                         free( string );                             \
-                    }                                               \
-                    else if( !b_empty_if_na )                       \
-                    {                                               \
-                        *(dst+d) = '-';                             \
-                        d++;                                        \
-                    }                                               \
+                    }
 
 /* same than INSERT_STRING, except that string won't be freed */
 #define INSERT_STRING_NO_FREE( string )                             \
                     {                                               \
                         int len = strlen( string );                 \
-                        dst = realloc( dst, i_size = i_size + len );\
+                        dst = xrealloc( dst, i_size = i_size + len );\
                         memcpy( dst+d, string, len );               \
                         d += len;                                   \
                     }
-char *__str_format_meta( vlc_object_t *p_object, const char *string )
+#undef str_format_meta
+char *str_format_meta( vlc_object_t *p_object, const char *string )
 {
     const char *s = string;
     bool b_is_format = false;
@@ -636,10 +652,8 @@ char *__str_format_meta( vlc_object_t *p_object, const char *string )
     if( !dst ) return NULL;
     int d = 0;
 
-    playlist_t *p_playlist = pl_Hold( p_object );
-    input_thread_t *p_input = playlist_CurrentInput( p_playlist );
+    input_thread_t *p_input = playlist_CurrentInput( pl_Get(p_object) );
     input_item_t *p_item = NULL;
-    pl_Release( p_object );
     if( p_input )
     {
         p_item = input_GetItem(p_input);
@@ -685,14 +699,12 @@ char *__str_format_meta( vlc_object_t *p_object, const char *string )
                     if( p_item && p_item->p_stats )
                     {
                         vlc_mutex_lock( &p_item->p_stats->lock );
-                        snprintf( buf, 10, "%d",
+                        snprintf( buf, 10, "%"PRIi64,
                                   p_item->p_stats->i_displayed_pictures );
                         vlc_mutex_unlock( &p_item->p_stats->lock );
                     }
                     else
-                    {
-                        sprintf( buf, b_empty_if_na ? "" : "-" );
-                    }
+                        strcpy( buf, b_empty_if_na ? "" : "-" );
                     INSERT_STRING_NO_FREE( buf );
                     break;
                 case 'g':
@@ -726,15 +738,15 @@ char *__str_format_meta( vlc_object_t *p_object, const char *string )
                     }
                     break;
                 case 's':
-                {
-                    char *lang = NULL;
-                    if( p_input )
-                        lang = var_GetNonEmptyString( p_input, "sub-language" );
-                    if( lang == NULL )
-                        lang = strdup( b_empty_if_na ? "" : "-" );
-                    INSERT_STRING( lang );
-                    break;
-                }
+                    {
+                        char *psz_lang = NULL;
+                        if( p_input )
+                            psz_lang = var_GetNonEmptyString( p_input, "sub-language" );
+                        if( psz_lang == NULL )
+                            psz_lang = strdup( b_empty_if_na ? "" : "-" );
+                        INSERT_STRING( psz_lang );
+                        break;
+                    }
                 case 't':
                     if( p_item )
                     {
@@ -756,40 +768,31 @@ char *__str_format_meta( vlc_object_t *p_object, const char *string )
                 case 'B':
                     if( p_input )
                     {
-                        snprintf( buf, 10, "%d",
+                        snprintf( buf, 10, "%"PRId64,
                                   var_GetInteger( p_input, "bit-rate" )/1000 );
                     }
                     else
-                    {
-                        sprintf( buf, b_empty_if_na ? "" : "-" );
-                    }
+                        strcpy( buf, b_empty_if_na ? "" : "-" );
                     INSERT_STRING_NO_FREE( buf );
                     break;
                 case 'C':
                     if( p_input )
                     {
-                        snprintf( buf, 10, "%d",
+                        snprintf( buf, 10, "%"PRId64,
                                   var_GetInteger( p_input, "chapter" ) );
                     }
                     else
-                    {
-                        sprintf( buf, b_empty_if_na ? "" : "-" );
-                    }
+                        strcpy( buf, b_empty_if_na ? "" : "-" );
                     INSERT_STRING_NO_FREE( buf );
                     break;
                 case 'D':
                     if( p_item )
                     {
                         mtime_t i_duration = input_item_GetDuration( p_item );
-                        snprintf( buf, 10, "%02d:%02d:%02d",
-                                 (int)(i_duration/(3600000000)),
-                                 (int)((i_duration/(60000000))%60),
-                                 (int)((i_duration/1000000)%60) );
+                        format_duration (buf, sizeof (buf), i_duration);
                     }
                     else
-                    {
-                        snprintf( buf, 10, b_empty_if_na ? "" : "--:--:--" );
-                    }
+                        strcpy( buf, b_empty_if_na ? "" : "--:--:--" );
                     INSERT_STRING_NO_FREE( buf );
                     break;
                 case 'F':
@@ -801,13 +804,11 @@ char *__str_format_meta( vlc_object_t *p_object, const char *string )
                 case 'I':
                     if( p_input )
                     {
-                        snprintf( buf, 10, "%d",
+                        snprintf( buf, 10, "%"PRId64,
                                   var_GetInteger( p_input, "title" ) );
                     }
                     else
-                    {
-                        sprintf( buf, b_empty_if_na ? "" : "-" );
-                    }
+                        strcpy( buf, b_empty_if_na ? "" : "-" );
                     INSERT_STRING_NO_FREE( buf );
                     break;
                 case 'L':
@@ -815,15 +816,11 @@ char *__str_format_meta( vlc_object_t *p_object, const char *string )
                     {
                         mtime_t i_duration = input_item_GetDuration( p_item );
                         int64_t i_time = var_GetTime( p_input, "time" );
-                        snprintf( buf, 10, "%02d:%02d:%02d",
-                     (int)( ( i_duration - i_time ) / 3600000000 ),
-                     (int)( ( ( i_duration - i_time ) / 60000000 ) % 60 ),
-                     (int)( ( ( i_duration - i_time ) / 1000000 ) % 60 ) );
+                        format_duration( buf, sizeof(buf),
+                                         i_duration - i_time );
                     }
                     else
-                    {
-                        snprintf( buf, 10, b_empty_if_na ? "" : "--:--:--" );
-                    }
+                        strcpy( buf, b_empty_if_na ? "" : "--:--:--" );
                     INSERT_STRING_NO_FREE( buf );
                     break;
                 case 'N':
@@ -833,16 +830,16 @@ char *__str_format_meta( vlc_object_t *p_object, const char *string )
                     }
                     break;
                 case 'O':
-                {
-                    char *lang = NULL;
-                    if( p_input )
-                        lang = var_GetNonEmptyString( p_input,
-                                                      "audio-language" );
-                    if( lang == NULL )
-                        lang = strdup( b_empty_if_na ? "" : "-" );
-                    INSERT_STRING( lang );
-                    break;
-                }
+                    {
+                        char *lang = NULL;
+                        if( p_input )
+                            lang = var_GetNonEmptyString( p_input,
+                                                          "audio-language" );
+                        if( lang == NULL )
+                            lang = strdup( b_empty_if_na ? "" : "-" );
+                        INSERT_STRING( lang );
+                        break;
+                    }
                 case 'P':
                     if( p_input )
                     {
@@ -858,13 +855,11 @@ char *__str_format_meta( vlc_object_t *p_object, const char *string )
                 case 'R':
                     if( p_input )
                     {
-                        int r = var_GetInteger( p_input, "rate" );
-                        snprintf( buf, 10, "%d.%d", r/1000, r%1000 );
+                        float f = var_GetFloat( p_input, "rate" );
+                        snprintf( buf, 10, "%.3f", f );
                     }
                     else
-                    {
-                        sprintf( buf, b_empty_if_na ? "" : "-" );
-                    }
+                        strcpy( buf, b_empty_if_na ? "" : "-" );
                     INSERT_STRING_NO_FREE( buf );
                     break;
                 case 'S':
@@ -874,24 +869,17 @@ char *__str_format_meta( vlc_object_t *p_object, const char *string )
                         snprintf( buf, 10, "%d.%d", r/1000, (r/100)%10 );
                     }
                     else
-                    {
-                        sprintf( buf, b_empty_if_na ? "" : "-" );
-                    }
+                        strcpy( buf, b_empty_if_na ? "" : "-" );
                     INSERT_STRING_NO_FREE( buf );
                     break;
                 case 'T':
                     if( p_input )
                     {
                         int64_t i_time = var_GetTime( p_input, "time" );
-                        snprintf( buf, 10, "%02d:%02d:%02d",
-                            (int)( i_time / ( 3600000000 ) ),
-                            (int)( ( i_time / ( 60000000 ) ) % 60 ),
-                            (int)( ( i_time / 1000000 ) % 60 ) );
+                        format_duration( buf, sizeof(buf), i_time );
                     }
                     else
-                    {
-                        snprintf( buf, 10, b_empty_if_na ? "" :  "--:--:--" );
-                    }
+                        strcpy( buf, b_empty_if_na ? "" : "--:--:--" );
                     INSERT_STRING_NO_FREE( buf );
                     break;
                 case 'U':
@@ -901,16 +889,35 @@ char *__str_format_meta( vlc_object_t *p_object, const char *string )
                     }
                     break;
                 case 'V':
-                {
-                    audio_volume_t volume;
-                    aout_VolumeGet( p_object, &volume );
-                    snprintf( buf, 10, "%d", volume );
-                    INSERT_STRING_NO_FREE( buf );
-                    break;
-                }
+                    {
+                        audio_volume_t volume = aout_VolumeGet( p_object );
+                        snprintf( buf, 10, "%d", volume );
+                        INSERT_STRING_NO_FREE( buf );
+                        break;
+                    }
                 case '_':
                     *(dst+d) = '\n';
                     d++;
+                    break;
+                case 'Z':
+                    if( p_item )
+                    {
+                        char *psz_now_playing = input_item_GetNowPlaying( p_item );
+                        if ( psz_now_playing == NULL )
+                        {
+                            char *psz_temp = input_item_GetTitleFbName( p_item );
+                            char *psz_artist = input_item_GetArtist( p_item );
+                            if( !EMPTY_STR( psz_temp ) )
+                            {
+                                INSERT_STRING( psz_temp );
+                                if ( !EMPTY_STR( psz_artist ) )
+                                    INSERT_STRING_NO_FREE( " - " );
+                            }
+                            INSERT_STRING( psz_artist );
+                        }
+                        else
+                            INSERT_STRING( psz_now_playing );
+                    }
                     break;
 
                 case ' ':
@@ -947,10 +954,11 @@ char *__str_format_meta( vlc_object_t *p_object, const char *string )
 #undef INSERT_STRING
 #undef INSERT_STRING_NO_FREE
 
+#undef str_format
 /**
  * Apply str format time and str format meta
  */
-char *__str_format( vlc_object_t *p_this, const char *psz_src )
+char *str_format( vlc_object_t *p_this, const char *psz_src )
 {
     char *psz_buf1, *psz_buf2;
     psz_buf1 = str_format_time( psz_src );
@@ -962,10 +970,12 @@ char *__str_format( vlc_object_t *p_this, const char *psz_src )
 /**
  * Remove forbidden characters from filenames (including slashes)
  */
-char* filename_sanitize( const char *str_origin )
+void filename_sanitize( char *str )
 {
-    char *str = strdup( str_origin );
+#if defined( WIN32 ) || defined( __OS2__ )
     char *str_base = str;
+#endif
+
     if( *str == '.' && (str[1] == '\0' || (str[1] == '.' && str[2] == '\0' ) ) )
     {
         while( *str )
@@ -973,10 +983,10 @@ char* filename_sanitize( const char *str_origin )
             *str = '_';
             str++;
         }
-        return str_base;
+        return;
     }
 
-#if defined( WIN32 )
+#if defined( WIN32 ) || defined( __OS2__ )
     // Change leading spaces into underscores
     while( *str && *str == ' ' )
         *str++ = '_';
@@ -989,7 +999,7 @@ char* filename_sanitize( const char *str_origin )
             case '/':
 #if defined( __APPLE__ )
             case ':':
-#elif defined( WIN32 )
+#elif defined( WIN32 ) || defined( __OS2__ )
             case '\\':
             case '*':
             case '"':
@@ -1004,7 +1014,7 @@ char* filename_sanitize( const char *str_origin )
         str++;
     }
 
-#if defined( WIN32 )
+#if defined( WIN32 ) || defined( __OS2__ )
     // Change trailing spaces into underscores
     str--;
     while( str != str_base )
@@ -1014,8 +1024,6 @@ char* filename_sanitize( const char *str_origin )
         *str-- = '_';
     }
 #endif
-
-    return str_base;
 }
 
 /**
@@ -1023,7 +1031,7 @@ char* filename_sanitize( const char *str_origin )
  */
 void path_sanitize( char *str )
 {
-#ifdef WIN32
+#if defined( WIN32 ) || defined( __OS2__ )
     /* check drive prefix if path is absolute */
     if( (((unsigned char)(str[0] - 'A') < 26)
       || ((unsigned char)(str[0] - 'a') < 26)) && (':' == str[1]) )
@@ -1034,7 +1042,7 @@ void path_sanitize( char *str )
 #if defined( __APPLE__ )
         if( *str == ':' )
             *str = '_';
-#elif defined( WIN32 )
+#elif defined( WIN32 ) || defined( __OS2__ )
         if( strchr( "*\"?:|<>", *str ) )
             *str = '_';
         if( *str == '/' )
@@ -1045,35 +1053,53 @@ void path_sanitize( char *str )
 }
 
 #include <vlc_url.h>
+#ifdef WIN32
+# include <io.h>
+#endif
 
 /**
- * Convert a file path to an URI. If already an URI, do nothing.
+ * Convert a file path to a URI.
+ * If already a URI, return a copy of the string.
+ * @param path path to convert (or URI to copy)
+ * @param scheme URI scheme to use (default is auto: "file", "fd" or "smb")
+ * @return a nul-terminated URI string (use free() to release it),
+ * or NULL in case of error
  */
-char *make_URI (const char *path)
+char *make_URI (const char *path, const char *scheme)
 {
     if (path == NULL)
         return NULL;
+    if (scheme == NULL && !strcmp (path, "-"))
+        return strdup ("fd://0"); // standard input
     if (strstr (path, "://") != NULL)
-        return strdup (path); /* Already an URI */
+        return strdup (path); /* Already a URI */
     /* Note: VLC cannot handle URI schemes without double slash after the
      * scheme name (such as mailto: or news:). */
 
     char *buf;
-#ifdef WIN32
+#if defined( WIN32 ) || defined( __OS2__ )
+    /* Drive letter */
     if (isalpha (path[0]) && (path[1] == ':'))
     {
-        if (asprintf (&buf, "file:///%c:", path[0]) == -1)
+        if (asprintf (&buf, "%s:///%c:", scheme ? scheme : "file",
+                      path[0]) == -1)
             buf = NULL;
         path += 2;
+# warning Drive letter-relative path not implemented!
+        if (path[0] != DIR_SEP_CHAR)
+            return NULL;
     }
     else
 #endif
     if (!strncmp (path, "\\\\", 2))
     {   /* Windows UNC paths */
-#ifndef WIN32
+#if !defined( WIN32 ) && !defined( __OS2__ )
+        if (scheme != NULL)
+            return NULL; /* remote files not supported */
+
         /* \\host\share\path -> smb://host/share/path */
         if (strchr (path + 2, '\\') != NULL)
-        {   /* Convert antislashes to slashes */
+        {   /* Convert backslashes to slashes */
             char *dup = strdup (path);
             if (dup == NULL)
                 return NULL;
@@ -1081,7 +1107,7 @@ char *make_URI (const char *path)
                 if (dup[i] == '\\')
                     dup[i] = DIR_SEP_CHAR;
 
-            char *ret = make_URI (dup);
+            char *ret = make_URI (dup, scheme);
             free (dup);
             return ret;
         }
@@ -1097,22 +1123,28 @@ char *make_URI (const char *path)
             snprintf (buf, sizeof (SMB_SCHEME) + 3 + hostlen,
                       SMB_SCHEME"://%s", path + 2);
         path += 2 + hostlen;
+
+        if (path[0] == '\0')
+            return buf; /* Hostname without path */
     }
     else
     if (path[0] != DIR_SEP_CHAR)
     {   /* Relative path: prepend the current working directory */
-        char cwd[PATH_MAX];
+        char *cwd, *ret;
 
-        if (getcwd (cwd, sizeof (cwd)) == NULL) /* FIXME: UTF8? */
+        if ((cwd = vlc_getcwd ()) == NULL)
             return NULL;
-        if (asprintf (&buf, "%s/%s", cwd, path) == -1)
-            return NULL;
-        char *ret = make_URI (buf);
+        if (asprintf (&buf, "%s"DIR_SEP"%s", cwd, path) == -1)
+            buf = NULL;
+
+        free (cwd);
+        ret = (buf != NULL) ? make_URI (buf, scheme) : NULL;
         free (buf);
         return ret;
     }
     else
-        buf = strdup ("file://");
+    if (asprintf (&buf, "%s://", scheme ? scheme : "file") == -1)
+        buf = NULL;
     if (buf == NULL)
         return NULL;
 
@@ -1139,4 +1171,97 @@ char *make_URI (const char *path)
         if (*ptr == '\0')
             return buf;
     }
+}
+
+/**
+ * Tries to convert a URI to a local (UTF-8-encoded) file path.
+ * @param url URI to convert
+ * @return NULL on error, a nul-terminated string otherwise
+ * (use free() to release it)
+ */
+char *make_path (const char *url)
+{
+    char *ret = NULL;
+    char *end;
+
+    char *path = strstr (url, "://");
+    if (path == NULL)
+        return NULL; /* unsupported scheme or invalid syntax */
+
+    end = memchr (url, '/', path - url);
+    size_t schemelen = ((end != NULL) ? end : path) - url;
+    path += 3; /* skip "://" */
+
+    /* Remove HTML anchor if present */
+    end = strchr (path, '#');
+    if (end)
+        path = strndup (path, end - path);
+    else
+        path = strdup (path);
+    if (unlikely(path == NULL))
+        return NULL; /* boom! */
+
+    /* Decode path */
+    decode_URI (path);
+
+    if (schemelen == 4 && !strncasecmp (url, "file", 4))
+    {
+#if (DIR_SEP_CHAR != '/')
+        for (char *p = strchr (path, '/'); p; p = strchr (p + 1, '/'))
+            *p = DIR_SEP_CHAR;
+#endif
+        /* Leading slash => local path */
+        if (*path == DIR_SEP_CHAR)
+#if (!defined (WIN32) && !defined (__OS2__)) || defined (UNDER_CE)
+            return path;
+#else
+            return memmove (path, path + 1, strlen (path + 1) + 1);
+#endif
+
+        /* Local path disguised as a remote one (MacOS X) */
+        if (!strncasecmp (path, "localhost"DIR_SEP, 10))
+            return memmove (path, path + 9, strlen (path + 9) + 1);
+
+#if defined( WIN32 ) || defined( __OS2__ )
+        if (*path && asprintf (&ret, "\\\\%s", path) == -1)
+            ret = NULL;
+#endif
+        /* non-local path :-( */
+    }
+    else
+    if (schemelen == 2 && !strncasecmp (url, "fd", 2))
+    {
+        int fd = strtol (path, &end, 0);
+
+        if (*end)
+            goto out;
+
+#if !defined( WIN32 ) && !defined( __OS2__ )
+        switch (fd)
+        {
+            case 0:
+                ret = strdup ("/dev/stdin");
+                break;
+            case 1:
+                ret = strdup ("/dev/stdout");
+                break;
+            case 2:
+                ret = strdup ("/dev/stderr");
+                break;
+            default:
+                if (asprintf (&ret, "/dev/fd/%d", fd) == -1)
+                    ret = NULL;
+        }
+#else
+        /* XXX: Does this work on WinCE? */
+        if (fd < 2)
+            ret = strdup ("CON");
+        else
+            ret = NULL;
+#endif
+    }
+
+out:
+    free (path);
+    return ret; /* unknown scheme */
 }

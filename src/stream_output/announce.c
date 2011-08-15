@@ -35,10 +35,6 @@
 
 #include <assert.h>
 
-struct announce_method_t
-{
-} sap_method;
-
 /****************************************************************************
  * Sout-side functions
  ****************************************************************************/
@@ -49,22 +45,21 @@ static void sap_destroy (vlc_object_t *p_this)
 }
 
 #undef sout_AnnounceRegisterSDP
+
+static vlc_mutex_t sap_mutex = VLC_STATIC_MUTEX;
+
 /**
  *  Registers a new session with the announce handler, using a pregenerated SDP
  *
  * \param obj a VLC object
  * \param psz_sdp the SDP to register
  * \param psz_dst session address (needed for SAP address auto detection)
- * \param p_method an announce method descriptor
  * \return the new session descriptor structure
  */
 session_descriptor_t *
 sout_AnnounceRegisterSDP( vlc_object_t *obj, const char *psz_sdp,
-                          const char *psz_dst, announce_method_t *p_method )
+                          const char *psz_dst )
 {
-    assert (p_method == &sap_method);
-    (void) p_method;
-
     session_descriptor_t *p_session = calloc( 1, sizeof (*p_session) );
     if( !p_session )
         return NULL;
@@ -78,15 +73,10 @@ sout_AnnounceRegisterSDP( vlc_object_t *obj, const char *psz_sdp,
         if (res->ai_addrlen <= sizeof (p_session->addr))
             memcpy (&p_session->addr, res->ai_addr,
                     p_session->addrlen = res->ai_addrlen);
-        vlc_freeaddrinfo (res);
+        freeaddrinfo (res);
     }
 
-    vlc_value_t lockval;
-    if (var_Create (obj->p_libvlc, "sap_mutex", VLC_VAR_MUTEX)
-     || var_Get (obj->p_libvlc, "sap_mutex", &lockval))
-       goto error;
-
-    vlc_mutex_lock (lockval.p_address);
+    vlc_mutex_lock (&sap_mutex);
     sap_handler_t *p_sap = libvlc_priv (obj->p_libvlc)->p_sap;
     if (p_sap == NULL)
     {
@@ -96,7 +86,7 @@ sout_AnnounceRegisterSDP( vlc_object_t *obj, const char *psz_sdp,
     }
     else
         vlc_object_hold ((vlc_object_t *)p_sap);
-    vlc_mutex_unlock (lockval.p_address);
+    vlc_mutex_unlock (&sap_mutex);
 
     if (p_sap == NULL)
         goto error;
@@ -127,28 +117,12 @@ int sout_AnnounceUnRegister( vlc_object_t *obj,
     msg_Dbg (obj, "removing SAP session");
     SAP_Del (p_sap, p_session);
 
-    vlc_value_t lockval;
-    var_Create (obj->p_libvlc, "sap_mutex", VLC_VAR_MUTEX);
-    var_Get (obj->p_libvlc, "sap_mutex", &lockval);
-    vlc_mutex_lock (lockval.p_address);
+    vlc_mutex_lock (&sap_mutex);
     vlc_object_release ((vlc_object_t *)p_sap);
-    vlc_mutex_unlock (lockval.p_address);
+    vlc_mutex_unlock (&sap_mutex);
 
     free (p_session->psz_sdp);
     free (p_session);
 
     return 0;
-}
-
-/**
- * \return the SAP announce method
- */
-announce_method_t * sout_SAPMethod (void)
-{
-    return &sap_method;
-}
-
-void sout_MethodRelease (announce_method_t *m)
-{
-    assert (m == &sap_method);
 }

@@ -32,6 +32,7 @@
 #include <vlc_common.h>
 #include <vlc_plugin.h>
 #include <vlc_sout.h>
+#include <vlc_modules.h>
 
 #include <vlc_filter.h>
 #include <vlc_image.h>
@@ -60,12 +61,12 @@ static picture_t *Filter( filter_t *, picture_t * );
 #define BASE_CHROMA_TEXT N_("Chroma for the base image")
 #define BASE_CHROMA_LONGTEXT N_("Chroma which the base image will be loaded in")
 
-#define BLEND_IMAGE_TEXT N_("Image which will be blended.")
+#define BLEND_IMAGE_TEXT N_("Image which will be blended")
 #define BLEND_IMAGE_LONGTEXT N_("The image blended onto the base image")
 
 #define BLEND_CHROMA_TEXT N_("Chroma for the blend image")
 #define BLEND_CHROMA_LONGTEXT N_("Chroma which the blend image will be loaded" \
-                                 "in")
+                                 " in")
 
 #define CFG_PREFIX "blendbench-"
 
@@ -77,21 +78,21 @@ vlc_module_begin ()
     set_capability( "video filter2", 0 )
 
     set_section( N_("Benchmarking"), NULL )
-    add_integer( CFG_PREFIX "loops", 1000, NULL, LOOPS_TEXT,
+    add_integer( CFG_PREFIX "loops", 1000, LOOPS_TEXT,
               LOOPS_LONGTEXT, false )
-    add_integer_with_range( CFG_PREFIX "alpha", 128, 0, 255, NULL, ALPHA_TEXT,
+    add_integer_with_range( CFG_PREFIX "alpha", 128, 0, 255, ALPHA_TEXT,
               ALPHA_LONGTEXT, false )
 
     set_section( N_("Base image"), NULL )
-    add_file( CFG_PREFIX "base-image", NULL, NULL, BASE_IMAGE_TEXT,
-              BASE_IMAGE_LONGTEXT, false )
-    add_string( CFG_PREFIX "base-chroma", "I420", NULL, BASE_CHROMA_TEXT,
+    add_loadfile( CFG_PREFIX "base-image", NULL, BASE_IMAGE_TEXT,
+                  BASE_IMAGE_LONGTEXT, false )
+    add_string( CFG_PREFIX "base-chroma", "I420", BASE_CHROMA_TEXT,
               BASE_CHROMA_LONGTEXT, false )
 
     set_section( N_("Blend image"), NULL )
-    add_file( CFG_PREFIX "blend-image", NULL, NULL, BLEND_IMAGE_TEXT,
-              BLEND_IMAGE_LONGTEXT, false )
-    add_string( CFG_PREFIX "blend-chroma", "YUVA", NULL, BLEND_CHROMA_TEXT,
+    add_loadfile( CFG_PREFIX "blend-image", NULL, BLEND_IMAGE_TEXT,
+                  BLEND_IMAGE_LONGTEXT, false )
+    add_string( CFG_PREFIX "blend-chroma", "YUVA", BLEND_CHROMA_TEXT,
               BLEND_CHROMA_LONGTEXT, false )
 
     set_callbacks( Create, Destroy )
@@ -224,14 +225,12 @@ static picture_t *Filter( filter_t *p_filter, picture_t *p_pic )
         picture_Release( p_pic );
         return NULL;
     }
-    vlc_object_attach( p_blend, p_filter );
     p_blend->fmt_out.video = p_sys->p_base_image->format;
     p_blend->fmt_in.video = p_sys->p_blend_image->format;
     p_blend->p_module = module_need( p_blend, "video blending", NULL, false );
     if( !p_blend->p_module )
     {
         picture_Release( p_pic );
-        vlc_object_detach( p_blend );
         vlc_object_release( p_blend );
         return NULL;
     }
@@ -245,7 +244,7 @@ static picture_t *Filter( filter_t *p_filter, picture_t *p_pic )
     }
     time = mdate() - time;
 
-    msg_Info( p_filter, "Blended %d images in %f sec.", p_sys->i_loops,
+    msg_Info( p_filter, "Blended %d images in %f sec", p_sys->i_loops,
               time / 1000000.0f );
     msg_Info( p_filter, "Speed is: %f images/second, %f pixels/second",
               (float) p_sys->i_loops / time * 1000000,
@@ -255,7 +254,6 @@ static picture_t *Filter( filter_t *p_filter, picture_t *p_pic )
 
     module_unneed( p_blend, p_blend->p_module );
 
-    vlc_object_detach( p_blend );
     vlc_object_release( p_blend );
 
     p_sys->b_done = true;

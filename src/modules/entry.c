@@ -25,41 +25,27 @@
 
 #include <vlc_common.h>
 #include <vlc_plugin.h>
+#include <vlc_memory.h>
 #include <assert.h>
 #include <stdarg.h>
-
-#ifdef ENABLE_NLS
-# include <libintl.h>
-#endif
+#include <limits.h>
 
 #include "modules/modules.h"
 #include "config/configuration.h"
 #include "libvlc.h"
 
-static const char *mdgettext (const char *domain, const char *msg)
-{
-    assert (msg);
-#ifdef ENABLE_NLS
-    if (*msg) /* Do not translate ""! */
-        return dgettext (domain, msg);
-#else
-    VLC_UNUSED(domain);
-#endif
-    return msg;
-}
-
 static void vlc_module_destruct (gc_object_t *obj)
 {
     module_t *module = vlc_priv (obj, module_t);
 
-    vlc_mutex_destroy (&module->lock);
+    free (module->pp_shortcuts);
     free (module->psz_object_name);
     free (module);
 }
 
 static const char default_name[] = "unnamed";
 
-module_t *vlc_module_create (vlc_object_t *obj)
+module_t *vlc_module_create (void)
 {
     module_t *module = malloc (sizeof (*module));
     if (module == NULL)
@@ -71,19 +57,15 @@ module_t *vlc_module_create (vlc_object_t *obj)
     module->parent = NULL;
     module->submodule_count = 0;
     vlc_gc_init (module, vlc_module_destruct);
-    vlc_mutex_init (&module->lock);
 
     module->psz_shortname = NULL;
     module->psz_longname = (char*)default_name;
     module->psz_help = NULL;
-    for (unsigned i = 0; i < MODULE_SHORTCUT_MAX; i++)
-        module->pp_shortcuts[i] = NULL;
+    module->pp_shortcuts = NULL;
+    module->i_shortcuts = 0;
     module->psz_capability = (char*)"";
     module->i_score = 1;
-    module->i_cpu = 0;
     module->b_unloadable = true;
-    module->b_reentrant = true;
-    module->b_submodule = false;
     module->pf_activate = NULL;
     module->pf_deactivate = NULL;
     module->p_config = NULL;
@@ -92,10 +74,9 @@ module_t *vlc_module_create (vlc_object_t *obj)
     module->i_bool_items = 0;
     /*module->handle = garbage */
     module->psz_filename = NULL;
+    module->domain = NULL;
     module->b_builtin = false;
     module->b_loaded = false;
-
-    (void)obj;
     return module;
 }
 
@@ -103,6 +84,7 @@ module_t *vlc_module_create (vlc_object_t *obj)
 static void vlc_submodule_destruct (gc_object_t *obj)
 {
     module_t *module = vlc_priv (obj, module_t);
+    free (module->pp_shortcuts);
     free (module->psz_object_name);
     free (module);
 }
@@ -123,17 +105,16 @@ module_t *vlc_submodule_create (module_t *module)
     module->submodule_count++;
 
     /* Muahahaha! Heritage! Polymorphism! Ugliness!! */
+    submodule->pp_shortcuts = malloc( sizeof( char ** ) );
     submodule->pp_shortcuts[0] = module->pp_shortcuts[0]; /* object name */
-    for (unsigned i = 1; i < MODULE_SHORTCUT_MAX; i++)
-        submodule->pp_shortcuts[i] = NULL;
+    submodule->i_shortcuts = 1;
 
     submodule->psz_object_name = strdup( module->psz_object_name );
     submodule->psz_shortname = module->psz_shortname;
     submodule->psz_longname = module->psz_longname;
     submodule->psz_capability = module->psz_capability;
     submodule->i_score = module->i_score;
-    submodule->i_cpu = module->i_cpu;
-    submodule->b_submodule = true;
+    submodule->domain = module->domain;
     return submodule;
 }
 
@@ -144,7 +125,7 @@ static module_config_t *vlc_config_create (module_t *module, int type)
 
     if ((confsize & 0xf) == 0)
     {
-        tab = realloc (tab, (confsize + 17) * sizeof (*tab));
+        tab = realloc_or_free (tab, (confsize + 17) * sizeof (*tab));
         if (tab == NULL)
             return NULL;
 
@@ -152,10 +133,14 @@ static module_config_t *vlc_config_create (module_t *module, int type)
     }
 
     memset (tab + confsize, 0, sizeof (tab[confsize]));
+    if (IsConfigIntegerType (type))
+    {
+        tab[confsize].max.i = INT_MAX;
+        tab[confsize].min.i = INT_MIN;
+    }
     tab[confsize].i_type = type;
-    tab[confsize].p_lock = &module->lock;
 
-    if (type & CONFIG_ITEM)
+    if (CONFIG_ITEM(type))
     {
         module->i_config_items++;
         if (type == CONFIG_ITEM_BOOL)
@@ -194,19 +179,24 @@ int vlc_plugin_set (module_t *module, module_config_t *item, int propid, ...)
             break;
         }
 
-        case VLC_MODULE_CPU_REQUIREMENT:
-            assert (!module->b_submodule);
-            module->i_cpu |= va_arg (ap, int);
-            break;
-
         case VLC_MODULE_SHORTCUT:
         {
-            unsigned i;
-            for (i = 0; module->pp_shortcuts[i] != NULL; i++);
-                if (i >= (MODULE_SHORTCUT_MAX - 1))
-                    break;
+            unsigned i_shortcuts = va_arg (ap, unsigned);
+            unsigned index = module->i_shortcuts;
+            /* The cache loader accept only a small number of shortcuts */
+            assert(i_shortcuts + index <= MODULE_SHORTCUT_MAX);
 
-            module->pp_shortcuts[i] = va_arg (ap, char *);
+            const char *const *tab = va_arg (ap, const char *const *);
+            char **pp = realloc (module->pp_shortcuts,
+                                 sizeof (pp[0]) * (index + i_shortcuts));
+            if (unlikely(pp == NULL))
+            {
+                ret = -1;
+                break;
+            }
+            module->pp_shortcuts = pp;
+            module->i_shortcuts = index + i_shortcuts;
+            memcpy (pp + index, tab, sizeof (pp[0]) * i_shortcuts);
             break;
         }
 
@@ -219,11 +209,11 @@ int vlc_plugin_set (module_t *module, module_config_t *item, int propid, ...)
             break;
 
         case VLC_MODULE_CB_OPEN:
-            module->pf_activate = va_arg (ap, int (*) (vlc_object_t *));
+            module->pf_activate = va_arg (ap, void *);
             break;
 
         case VLC_MODULE_CB_CLOSE:
-            module->pf_deactivate = va_arg (ap, void (*) (vlc_object_t *));
+            module->pf_deactivate = va_arg (ap, void *);
             break;
 
         case VLC_MODULE_NO_UNLOAD:
@@ -235,61 +225,52 @@ int vlc_plugin_set (module_t *module, module_config_t *item, int propid, ...)
             const char *value = va_arg (ap, const char *);
             free( module->psz_object_name );
             module->psz_object_name = strdup( value );
+            module->pp_shortcuts = malloc( sizeof( char ** ) );
             module->pp_shortcuts[0] = (char*)value; /* dooh! */
+            module->i_shortcuts = 1;
+
             if (module->psz_longname == default_name)
                 module->psz_longname = (char*)value; /* dooh! */
             break;
         }
 
         case VLC_MODULE_SHORTNAME:
-        {
-            const char *domain = va_arg (ap, const char *);
-            if (domain == NULL)
-                domain = PACKAGE;
-            module->psz_shortname = mdgettext (domain, va_arg (ap, char *));
+            module->psz_shortname = va_arg (ap, char *);
             break;
-        }
 
         case VLC_MODULE_DESCRIPTION:
-        {
-            const char *domain = va_arg (ap, const char *);
-            if (domain == NULL)
-                domain = PACKAGE;
-            module->psz_longname = mdgettext (domain, va_arg (ap, char *));
+            module->psz_longname = va_arg (ap, char *);
             break;
-        }
 
         case VLC_MODULE_HELP:
-        {
-            const char *domain = va_arg (ap, const char *);
-            if (domain == NULL)
-                domain = PACKAGE;
-            module->psz_help = mdgettext (domain, va_arg (ap, char *));
+            module->psz_help = va_arg (ap, char *);
             break;
-        }
+
+        case VLC_MODULE_TEXTDOMAIN:
+            module->domain = va_arg (ap, char *);
+            break;
 
         case VLC_CONFIG_NAME:
         {
             const char *name = va_arg (ap, const char *);
-            vlc_callback_t cb = va_arg (ap, vlc_callback_t);
 
             assert (name != NULL);
             item->psz_name = strdup (name);
-            item->pf_callback = cb;
             break;
         }
 
         case VLC_CONFIG_VALUE:
         {
-            if (IsConfigIntegerType (item->i_type))
+            if (IsConfigIntegerType (item->i_type)
+             || !CONFIG_ITEM(item->i_type))
             {
-                item->orig.i = item->saved.i =
-                item->value.i = va_arg (ap, int);
+                item->orig.i =
+                item->value.i = va_arg (ap, int64_t);
             }
             else
             if (IsConfigFloatType (item->i_type))
             {
-                item->orig.f = item->saved.f =
+                item->orig.f =
                 item->value.f = va_arg (ap, double);
             }
             else
@@ -298,7 +279,6 @@ int vlc_plugin_set (module_t *module, module_config_t *item, int propid, ...)
                 const char *value = va_arg (ap, const char *);
                 item->value.psz = value ? strdup (value) : NULL;
                 item->orig.psz = value ? strdup (value) : NULL;
-                item->saved.psz = value ? strdup (value) : NULL;
             }
             break;
         }
@@ -306,11 +286,10 @@ int vlc_plugin_set (module_t *module, module_config_t *item, int propid, ...)
         case VLC_CONFIG_RANGE:
         {
             if (IsConfigIntegerType (item->i_type)
-             || item->i_type == CONFIG_ITEM_MODULE_LIST_CAT
-             || item->i_type == CONFIG_ITEM_MODULE_CAT)
+             || !CONFIG_ITEM(item->i_type))
             {
-                item->min.i = va_arg (ap, int);
-                item->max.i = va_arg (ap, int);
+                item->min.i = va_arg (ap, int64_t);
+                item->max.i = va_arg (ap, int64_t);
             }
             else
             if (IsConfigFloatType (item->i_type))
@@ -327,14 +306,6 @@ int vlc_plugin_set (module_t *module, module_config_t *item, int propid, ...)
 
         case VLC_CONFIG_VOLATILE:
             item->b_unsaveable = true;
-            break;
-
-        case VLC_CONFIG_PERSISTENT:
-            item->b_autosave = true;
-            break;
-
-        case VLC_CONFIG_RESTART:
-            item->b_restart = true;
             break;
 
         case VLC_CONFIG_PRIVATE:
@@ -359,6 +330,7 @@ int vlc_plugin_set (module_t *module, module_config_t *item, int propid, ...)
         case VLC_CONFIG_OLDNAME:
         {
             const char *oldname = va_arg (ap, const char *);
+            assert (item->psz_oldname == NULL);
             item->psz_oldname = oldname ? strdup (oldname) : NULL;
             break;
         }
@@ -369,21 +341,16 @@ int vlc_plugin_set (module_t *module, module_config_t *item, int propid, ...)
 
         case VLC_CONFIG_DESC:
         {
-            const char *domain = va_arg (ap, const char *);
             const char *text = va_arg (ap, const char *);
             const char *longtext = va_arg (ap, const char *);
 
-            if (domain == NULL)
-                domain = PACKAGE;
-            item->psz_text = text ? strdup (mdgettext (domain, text)) : NULL;
-            item->psz_longtext =
-                longtext ? strdup (mdgettext (domain, longtext)) : NULL;
+            item->psz_text = text ? strdup (text) : NULL;
+            item->psz_longtext = longtext ? strdup (longtext) : NULL;
             break;
         }
 
         case VLC_CONFIG_LIST:
         {
-            const char *domain = va_arg (ap, const char *);
             size_t len = va_arg (ap, size_t);
 
             /* Copy values */
@@ -417,9 +384,6 @@ int vlc_plugin_set (module_t *module, module_config_t *item, int propid, ...)
                 break;
 
             /* Copy textual descriptions */
-            if (domain == NULL)
-                domain = PACKAGE;
-
             const char *const *text = va_arg (ap, const char *const *);
             if (text != NULL)
             {
@@ -427,9 +391,7 @@ int vlc_plugin_set (module_t *module, module_config_t *item, int propid, ...)
                 if( dtext != NULL )
                 {
                     for (size_t i = 0; i < len; i++)
-                        dtext[i] = text[i] ?
-                                        strdup (mdgettext( domain, text[i] )) :
-                                        NULL;
+                        dtext[i] = text[i] ? strdup (text[i]) : NULL;
                     dtext[len] = NULL;
                 }
                 item->ppsz_list_text = dtext;
@@ -444,7 +406,6 @@ int vlc_plugin_set (module_t *module, module_config_t *item, int propid, ...)
 
         case VLC_CONFIG_ADD_ACTION:
         {
-            const char *domain = va_arg (ap, const char *);
             vlc_callback_t cb = va_arg (ap, vlc_callback_t), *tabcb;
             const char *name = va_arg (ap, const char *);
             char **tabtext;
@@ -463,10 +424,8 @@ int vlc_plugin_set (module_t *module, module_config_t *item, int propid, ...)
                 break;
             item->ppsz_action_text = tabtext;
 
-            if (domain == NULL)
-                domain = PACKAGE;
             if (name)
-                tabtext[item->i_action] = strdup (mdgettext (domain, name));
+                tabtext[item->i_action] = strdup (name);
             else
                 tabtext[item->i_action] = NULL;
             tabtext[item->i_action + 1] = NULL;

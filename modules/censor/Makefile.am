@@ -18,5 +18,5 @@ libcensor_plugin_la_CXXFLAGS = $(AM_CXXFLAGS)
 libcensor_plugin_la_OBJCFLAGS = $(AM_OBJCFLAGS)
 # Set LIBADD and DEPENDENCIES manually:
 libcensor_plugin_la_LIBADD = $(AM_LIBADD)
-libcensor_plugin_la_DEPENDENCIES = $(top_srcdir)/src/libvlccore.sym
+libcensor_plugin_la_DEPENDENCIES =
 

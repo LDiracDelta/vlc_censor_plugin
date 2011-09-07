@@ -32,156 +32,73 @@
 #include <search.h>
 #include <stdlib.h>
 #include <stdio.h>
-#include <antlr3.h>
+#include <expat.h>
+#include <vector>
 
-#ifdef __cplusplus
-extern "C" {
-#endif
+using std::vector;
+
+typedef enum
+{
+    EDIT_UNDEF,
+    SKIP,
+    MUTE,
+    DIM
+} CnsrEditAction;
 
 
 typedef enum
 {
-    SKIP_OP,
-    MUTE,
-    DIM
-} edit_t;
+    RATING_UNDEF,
+    G,
+    PG,
+    PG13,
+    R
+} CnsrRating;
 
-typedef struct dynamic_array_t {
-    int _allocated;   // keep track of allocated size
-    int length;       // keep track of usage
-    void **_pp_array; // dynamicaly grown with realloc
-} dynamic_array_t;
-
-static dynamic_array_t *new_dynamic_array(int initial_size) 
+class CnsrEditClassification 
 {
-    dynamic_array_t *new_dyn_ary = malloc(sizeof(*new_dyn_ary));
-    new_dyn_ary->_allocated = initial_size;
-    new_dyn_ary->length = 0;
-    new_dyn_ary->_pp_array = malloc(initial_size*sizeof(void*));
-    return new_dyn_ary;
-}
-static void dynamic_array_append(dynamic_array_t *p_dynamic_array, void *ptr_to_add) 
+public:
+    CnsrRating rating; 
+    // a list of lowercase strings catagorizing the event to be editted
+    // an empty list is allowed
+    vector<char*> categoryHierarchy; 
+};
+
+class CnsrEdit
 {
-    if ( NULL == p_dynamic_array) {
-        fprintf(stderr,"ERROR: p_dynamic_array == NULL");
-    }
-    if (p_dynamic_array->length == p_dynamic_array->_allocated) {
-	int new_alloc_num = 2*p_dynamic_array->_allocated;
-	if ( new_alloc_num == 0 ) { new_alloc_num = 1; }
-        p_dynamic_array->_pp_array = realloc(p_dynamic_array->_pp_array,
-            new_alloc_num * sizeof(void*));
-        p_dynamic_array->_allocated = new_alloc_num;
-    }
-    p_dynamic_array->_pp_array[p_dynamic_array->length] = ptr_to_add;
-    p_dynamic_array->length +=1;
-}
+public:
+    CnsrEdit();
+    ~CnsrEdit();
+    void print();
+    struct timeval startTime, endTime;
+    CnsrEditAction cnsrEditAction;
+    // An event to be censored may have multiple classifications under which
+    // the event may be classified.  Having an empty list, i.e. no 
+    // classifications or ratings, is allowed
+    vector<CnsrEditClassification> editClassifications;
+};
 
-static void* dynamic_array_get(dynamic_array_t *p_dynamic_array, int index) 
+class CnsrEditCollection
 {
-    if ( index >= p_dynamic_array->length ) {
-        fprintf(stderr,"ERROR: array index out of bounds");
-    }
-    return p_dynamic_array->_pp_array[index];
+public:
+    static CnsrEditCollection *inst();
+    void print();
+    static vector<CnsrEdit> edits;
+    vector<CnsrEdit>* intersectingEdits(struct timeval &t);
+    struct timeval *timeToNextEdit(struct timeval &curTime);
+private:
+    CnsrEditCollection();
+    static CnsrEditCollection *_inst;
 }
 
+static int compareTimevals( struct timeval *p_a, struct timeval *p_b);
+static struct timeval parseTime(char *timeStr);
+static void parseRatings(vector<CnsrEditClassification> &editClassifications, char *ratingsStr);
 
-typedef struct dynamic_array_iter_t {
-    dynamic_array_t *_p_dynamic_array;
-    int _cur_index;
-} dynamic_array_iter_t;
-
-static dynamic_array_iter_t * dynamic_array_iter_new(dynamic_array_t *p_dynamic_array) {
-    dynamic_array_iter_t *p_iter;
-    p_iter = malloc(sizeof(*p_iter));
-    p_iter->_p_dynamic_array = p_dynamic_array;
-    p_iter->_cur_index = 0;
-    return p_iter;
-}
-
-
-static void * dynamic_array_iter_next( dynamic_array_iter_t *p_iter)
-{
-    if (p_iter->_cur_index <  p_iter->_p_dynamic_array->length ) {
-        p_iter->_cur_index += 1;
-        return dynamic_array_get(p_iter->_p_dynamic_array, p_iter->_cur_index-1);
-    } else {
-        return NULL;
-    }
-}
-
-static void dynamic_array_iter_free(dynamic_array_iter_t *p_dynamic_array_iter) {
-    free(p_dynamic_array_iter);
-}
-
-
-typedef struct censor_category_rating_t 
-{
-    float rating; // number in [0.0,10.0]
-    
-    dynamic_array_t *p_category_hierarchy;
-} censor_category_rating_t;
-
-typedef struct censor_edit_node_t
-{
-    struct timeval  *p_start_time, *p_end_time;
-    
-    edit_t edit;
-    
-    // A list of list of lowercased strings corresponding to the category 
-    // hierarchy that an edit belongs to
-    dynamic_array_t *p_category_ratings;
-} censor_edit_node_t;
-
-static censor_edit_node_t * censor_edit_node_new()
-{
-    censor_edit_node_t *p_ced;
-    p_ced = malloc(sizeof(*p_ced));
-    p_ced->p_start_time = NULL;
-    p_ced->p_end_time   = NULL;
-    p_ced->edit = 0;
-    p_ced->p_category_ratings =  new_dynamic_array(0);
-    return p_ced;
-}
-
-typedef struct censor_edit_section_t {
-    char *psz_section_title;
-    dynamic_array_t *p_edits;
-} censor_edit_section_t;
-
-static void dead_code();
-
-static censor_edit_section_t * censor_edit_section_new()
-{
-    censor_edit_section_t *p_edit_file;
-    p_edit_file = malloc(sizeof(*p_edit_file));
-    p_edit_file->psz_section_title = NULL;
-    p_edit_file->p_edits = new_dynamic_array(8);
-    return p_edit_file;
-    dead_code();
-}
-
-static void dead_code() 
-{
-    // I have to use every thing I declare otherwise gcc complains that I'm not
-    // using a variable
-    if (0) {
-        censor_edit_section_new();
-        censor_edit_node_new();
-        dynamic_array_iter_new(NULL);
-        dynamic_array_iter_next(NULL);
-        dynamic_array_iter_free(NULL);
-    }
-}
-
-typedef struct censor_edit_collection_t {
-    dynamic_array_t *p_censor_sections;
-} censor_edit_collection_t;
-
-
-//void hello_world( libvlc_int_t * p_libvlc );
-
-#ifdef __cplusplus
-}
-#endif
+// VLC plugin interface prototypes
+static int  CensorActivate     ( vlc_object_t * p_this);
+static void CensorClose        ( vlc_object_t * p_this);
+static void Run( intf_thread_t *p_intf );
+static void loadCensorFile(intf_thread_t *p_intf, const char *filename);
 
 #endif
